@@ -53,9 +53,19 @@ static void target_set_state(Target *t, TargetState state) {
 }
 
 static int target_add_default_dependencies(Target *t) {
+        static const UnitDependency deps[] = {
+                UNIT_REQUIRES,
+                UNIT_REQUIRES_OVERRIDABLE,
+                UNIT_REQUISITE,
+                UNIT_REQUISITE_OVERRIDABLE,
+                UNIT_WANTS,
+                UNIT_BIND_TO
+        };
+
         Iterator i;
         Unit *other;
         int r;
+        unsigned k;
 
         assert(t);
 
@@ -64,81 +74,13 @@ static int target_add_default_dependencies(Target *t) {
          * ordering manually we won't add anything in here to make
          * sure we don't create a loop. */
 
-        SET_FOREACH(other, t->meta.dependencies[UNIT_REQUIRES], i)
-                if ((r = unit_add_default_target_dependency(other, UNIT(t))) < 0)
-                    return r;
-
-        SET_FOREACH(other, t->meta.dependencies[UNIT_REQUIRES_OVERRIDABLE], i)
-                if ((r = unit_add_default_target_dependency(other, UNIT(t))) < 0)
-                    return r;
-
-        SET_FOREACH(other, t->meta.dependencies[UNIT_WANTS], i)
-                if ((r = unit_add_default_target_dependency(other, UNIT(t))) < 0)
-                    return r;
+        for (k = 0; k < ELEMENTSOF(deps); k++)
+                SET_FOREACH(other, t->meta.dependencies[deps[k]], i)
+                        if ((r = unit_add_default_target_dependency(other, UNIT(t))) < 0)
+                                return r;
 
         /* Make sure targets are unloaded on shutdown */
         return unit_add_dependency_by_name(UNIT(t), UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, NULL, true);
-}
-
-static int target_add_getty_dependencies(Target *t) {
-        char *n, *active;
-        int r;
-
-        assert(t);
-
-        if (!unit_has_name(UNIT(t), SPECIAL_GETTY_TARGET))
-                return 0;
-
-        if (read_one_line_file("/sys/class/tty/console/active", &active) >= 0) {
-                const char *tty;
-
-                truncate_nl(active);
-                if ((tty = strrchr(active, ' ')))
-                        tty ++;
-                else
-                        tty = active;
-
-                /* Automatically add in a serial getty on the kernel
-                 * console */
-                if (!tty_is_vc(tty)) {
-
-                        /* We assume that gettys on virtual terminals are
-                         * started via manual configuration and do this magic
-                         * only for non-VC terminals. */
-
-                        log_debug("Automatically adding serial getty for /dev/%s", tty);
-                        if (!(n = unit_name_replace_instance(SPECIAL_SERIAL_GETTY_SERVICE, tty))) {
-                                free(active);
-                                return -ENOMEM;
-                        }
-
-                        r = unit_add_two_dependencies_by_name(UNIT(t), UNIT_AFTER, UNIT_WANTS, n, NULL, true);
-                        free(n);
-
-                        if (r < 0) {
-                                free(active);
-                                return r;
-                        }
-                }
-
-                free(active);
-        }
-
-        /* Automatically add in a serial getty on the first
-         * virtualizer console */
-        if (access("/sys/class/tty/hvc0", F_OK) == 0) {
-                log_debug("Automatic adding serial getty for hvc0");
-                if (!(n = unit_name_replace_instance(SPECIAL_SERIAL_GETTY_SERVICE, "hvc0")))
-                        return -ENOMEM;
-
-                r = unit_add_two_dependencies_by_name(UNIT(t), UNIT_AFTER, UNIT_WANTS, n, NULL, true);
-                free(n);
-
-                if (r < 0)
-                        return r;
-        }
-
-        return 0;
 }
 
 static int target_load(Unit *u) {
@@ -155,9 +97,6 @@ static int target_load(Unit *u) {
                 if (u->meta.default_dependencies)
                         if ((r = target_add_default_dependencies(t)) < 0)
                                 return r;
-
-                if ((r = target_add_getty_dependencies(t)) < 0)
-                        return r;
         }
 
         return 0;

@@ -119,9 +119,10 @@ static int pack_file(FILE *pack, const char *fn, bool on_btrfs) {
                 goto finish;
         }
 
-        pages = l / PAGE_SIZE;
+        pages = l / page_size();
 
         vec = alloca(pages);
+        memset(vec, 0, pages);
         if (mincore(start, l, vec) < 0) {
                 log_warning("mincore(%s) failed: %m", fn);
                 r = -errno;
@@ -289,13 +290,13 @@ static int collect(const char *root) {
 
         log_debug("Collecting...");
 
-        if (access("/dev/.systemd/readahead/cancel", F_OK) >= 0) {
+        if (access("/run/systemd/readahead/cancel", F_OK) >= 0) {
                 log_debug("Collection canceled");
                 r = -ECANCELED;
                 goto finish;
         }
 
-        if (access("/dev/.systemd/readahead/done", F_OK) >= 0) {
+        if (access("/run/systemd/readahead/done", F_OK) >= 0) {
                 log_debug("Got termination request");
                 goto done;
         }
@@ -639,6 +640,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
         int r;
+        const char *root;
 
         log_set_target(LOG_TARGET_SYSLOG_OR_KMSG);
         log_parse_environment();
@@ -646,6 +648,13 @@ int main(int argc, char *argv[]) {
 
         if ((r = parse_argv(argc, argv)) <= 0)
                 return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+
+        root = optind < argc ? argv[optind] : "/";
+
+        if (fs_on_read_only(root) > 0) {
+                log_info("Disabling readahead collector due to read-only media.");
+                return 0;
+        }
 
         if (!enough_ram()) {
                 log_info("Disabling readahead collector due to low memory.");
@@ -663,7 +672,7 @@ int main(int argc, char *argv[]) {
         shared->collect = getpid();
         __sync_synchronize();
 
-        if (collect(optind < argc ? argv[optind] : "/") < 0)
+        if (collect(root) < 0)
                 return 1;
 
         return 0;

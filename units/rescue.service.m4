@@ -22,10 +22,16 @@ ExecStartPre=-/bin/echo 'Welcome to rescue mode. Use "systemctl default" or ^D t
 m4_ifdef(`TARGET_FEDORA',
 `EnvironmentFile=/etc/sysconfig/init
 ExecStart=-/bin/bash -c "exec ${SINGLE}"',
-`ExecStart=-/sbin/sulogin')
-ExecStopPost=-/bin/systemctl --fail default
+m4_ifdef(`TARGET_MANDRIVA',
+`EnvironmentFile=/etc/sysconfig/init
+ExecStart=-/bin/bash -c "exec ${SINGLE}"',
+`ExecStart=-/sbin/sulogin'
+m4_ifdef(`TARGET_MEEGO',
+`EnvironmentFile=/etc/sysconfig/init
+ExecStart=-/bin/bash -c "exec ${SINGLE}"',)))
+ExecStopPost=-/bin/systemctl --fail --no-block default
 StandardInput=tty-force
-KillMode=process-group
+KillMode=process
 
 # Bash ignores SIGTERM, so we send SIGHUP instead, to ensure that bash
 # terminates cleanly.

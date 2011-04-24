@@ -27,17 +27,49 @@
 #include "missing.h"
 #include "ioprio.h"
 #include "strv.h"
+#include "dbus-common.h"
 
 DEFINE_BUS_PROPERTY_APPEND_ENUM(bus_execute_append_kill_mode, kill_mode, KillMode);
 
 DEFINE_BUS_PROPERTY_APPEND_ENUM(bus_execute_append_input, exec_input, ExecInput);
 DEFINE_BUS_PROPERTY_APPEND_ENUM(bus_execute_append_output, exec_output, ExecOutput);
 
-int bus_execute_append_oom_score_adjust(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_env_files(DBusMessageIter *i, const char *property, void *data) {
+        char **env_files = data, **j;
+        DBusMessageIter sub, sub2;
+
+        assert(i);
+        assert(property);
+
+        if (!dbus_message_iter_open_container(i, DBUS_TYPE_ARRAY, "(sb)", &sub))
+                return -ENOMEM;
+
+        STRV_FOREACH(j, env_files) {
+                dbus_bool_t b = false;
+                char *fn = *j;
+
+                if (fn[0] == '-') {
+                        b = true;
+                        fn++;
+                }
+
+                if (!dbus_message_iter_open_container(&sub, DBUS_TYPE_STRUCT, NULL, &sub2) ||
+                    !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_STRING, &fn) ||
+                    !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_BOOLEAN, &b) ||
+                    !dbus_message_iter_close_container(&sub, &sub2))
+                        return -ENOMEM;
+        }
+
+        if (!dbus_message_iter_close_container(i, &sub))
+                return -ENOMEM;
+
+        return 0;
+}
+
+int bus_execute_append_oom_score_adjust(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int32_t n;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -68,11 +100,10 @@ int bus_execute_append_oom_score_adjust(Manager *m, DBusMessageIter *i, const ch
         return 0;
 }
 
-int bus_execute_append_nice(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_nice(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int32_t n;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -88,11 +119,10 @@ int bus_execute_append_nice(Manager *m, DBusMessageIter *i, const char *property
         return 0;
 }
 
-int bus_execute_append_ioprio(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_ioprio(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int32_t n;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -108,11 +138,10 @@ int bus_execute_append_ioprio(Manager *m, DBusMessageIter *i, const char *proper
         return 0;
 }
 
-int bus_execute_append_cpu_sched_policy(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_cpu_sched_policy(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int32_t n;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -128,11 +157,10 @@ int bus_execute_append_cpu_sched_policy(Manager *m, DBusMessageIter *i, const ch
         return 0;
 }
 
-int bus_execute_append_cpu_sched_priority(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_cpu_sched_priority(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int32_t n;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -154,12 +182,11 @@ int bus_execute_append_cpu_sched_priority(Manager *m, DBusMessageIter *i, const 
         return 0;
 }
 
-int bus_execute_append_affinity(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_affinity(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         dbus_bool_t b;
         DBusMessageIter sub;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -181,11 +208,10 @@ int bus_execute_append_affinity(Manager *m, DBusMessageIter *i, const char *prop
         return 0;
 }
 
-int bus_execute_append_timer_slack_nsec(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_timer_slack_nsec(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         uint64_t u;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -201,13 +227,29 @@ int bus_execute_append_timer_slack_nsec(Manager *m, DBusMessageIter *i, const ch
         return 0;
 }
 
-int bus_execute_append_capabilities(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_capability_bs(DBusMessageIter *i, const char *property, void *data) {
+        ExecContext *c = data;
+        uint64_t normal, inverted;
+
+        assert(i);
+        assert(property);
+        assert(c);
+
+        /* We store this negated internally, to match the kernel, bu
+         * we expose it normalized. */
+
+        normal = *(uint64_t*) data;
+        inverted = ~normal;
+
+        return bus_property_append_uint64(i, property, &inverted);
+}
+
+int bus_execute_append_capabilities(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         char *t = NULL;
         const char *s;
         dbus_bool_t b;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -231,12 +273,11 @@ int bus_execute_append_capabilities(Manager *m, DBusMessageIter *i, const char *
         return 0;
 }
 
-int bus_execute_append_rlimits(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_rlimits(DBusMessageIter *i, const char *property, void *data) {
         ExecContext *c = data;
         int r;
         uint64_t u;
 
-        assert(m);
         assert(i);
         assert(property);
         assert(c);
@@ -260,11 +301,10 @@ int bus_execute_append_rlimits(Manager *m, DBusMessageIter *i, const char *prope
         return 0;
 }
 
-int bus_execute_append_command(Manager *m, DBusMessageIter *i, const char *property, void *data) {
+int bus_execute_append_command(DBusMessageIter *i, const char *property, void *data) {
         ExecCommand *c = data;
         DBusMessageIter sub, sub2, sub3;
 
-        assert(m);
         assert(i);
         assert(property);
 
@@ -295,7 +335,9 @@ int bus_execute_append_command(Manager *m, DBusMessageIter *i, const char *prope
                 if (!dbus_message_iter_close_container(&sub2, &sub3) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_BOOLEAN, &c->ignore) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_UINT64, &c->exec_status.start_timestamp.realtime) ||
+                    !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_UINT64, &c->exec_status.start_timestamp.monotonic) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_UINT64, &c->exec_status.exit_timestamp.realtime) ||
+                    !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_UINT64, &c->exec_status.exit_timestamp.monotonic) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_UINT32, &pid) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_INT32, &code) ||
                     !dbus_message_iter_append_basic(&sub2, DBUS_TYPE_INT32, &status))

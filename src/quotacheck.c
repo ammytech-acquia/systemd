@@ -35,6 +35,9 @@ static int parse_proc_cmdline(void) {
         int r;
         size_t l;
 
+        if (detect_container(NULL) > 0)
+                return 0;
+
         if ((r = read_one_line_file("/proc/cmdline", &line)) < 0) {
                 log_warning("Failed to read /proc/cmdline, ignoring: %s", strerror(-r));
                 return 0;
@@ -50,7 +53,7 @@ static int parse_proc_cmdline(void) {
                         arg_skip = true;
                 else if (startswith(w, "quotacheck.mode"))
                         log_warning("Invalid quotacheck.mode= parameter. Ignoring.");
-#ifdef TARGET_FEDORA
+#if defined(TARGET_FEDORA) || defined(TARGET_MANDRIVA)
                 else if (strneq(w, "forcequotacheck", l))
                         arg_force = true;
 #endif
@@ -61,8 +64,8 @@ static int parse_proc_cmdline(void) {
 }
 
 static void test_files(void) {
-#ifdef TARGET_FEDORA
-        /* This exists only on Fedora */
+#if defined(TARGET_FEDORA) || defined(TARGET_MANDRIVA)
+        /* This exists only on Fedora or Mandriva */
         if (access("/forcequotacheck", F_OK) >= 0)
                 arg_force = true;
 #endif
@@ -94,7 +97,7 @@ int main(int argc, char *argv[]) {
                 if (arg_skip)
                         return 0;
 
-                if (access("/dev/.systemd/quotacheck", F_OK) < 0)
+                if (access("/run/systemd/quotacheck", F_OK) < 0)
                         return 0;
         }
 
@@ -107,7 +110,7 @@ int main(int argc, char *argv[]) {
                 _exit(1); /* Operational error */
         }
 
-        r = wait_for_terminate_and_warn("quotacheck", pid) >= 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        r = wait_for_terminate_and_warn("quotacheck", pid) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 
 finish:
         return r;

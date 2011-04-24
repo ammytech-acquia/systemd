@@ -24,14 +24,21 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef HAVE_SELINUX
+#include <selinux/selinux.h>
+#endif
+
 #include "util.h"
 #include "condition.h"
 
-Condition* condition_new(ConditionType type, const char *parameter, bool negate) {
+Condition* condition_new(ConditionType type, const char *parameter, bool trigger, bool negate) {
         Condition *c;
 
-        c = new0(Condition, 1);
+        if (!(c = new0(Condition, 1)))
+                return NULL;
+
         c->type = type;
+        c->trigger = trigger;
         c->negate = negate;
 
         if (parameter)
@@ -65,6 +72,9 @@ static bool test_kernel_command_line(const char *parameter) {
         bool found = false;
 
         assert(parameter);
+
+        if (detect_virtualization(NULL) > 0)
+                return false;
 
         if ((r = read_one_line_file("/proc/cmdline", &line)) < 0) {
                 log_warning("Failed to read /proc/cmdline, ignoring: %s", strerror(-r));
@@ -122,6 +132,14 @@ static bool test_virtualization(const char *parameter) {
         return streq(parameter, id);
 }
 
+static bool test_security(const char *parameter) {
+#ifdef HAVE_SELINUX
+        if (streq(parameter, "selinux"))
+                return is_selinux_enabled() > 0;
+#endif
+        return false;
+}
+
 bool condition_test(Condition *c) {
         assert(c);
 
@@ -129,6 +147,14 @@ bool condition_test(Condition *c) {
 
         case CONDITION_PATH_EXISTS:
                 return (access(c->parameter, F_OK) >= 0) == !c->negate;
+
+        case CONDITION_PATH_IS_DIRECTORY: {
+                struct stat st;
+
+                if (lstat(c->parameter, &st) < 0)
+                        return !c->negate;
+                return S_ISDIR(st.st_mode) == !c->negate;
+        }
 
         case CONDITION_DIRECTORY_NOT_EMPTY: {
                 int k;
@@ -143,6 +169,9 @@ bool condition_test(Condition *c) {
         case CONDITION_VIRTUALIZATION:
                 return test_virtualization(c->parameter) == !c->negate;
 
+        case CONDITION_SECURITY:
+                return test_security(c->parameter) == !c->negate;
+
         case CONDITION_NULL:
                 return !c->negate;
 
@@ -153,17 +182,28 @@ bool condition_test(Condition *c) {
 
 bool condition_test_list(Condition *first) {
         Condition *c;
+        int triggered = -1;
 
         /* If the condition list is empty, then it is true */
         if (!first)
                 return true;
 
-        /* Otherwise, if any of the conditions apply we return true */
-        LIST_FOREACH(conditions, c, first)
-                if (condition_test(c))
-                        return true;
+        /* Otherwise, if all of the non-trigger conditions apply and
+         * if any of the trigger conditions apply (unless there are
+         * none) we return true */
+        LIST_FOREACH(conditions, c, first) {
+                bool b;
 
-        return false;
+                b = condition_test(c);
+
+                if (!c->trigger && !b)
+                        return false;
+
+                if (c->trigger && triggered <= 0)
+                        triggered = b;
+        }
+
+        return triggered != 0;
 }
 
 void condition_dump(Condition *c, FILE *f, const char *prefix) {
@@ -174,9 +214,10 @@ void condition_dump(Condition *c, FILE *f, const char *prefix) {
                 prefix = "";
 
         fprintf(f,
-                "%s%s: %s%s\n",
+                "%s\t%s: %s%s%s\n",
                 prefix,
                 condition_type_to_string(c->type),
+                c->trigger ? "|" : "",
                 c->negate ? "!" : "",
                 c->parameter);
 }
@@ -189,8 +230,12 @@ void condition_dump_list(Condition *first, FILE *f, const char *prefix) {
 }
 
 static const char* const condition_type_table[_CONDITION_TYPE_MAX] = {
-        [CONDITION_KERNEL_COMMAND_LINE] = "ConditionKernelCommandLine",
         [CONDITION_PATH_EXISTS] = "ConditionPathExists",
+        [CONDITION_PATH_IS_DIRECTORY] = "ConditionPathIsDirectory",
+        [CONDITION_DIRECTORY_NOT_EMPTY] = "ConditionDirectoryNotEmpty",
+        [CONDITION_KERNEL_COMMAND_LINE] = "ConditionKernelCommandLine",
+        [CONDITION_VIRTUALIZATION] = "ConditionVirtualization",
+        [CONDITION_SECURITY] = "ConditionSecurity",
         [CONDITION_NULL] = "ConditionNull"
 };
 

@@ -83,6 +83,12 @@ static int load_keymap(const char *vc, const char *map, const char *map_toggle, 
         int i = 0;
         pid_t pid;
 
+        if (isempty(map)) {
+                /* An empty map means kernel map */
+                *_pid = 0;
+                return 0;
+        }
+
         args[i++] = KBD_LOADKEYS;
         args[i++] = "-q";
         args[i++] = "-C";
@@ -110,6 +116,12 @@ static int load_font(const char *vc, const char *font, const char *map, const ch
         const char *args[9];
         int i = 0;
         pid_t pid;
+
+        if (isempty(font)) {
+                /* An empty font means kernel font */
+                *_pid = 0;
+                return 0;
+        }
 
         args[i++] = KBD_SETFONT;
         args[i++] = "-C";
@@ -147,12 +159,15 @@ int main(int argc, char **argv) {
 #ifdef TARGET_GENTOO
         char *vc_unicode = NULL;
 #endif
+#ifdef TARGET_MANDRIVA
+        char *vc_keytable = NULL;
+#endif
         int fd = -1;
         bool utf8;
         int r = EXIT_FAILURE;
         pid_t font_pid = 0, keymap_pid = 0;
 
-        log_set_target(LOG_TARGET_SYSLOG_OR_KMSG);
+        log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
 
@@ -173,21 +188,32 @@ int main(int argc, char **argv) {
 
         utf8 = is_locale_utf8();
 
-        if ((r = parse_env_file("/proc/cmdline", WHITESPACE,
-#ifdef TARGET_FEDORA
-                                "SYSFONT", &vc_font,
-                                "KEYTABLE", &vc_keymap,
-#endif
-                                "vconsole.keymap", &vc_keymap,
-                                "vconsole.keymap.toggle", &vc_keymap_toggle,
-                                "vconsole.font", &vc_font,
-                                "vconsole.font.map", &vc_font_map,
-                                "vconsole.font.unimap", &vc_font_unimap,
-                                NULL)) < 0) {
+        vc_keymap = strdup("us");
+        vc_font = strdup(DEFAULT_FONT);
 
-                if (r != -ENOENT)
-                        log_warning("Failed to read /proc/cmdline: %s", strerror(-r));
+        if (!vc_keymap || !vc_font) {
+                log_error("Failed to allocate strings.");
+                goto finish;
         }
+
+        r = 0;
+
+        if (detect_container(NULL) <= 0)
+                if ((r = parse_env_file("/proc/cmdline", WHITESPACE,
+#if defined(TARGET_FEDORA) || defined(TARGET_MEEGO)
+                                        "SYSFONT", &vc_font,
+                                        "KEYTABLE", &vc_keymap,
+#endif
+                                        "vconsole.keymap", &vc_keymap,
+                                        "vconsole.keymap.toggle", &vc_keymap_toggle,
+                                        "vconsole.font", &vc_font,
+                                        "vconsole.font.map", &vc_font_map,
+                                        "vconsole.font.unimap", &vc_font_unimap,
+                                        NULL)) < 0) {
+
+                        if (r != -ENOENT)
+                                log_warning("Failed to read /proc/cmdline: %s", strerror(-r));
+                }
 
         /* Hmm, nothing set on the kernel cmd line? Then let's
          * try /etc/vconsole.conf */
@@ -205,7 +231,7 @@ int main(int argc, char **argv) {
         }
 
         if (r <= 0) {
-#ifdef TARGET_FEDORA
+#if defined(TARGET_FEDORA) || defined(TARGET_MEEGO)
                 if ((r = parse_env_file("/etc/sysconfig/i18n", NEWLINE,
                                         "SYSFONT", &vc_font,
                                         "SYSFONTACM", &vc_font_map,
@@ -345,18 +371,68 @@ int main(int argc, char **argv) {
                         if (r != -ENOENT)
                                 log_warning("Failed to read /etc/conf.d/keymaps: %s", strerror(-r));
                 }
+
+#elif defined(TARGET_MANDRIVA)
+
+                if ((r = parse_env_file("/etc/sysconfig/i18n", NEWLINE,
+                                        "SYSFONT", &vc_font,
+                                        "SYSFONTACM", &vc_font_map,
+                                        "UNIMAP", &vc_font_unimap,
+                                        NULL)) < 0) {
+
+                        if (r != -ENOENT)
+                                log_warning("Failed to read /etc/sysconfig/i18n: %s", strerror(-r));
+                }
+
+                if ((r = parse_env_file("/etc/sysconfig/keyboard", NEWLINE,
+                                        "KEYTABLE", &vc_keytable,
+                                        "KEYMAP", &vc_keymap,
+                                        "UNIKEYTABLE", &vc_keymap,
+                                        "GRP_TOGGLE", &vc_keymap_toggle,
+                                        NULL)) < 0) {
+
+                        if (r != -ENOENT)
+                                log_warning("Failed to read /etc/sysconfig/i18n: %s", strerror(-r));
+                }
+
+                if (vc_keytable) {
+                        if (vc_keymap)
+                                free(vc_keymap);
+                        if (utf8) {
+                                if (endswith(vc_keytable, ".uni") || strstr(vc_keytable, ".uni."))
+                                        vc_keymap = strdup(vc_keytable);
+                                else {
+                                        char *s;
+                                        if ((s = strstr(vc_keytable, ".map")))
+                                                vc_keytable[s-vc_keytable+1] = '\0';
+                                        vc_keymap = strappend(vc_keytable, ".uni");
+                                }
+                        } else
+                                vc_keymap = strdup(vc_keytable);
+
+                        free(vc_keytable);
+
+                        if (!vc_keymap) {
+                                log_error("Out of memory.");
+                                goto finish;
+                        }
+                }
+
+                if (access("/etc/sysconfig/console/default.kmap", F_OK) >= 0) {
+                        char *t;
+
+                        if (!(t = strdup("/etc/sysconfig/console/default.kmap"))) {
+                                log_error("Out of memory.");
+                                goto finish;
+                        }
+
+                        free(vc_keymap);
+                        vc_keymap = t;
+                }
 #endif
         }
 
-        if (!vc_keymap)
-                vc_keymap = strdup("us");
-        if (!vc_font)
-                vc_font = strdup(DEFAULT_FONT);
-
-        if (!vc_keymap || !vc_font) {
-                log_error("Failed to allocate strings.");
-                goto finish;
-        }
+        r = EXIT_FAILURE;
 
         if (!utf8)
                 disable_utf8(fd);

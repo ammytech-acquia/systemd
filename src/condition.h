@@ -28,9 +28,11 @@
 
 typedef enum ConditionType {
         CONDITION_PATH_EXISTS,
+        CONDITION_PATH_IS_DIRECTORY,
         CONDITION_DIRECTORY_NOT_EMPTY,
         CONDITION_KERNEL_COMMAND_LINE,
         CONDITION_VIRTUALIZATION,
+        CONDITION_SECURITY,
         CONDITION_NULL,
         _CONDITION_TYPE_MAX,
         _CONDITION_TYPE_INVALID = -1
@@ -39,12 +41,14 @@ typedef enum ConditionType {
 typedef struct Condition {
         ConditionType type;
         char *parameter;
-        bool negate;
+
+        bool trigger:1;
+        bool negate:1;
 
         LIST_FIELDS(struct Condition, conditions);
 } Condition;
 
-Condition* condition_new(ConditionType type, const char *parameter, bool negate);
+Condition* condition_new(ConditionType type, const char *parameter, bool trigger, bool negate);
 void condition_free(Condition *c);
 void condition_free_list(Condition *c);
 

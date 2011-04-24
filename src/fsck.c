@@ -106,6 +106,9 @@ static int parse_proc_cmdline(void) {
         int r;
         size_t l;
 
+        if (detect_container(NULL) > 0)
+                return 0;
+
         if ((r = read_one_line_file("/proc/cmdline", &line)) < 0) {
                 log_warning("Failed to read /proc/cmdline, ignoring: %s", strerror(-r));
                 return 0;
@@ -121,7 +124,7 @@ static int parse_proc_cmdline(void) {
                         arg_skip = true;
                 else if (startswith(w, "fsck.mode"))
                         log_warning("Invalid fsck.mode= parameter. Ignoring.");
-#ifdef TARGET_FEDORA
+#if defined(TARGET_FEDORA) || defined(TARGET_MANDRIVA)
                 else if (strneq(w, "fastboot", l))
                         arg_skip = true;
                 else if (strneq(w, "forcefsck", l))
@@ -262,7 +265,7 @@ int main(int argc, char *argv[]) {
                 r = EXIT_SUCCESS;
 
         if (status.si_code == CLD_EXITED && (status.si_status & 1))
-                touch("/dev/.systemd/quotacheck");
+                touch("/run/systemd/quotacheck");
 
 finish:
         if (udev_device)

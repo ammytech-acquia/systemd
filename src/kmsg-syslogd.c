@@ -39,7 +39,6 @@
 #include "fdset.h"
 
 #define SERVER_FD_MAX 16
-#define TIMEOUT ((int) (5*60*MSEC_PER_SEC))
 
 typedef struct Stream Stream;
 
@@ -153,50 +152,6 @@ static int server_init(Server *s, unsigned n_sockets) {
 fail:
         server_done(s);
         return r;
-}
-
-static int read_priority(const char **buf) {
-        int priority;
-        size_t n;
-        const char *p;
-        int a, b, c;
-
-        assert(buf);
-        assert(*buf);
-
-        p = *buf;
-        n = strlen(p);
-
-        if (n < 3 || p[0] != '<')
-                goto fail;
-
-        if (p[2] == '>') {
-                a = b = 0;
-                c = undecchar(p[1]);
-                p += 3;
-        } else if (n >= 4 && p[3] == '>') {
-                a = 0;
-                b = undecchar(p[1]);
-                c = undecchar(p[2]);
-                p += 4;
-        } else if (n >= 5 && p[4] == '>') {
-                a = undecchar(p[1]);
-                b = undecchar(p[2]);
-                c = undecchar(p[3]);
-                p += 5;
-        } else
-                goto fail;
-
-        if (a < 0 || b < 0 || c < 0)
-                goto fail;
-
-        *buf = p;
-
-        priority = 100*a + 10*b + c;
-        return LOG_PRI(priority);
-
-fail:
-        return LOG_INFO;
 }
 
 static void skip_date(const char **buf) {
@@ -335,17 +290,26 @@ static void skip_pid(const char **buf) {
 
 static int write_message(Server *s, const char *buf, struct ucred *ucred) {
         ssize_t k;
-        char priority[4], pid[16];
+        char priority[6], pid[16];
         struct iovec iovec[5];
         unsigned i = 0;
         char *process = NULL;
         int r = 0;
+        int prio = LOG_USER | LOG_INFO;
 
         assert(s);
         assert(buf);
 
+        parse_syslog_priority((char**) &buf, &prio);
+
+        if (*buf == 0)
+                return 0;
+
+        if ((prio & LOG_FACMASK) == 0)
+                prio = LOG_USER | LOG_PRI(prio);
+
         /* First, set priority field */
-        snprintf(priority, sizeof(priority), "<%i>", read_priority(&buf));
+        snprintf(priority, sizeof(priority), "<%i>", prio);
         char_array_0(priority);
         IOVEC_SET_STRING(iovec[i++], priority);
 
@@ -355,7 +319,9 @@ static int write_message(Server *s, const char *buf, struct ucred *ucred) {
         /* Then, add process if set */
         if (read_process(&buf, &iovec[i]) > 0)
                 i++;
-        else if (ucred && get_process_name(ucred->pid, &process) >= 0)
+        else if (ucred &&
+                 ucred->pid > 0 &&
+                 get_process_name(ucred->pid, &process) >= 0)
                 IOVEC_SET_STRING(iovec[i++], process);
 
         /* Skip the stored PID if we have a better one */
@@ -512,7 +478,7 @@ int main(int argc, char *argv[]) {
                 struct epoll_event event;
                 int k;
 
-                if ((k = epoll_wait(server.epoll_fd, &event, 1, TIMEOUT)) < 0) {
+                if ((k = epoll_wait(server.epoll_fd, &event, 1, -1)) < 0) {
 
                         if (errno == EINTR)
                                 continue;

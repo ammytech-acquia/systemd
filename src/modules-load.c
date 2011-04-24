@@ -43,7 +43,8 @@ static int scandir_filter(const struct dirent *d) {
                 return 0;
 
         if (d->d_type != DT_REG &&
-            d->d_type != DT_LNK)
+            d->d_type != DT_LNK &&
+            d->d_type != DT_UNKNOWN)
                 return 0;
 
         return endswith(d->d_name, ".conf");
@@ -98,16 +99,20 @@ int main(int argc, char *argv[]) {
                 }
 
                 f = fopen(fn, "re");
-                free(fn);
 
                 if (!f) {
-                        if (errno == ENOENT)
+                        if (errno == ENOENT) {
+                                free(fn);
                                 continue;
+                        }
 
                         log_error("Failed to open %s: %m", fn);
+                        free(fn);
                         r = EXIT_FAILURE;
                         continue;
                 }
+
+                free(fn);
 
                 for (;;) {
                         char line[LINE_MAX], *l, *t;

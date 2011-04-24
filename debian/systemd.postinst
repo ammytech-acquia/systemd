@@ -18,4 +18,8 @@ if [ -n "$2" ]; then
     fi
 fi
 
+systemd-machine-id-setup
+
+dpkg-maintscript-helper rm_conffile /etc/lsb-base-logging.sh 20-1 systemd -- "$@"
+
 #DEBHELPER#

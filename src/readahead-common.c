@@ -114,6 +114,41 @@ finish:
         return b;
 }
 
+int fs_on_read_only(const char *p) {
+        struct stat st;
+        struct udev *udev = NULL;
+        struct udev_device *udev_device = NULL;
+        bool b = false;
+        const char *read_only;
+
+        assert(p);
+
+        if (stat(p, &st) < 0)
+                return -errno;
+
+        if (major(st.st_dev) == 0)
+                return false;
+
+        if (!(udev = udev_new()))
+                return -ENOMEM;
+
+        if (!(udev_device = udev_device_new_from_devnum(udev, 'b', st.st_dev)))
+                goto finish;
+
+        if ((read_only = udev_device_get_sysattr_value(udev_device, "ro")))
+                if ((b = streq(read_only, "1")))
+                        goto finish;
+
+finish:
+        if (udev_device)
+                udev_device_unref(udev_device);
+
+        if (udev)
+                udev_unref(udev);
+
+        return b;
+}
+
 bool enough_ram(void) {
         struct sysinfo si;
 
@@ -132,11 +167,11 @@ int open_inotify(void) {
                 return -errno;
         }
 
-        mkdir("/dev/.systemd", 0755);
-        mkdir("/dev/.systemd/readahead", 0755);
+        mkdir("/run/systemd", 0755);
+        mkdir("/run/systemd/readahead", 0755);
 
-        if (inotify_add_watch(fd, "/dev/.systemd/readahead", IN_CREATE) < 0) {
-                log_error("Failed to watch /dev/.systemd/readahead: %m");
+        if (inotify_add_watch(fd, "/run/systemd/readahead", IN_CREATE) < 0) {
+                log_error("Failed to watch /run/systemd/readahead: %m");
                 close_nointr_nofail(fd);
                 return -errno;
         }
@@ -148,10 +183,10 @@ ReadaheadShared *shared_get(void) {
         int fd;
         ReadaheadShared *m = NULL;
 
-        mkdir("/dev/.systemd", 0755);
-        mkdir("/dev/.systemd/readahead", 0755);
+        mkdir("/run/systemd", 0755);
+        mkdir("/run/systemd/readahead", 0755);
 
-        if ((fd = open("/dev/.systemd/readahead/shared", O_CREAT|O_RDWR|O_CLOEXEC, 0644)) < 0) {
+        if ((fd = open("/run/systemd/readahead/shared", O_CREAT|O_RDWR|O_CLOEXEC, 0644)) < 0) {
                 log_error("Failed to create shared memory segment: %m");
                 goto finish;
         }
@@ -173,7 +208,6 @@ finish:
 
         return m;
 }
-
 
 #define BUMP_REQUEST_NR (16*1024)
 
