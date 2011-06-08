@@ -219,6 +219,51 @@
                         </varlistentry>
 
                         <varlistentry>
+                                <term><varname>ListenSpecial=</varname></term>
+                                <listitem><para>Specifies a special
+                                file in the file system to listen
+                                on. This expects an absolute file
+                                system path as argument. Behaviour
+                                otherwise is very similar to the
+                                <varname>ListenFIFO=</varname>
+                                directive above. Use this to open
+                                character device nodes as well as
+                                special files in
+                                <filename>/proc</filename> and
+                                <filename>/sys</filename>.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                                <term><varname>ListenNetlink=</varname></term>
+                                <listitem><para>Specifies a Netlink
+                                family to create a socket for to
+                                listen on. This expects a short string
+                                referring to the AF_NETLINK family
+                                name (such as <varname>audit</varname>
+                                or <varname>kobject-uevent</varname>)
+                                as argument, optionally suffixed by a
+                                whitespace followed by a multicast
+                                group integer. Behaviour otherwise is
+                                very similar to the
+                                <varname>ListenDatagram=</varname>
+                                directive above.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                                <term><varname>ListenMessageQueue=</varname></term>
+                                <listitem><para>Specifies a POSIX
+                                message queue name to listen on. This
+                                expects a valid message queue name
+                                (i.e. beginning with /). Behaviour
+                                otherwise is very similar to the
+                                <varname>ListenFIFO=</varname>
+                                directive above. On Linux message
+                                queue descriptors are actually file
+                                descriptors and can be inherited
+                                between processes.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
                                 <term><varname>BindIPv6Only=</varname></term>
                                 <listitem><para>Takes a one of
                                 <option>default</option>,
@@ -432,6 +477,19 @@
                         </varlistentry>
 
                         <varlistentry>
+                                <term><varname>MessageQueueMaxMessages=</varname>,
+                                <varname>MessageQueueMessageSize=</varname></term>
+                                <listitem><para>These two settings
+                                take integer values and control the
+                                mq_maxmsg resp. mq_msgsize field when
+                                creating the message queue. Note that
+                                either none or both of these variables
+                                need to be set. See
+                                <citerefentry><refentrytitle>mq_setattr</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+                                for details.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
                                 <term><varname>FreeBind=</varname></term>
                                 <listitem><para>Takes a boolean
                                 value. Controls whether the socket can
@@ -446,6 +504,24 @@
                                 to use this option whenever you bind a
                                 socket to a specific IP
                                 address. Defaults to <option>false</option>.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                                <term><varname>Transparent=</varname></term>
+                                <listitem><para>Takes a boolean
+                                value. Controls the IP_TRANSPARENT
+                                option. Defaults to
+                                <option>false</option>.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                                <term><varname>Broadcast=</varname></term>
+                                <listitem><para>Takes a boolean
+                                value. This controls the SO_BROADCAST
+                                option, which allows boradcast
+                                datagrams to be sent from this
+                                socket. Defaults to
+                                <option>false</option>.</para></listitem>
                         </varlistentry>
 
                         <varlistentry>
@@ -510,7 +586,7 @@
                                 a time span value such as "5min
                                 20s". Pass 0 to disable the timeout
                                 logic. Defaults to
-                                60s.</para></listitem>
+                                90s.</para></listitem>
                         </varlistentry>
 
                         <varlistentry>
@@ -519,7 +595,6 @@
                                 processes of this socket unit shall be
                                 killed. One of
                                 <option>control-group</option>,
-                                <option>process-group</option>,
                                 <option>process</option>,
                                 <option>none</option>.</para>
 

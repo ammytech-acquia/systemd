@@ -31,6 +31,7 @@
 #include "util.h"
 #include "strv.h"
 #include "ask-password-api.h"
+#include "def.h"
 
 static const char *opt_type = NULL; /* LUKS1 or PLAIN */
 static char *opt_cipher = NULL;
@@ -39,7 +40,7 @@ static char *opt_hash = NULL;
 static unsigned opt_tries = 0;
 static bool opt_readonly = false;
 static bool opt_verify = false;
-static usec_t opt_timeout = 0;
+static usec_t opt_timeout = DEFAULT_TIMEOUT_USEC;
 
 /* Options Debian's crypttab knows we don't:
 
@@ -224,6 +225,7 @@ int main(int argc, char *argv[]) {
         char **passwords = NULL, *truncated_cipher = NULL;
         const char *cipher = NULL, *cipher_mode = NULL, *hash = NULL, *name = NULL;
         char *description = NULL, *name_buffer = NULL, *mount_point = NULL;
+        unsigned keyfile_size = 0;
 
         if (argc <= 1) {
                 help();
@@ -308,7 +310,10 @@ int main(int argc, char *argv[]) {
                 if (opt_readonly)
                         flags |= CRYPT_ACTIVATE_READONLY;
 
-                until = now(CLOCK_MONOTONIC) + (opt_timeout > 0 ? opt_timeout : 60 * USEC_PER_SEC);
+                if (opt_timeout > 0)
+                        until = now(CLOCK_MONOTONIC) + opt_timeout;
+                else
+                        until = 0;
 
                 opt_tries = opt_tries > 0 ? opt_tries : 3;
                 opt_key_size = (opt_key_size > 0 ? opt_key_size : 256);
@@ -403,6 +408,8 @@ int main(int argc, char *argv[]) {
                                 }
                         }
 
+                        k = 0;
+
                         if (!opt_type || streq(opt_type, CRYPT_LUKS1))
                                 k = crypt_load(cd, CRYPT_LUKS1, NULL);
 
@@ -427,6 +434,10 @@ int main(int argc, char *argv[]) {
                                                  &params);
 
                                 pass_volume_key = streq(hash, "plain");
+
+                               /* for CRYPT_PLAIN limit reads
+                                * from keyfile to key length */
+                                keyfile_size = opt_key_size / 8;
                         }
 
                         if (k < 0) {
@@ -441,7 +452,7 @@ int main(int argc, char *argv[]) {
                                  argv[3]);
 
                         if (key_file)
-                                k = crypt_activate_by_keyfile(cd, argv[2], CRYPT_ANY_SLOT, key_file, opt_key_size, flags);
+                                k = crypt_activate_by_keyfile(cd, argv[2], CRYPT_ANY_SLOT, key_file, keyfile_size, flags);
                         else {
                                 char **p;
 

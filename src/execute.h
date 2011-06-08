@@ -39,16 +39,10 @@ struct CGroupBonding;
 #include "list.h"
 #include "util.h"
 
-/* Abstract namespace! */
-#define LOGGER_SOCKET "/org/freedesktop/systemd1/logger"
-
-/* This doesn't really belong here, but I couldn't find a better place to put this. */
-#define SIGNALS_CRASH_HANDLER SIGSEGV,SIGILL,SIGFPE,SIGBUS,SIGQUIT,SIGABRT
-#define SIGNALS_IGNORE SIGKILL,SIGPIPE
+#define LOGGER_SOCKET "/run/systemd/logger"
 
 typedef enum KillMode {
         KILL_CONTROL_GROUP = 0,
-        KILL_PROCESS_GROUP,
         KILL_PROCESS,
         KILL_NONE,
         _KILL_MODE_MAX,
@@ -129,6 +123,10 @@ struct ExecContext {
 
         char *tty_path;
 
+        bool tty_reset;
+        bool tty_vhangup;
+        bool tty_vt_disallocate;
+
         /* Since resolving these names might might involve socket
          * connections and we don't want to deadlock ourselves these
          * names are resolved on execution only and in the child
@@ -204,18 +202,19 @@ int exec_command_set(ExecCommand *c, const char *path, ...);
 void exec_context_init(ExecContext *c);
 void exec_context_done(ExecContext *c);
 void exec_context_dump(ExecContext *c, FILE* f, const char *prefix);
+void exec_context_tty_reset(const ExecContext *context);
 
 int exec_context_load_environment(const ExecContext *c, char ***l);
 
 void exec_status_start(ExecStatus *s, pid_t pid);
-void exec_status_exit(ExecStatus *s, pid_t pid, int code, int status, const char *utmp_id);
+void exec_status_exit(ExecStatus *s, ExecContext *context, pid_t pid, int code, int status);
 void exec_status_dump(ExecStatus *s, FILE *f, const char *prefix);
 
 const char* exec_output_to_string(ExecOutput i);
-int exec_output_from_string(const char *s);
+ExecOutput exec_output_from_string(const char *s);
 
 const char* exec_input_to_string(ExecInput i);
-int exec_input_from_string(const char *s);
+ExecInput exec_input_from_string(const char *s);
 
 const char *kill_mode_to_string(KillMode k);
 KillMode kill_mode_from_string(const char *s);

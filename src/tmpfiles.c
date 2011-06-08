@@ -47,9 +47,8 @@
 
 /* This reads all files listed in /etc/tmpfiles.d/?*.conf and creates
  * them in the file system. This is intended to be used to create
- * properly owned directories beneath /tmp, /var/tmp, /var/run and
- * /var/lock which are volatile and hence need to be recreated on
- * bootup. */
+ * properly owned directories beneath /tmp, /var/tmp, /run, which are
+ * volatile and hence need to be recreated on bootup. */
 
 enum {
         /* These ones take file names */
@@ -466,6 +465,7 @@ static int create_item(Item *i) {
         case CREATE_DIRECTORY:
 
                 u = umask(0);
+                mkdir_parents(i->path, 0755);
                 r = mkdir(i->path, i->mode);
                 umask(u);
 
@@ -623,9 +623,39 @@ static void item_free(Item *i) {
         free(i);
 }
 
+static bool item_equal(Item *a, Item *b) {
+        assert(a);
+        assert(b);
+
+        if (!streq_ptr(a->path, b->path))
+                return false;
+
+        if (a->type != b->type)
+                return false;
+
+        if (a->uid_set != b->uid_set ||
+            (a->uid_set && a->uid != b->uid))
+            return false;
+
+        if (a->gid_set != b->gid_set ||
+            (a->gid_set && a->gid != b->gid))
+            return false;
+
+        if (a->mode_set != b->mode_set ||
+            (a->mode_set && a->mode != b->mode))
+            return false;
+
+        if (a->age_set != b->age_set ||
+            (a->age_set && a->age != b->age))
+            return false;
+
+        return true;
+}
+
 static int parse_line(const char *fname, unsigned line, const char *buffer) {
-        Item *i;
+        Item *i, *existing;
         char *mode = NULL, *user = NULL, *group = NULL, *age = NULL;
+        Hashmap *h;
         int r;
 
         assert(fname);
@@ -742,13 +772,19 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                 i->age_set = true;
         }
 
-        if ((r = hashmap_put(needs_glob(i->type) ? globs : items, i->path, i)) < 0) {
-                if (r == -EEXIST) {
-                        log_warning("Two or more conflicting lines for %s configured, ignoring.", i->path);
-                        r = 0;
-                        goto finish;
-                }
+        h = needs_glob(i->type) ? globs : items;
 
+        if ((existing = hashmap_get(h, i->path))) {
+
+                /* Two identical items are fine */
+                if (!item_equal(existing, i))
+                        log_warning("Two or more conflicting lines for %s configured, ignoring.", i->path);
+
+                r = 0;
+                goto finish;
+        }
+
+        if ((r = hashmap_put(h, i->path, i)) < 0) {
                 log_error("Failed to insert item %s: %s", i->path, strerror(-r));
                 goto finish;
         }
@@ -766,20 +802,6 @@ finish:
                 item_free(i);
 
         return r;
-}
-
-static int scandir_filter(const struct dirent *d) {
-        assert(d);
-
-        if (ignore_file(d->d_name))
-                return 0;
-
-        if (d->d_type != DT_REG &&
-            d->d_type != DT_LNK &&
-            d->d_type != DT_UNKNOWN)
-                return 0;
-
-        return endswith(d->d_name, ".conf");
 }
 
 static int help(void) {
@@ -876,6 +898,7 @@ static int read_config_file(const char *fn, bool ignore_enoent) {
                 return -errno;
         }
 
+        log_debug("apply: %s\n", fn);
         for (;;) {
                 char line[LINE_MAX], *l;
                 int k;
@@ -938,40 +961,29 @@ int main(int argc, char *argv[]) {
                                 r = EXIT_FAILURE;
 
         } else {
-                int n, j;
-                struct dirent **de = NULL;
+                char **files, **f;
 
-                if ((n = scandir("/etc/tmpfiles.d/", &de, scandir_filter, alphasort)) < 0) {
-
-                        if (errno != ENOENT) {
-                                log_error("Failed to enumerate /etc/tmpfiles.d/ files: %m");
-                                r = EXIT_FAILURE;
-                        }
-
+                r = conf_files_list(&files, ".conf",
+                                    "/run/tmpfiles.d",
+                                    "/etc/tmpfiles.d",
+                                    "/usr/local/lib/tmpfiles.d",
+                                    "/usr/lib/tmpfiles.d",
+                                    NULL);
+                if (r < 0) {
+                        r = EXIT_FAILURE;
+                        log_error("Failed to enumerate tmpfiles.d files: %s", strerror(-r));
                         goto finish;
                 }
 
-                for (j = 0; j < n; j++) {
-                        int k;
-                        char *fn;
-
-                        k = asprintf(&fn, "/etc/tmpfiles.d/%s", de[j]->d_name);
-                        free(de[j]);
-
-                        if (k < 0) {
-                                log_error("Failed to allocate file name.");
+                STRV_FOREACH(f, files) {
+                        if (read_config_file(*f, true) < 0)
                                 r = EXIT_FAILURE;
-                                continue;
-                        }
-
-                        if (read_config_file(fn, true) < 0)
-                                r = EXIT_FAILURE;
-
-                        free(fn);
                 }
 
-                free(de);
+                strv_free(files);
         }
+
+
 
         HASHMAP_FOREACH(i, globs, iterator)
                 if (process_item(i) < 0)

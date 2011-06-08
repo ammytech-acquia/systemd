@@ -102,7 +102,11 @@ static char** user_dirs(void) {
         if ((e = getenv("XDG_DATA_DIRS")))
                 data_dirs = strv_split(e, ":");
         else
-                data_dirs = strv_new("/usr/local/share", "/usr/share", NULL);
+                data_dirs = strv_new("/usr/local/share",
+                                     "/usr/local/lib",
+                                     "/usr/share",
+                                     "/usr/lib",
+                                     NULL);
 
         if (!data_dirs)
                 goto fail;
@@ -181,11 +185,13 @@ int lookup_paths_init(LookupPaths *p, ManagerRunningAs running_as) {
                                 return -ENOMEM;
                 } else
                         if (!(p->unit_path = strv_new(
-                                              "/dev/.systemd/system",
+                                              /* If you modify this you also want to modify
+                                               * systemdsystemunitpath= in systemd.pc.in! */
+                                              "/run/systemd/system",
                                               SYSTEM_CONFIG_UNIT_PATH,
                                               "/etc/systemd/system",
-                                              "/usr/local/share/systemd/system",
-                                              "/usr/share/systemd/system",
+                                              "/usr/local/lib/systemd/system",
+                                              "/usr/lib/systemd/system",
                                               "/lib/systemd/system",
                                               SYSTEM_DATA_UNIT_PATH,
                                               NULL)))
@@ -197,6 +203,7 @@ int lookup_paths_init(LookupPaths *p, ManagerRunningAs running_as) {
                         return -ENOMEM;
 
         strv_uniq(p->unit_path);
+        strv_path_remove_empty(p->unit_path);
 
         if (!strv_isempty(p->unit_path)) {
 
@@ -250,6 +257,9 @@ int lookup_paths_init(LookupPaths *p, ManagerRunningAs running_as) {
 
                 strv_uniq(p->sysvinit_path);
                 strv_uniq(p->sysvrcnd_path);
+
+                strv_path_remove_empty(p->sysvinit_path);
+                strv_path_remove_empty(p->sysvrcnd_path);
 
                 if (!strv_isempty(p->sysvinit_path)) {
 

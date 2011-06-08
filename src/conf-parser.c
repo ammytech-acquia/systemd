@@ -61,7 +61,7 @@ static int next_assignment(
                 if (!t->parse)
                         return 0;
 
-                return t->parse(filename, line, section, lvalue, rvalue, t->data, userdata);
+                return t->parse(filename, line, section, lvalue, t->ltype, rvalue, t->data, userdata);
         }
 
         /* Warn about unknown non-extension fields. */
@@ -226,6 +226,7 @@ int config_parse_int(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -246,11 +247,38 @@ int config_parse_int(
         return 0;
 }
 
+int config_parse_long(
+                const char *filename,
+                unsigned line,
+                const char *section,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        long *i = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if ((r = safe_atoli(rvalue, i)) < 0) {
+                log_error("[%s:%u] Failed to parse numeric value: %s", filename, line, rvalue);
+                return r;
+        }
+
+        return 0;
+}
+
 int config_parse_uint64(
                 const char *filename,
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -276,6 +304,7 @@ int config_parse_unsigned(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -301,6 +330,7 @@ int config_parse_size(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -328,6 +358,7 @@ int config_parse_bool(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -354,6 +385,7 @@ int config_parse_string(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -383,6 +415,7 @@ int config_parse_path(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -416,6 +449,7 @@ int config_parse_strv(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {
@@ -468,6 +502,7 @@ int config_parse_path_strv(
                 unsigned line,
                 const char *section,
                 const char *lvalue,
+                int ltype,
                 const char *rvalue,
                 void *data,
                 void *userdata) {

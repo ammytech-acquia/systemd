@@ -132,12 +132,14 @@ struct Service {
         bool reload_failure:1;
 
         bool main_pid_known:1;
+        bool main_pid_alien:1;
         bool bus_name_good:1;
         bool forbid_restart:1;
         bool got_socket_fd:1;
 #ifdef HAVE_SYSV_COMPAT
         bool sysv_has_lsb:1;
         bool sysv_enabled:1;
+        int sysv_start_priority_from_rcnd;
         int sysv_start_priority;
 
         char *sysv_path;

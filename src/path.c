@@ -39,6 +39,15 @@ static const UnitActiveState state_translation_table[_PATH_STATE_MAX] = {
         [PATH_FAILED] = UNIT_FAILED
 };
 
+static void path_init(Unit *u) {
+        Path *p = PATH(u);
+
+        assert(u);
+        assert(u->meta.load_state == UNIT_STUB);
+
+        p->directory_mode = 0755;
+}
+
 static void path_unwatch_one(Path *p, PathSpec *s) {
 
         if (s->inotify_fd < 0)
@@ -169,9 +178,13 @@ static void path_dump(Unit *u, FILE *f, const char *prefix) {
 
         fprintf(f,
                 "%sPath State: %s\n"
-                "%sUnit: %s\n",
+                "%sUnit: %s\n"
+                "%sMakeDirectory: %s\n"
+                "%sDirectoryMode: %04o\n",
                 prefix, path_state_to_string(p->state),
-                prefix, p->unit->meta.id);
+                prefix, p->unit->meta.id,
+                prefix, yes_no(p->make_directory),
+                prefix, p->directory_mode);
 
         LIST_FOREACH(spec, s, p->specs)
                 fprintf(f,
@@ -282,7 +295,7 @@ static void path_set_state(Path *p, PathState state) {
         unit_notify(UNIT(p), state_translation_table[old_state], state_translation_table[state], true);
 }
 
-static void path_enter_waiting(Path *p, bool initial, bool recheck, bool skip_watch);
+static void path_enter_waiting(Path *p, bool initial, bool recheck);
 
 static int path_coldplug(Unit *u) {
         Path *p = PATH(u);
@@ -294,7 +307,7 @@ static int path_coldplug(Unit *u) {
 
                 if (p->deserialized_state == PATH_WAITING ||
                     p->deserialized_state == PATH_RUNNING)
-                        path_enter_waiting(p, true, true, false);
+                        path_enter_waiting(p, true, true);
                 else
                         path_set_state(p, p->deserialized_state);
         }
@@ -340,14 +353,11 @@ fail:
         dbus_error_free(&error);
 }
 
-
-static void path_enter_waiting(Path *p, bool initial, bool recheck, bool skip_watch) {
+static bool path_check_good(Path *p, bool initial) {
         PathSpec *s;
-        int r;
         bool good = false;
 
-        if (!recheck)
-                goto waiting;
+        assert(p);
 
         LIST_FOREACH(spec, s, p->specs) {
 
@@ -382,23 +392,32 @@ static void path_enter_waiting(Path *p, bool initial, bool recheck, bool skip_wa
                         break;
         }
 
-        if (good) {
-                log_debug("%s got triggered.", p->meta.id);
-                path_enter_running(p);
-                return;
-        }
+        return good;
+}
 
-waiting:
-        if (!skip_watch) {
-                if ((r = path_watch(p)) < 0)
-                        goto fail;
+static void path_enter_waiting(Path *p, bool initial, bool recheck) {
+        int r;
 
-                /* Hmm, so now we have created inotify watches, but the file
-                 * might have appeared/been removed by now, so we must
-                 * recheck */
-                path_enter_waiting(p, false, true, true);
-                return;
-        }
+        if (recheck)
+                if (path_check_good(p, initial)) {
+                        log_debug("%s got triggered.", p->meta.id);
+                        path_enter_running(p);
+                        return;
+                }
+
+        if ((r = path_watch(p)) < 0)
+                goto fail;
+
+        /* Hmm, so now we have created inotify watches, but the file
+         * might have appeared/been removed by now, so we must
+         * recheck */
+
+        if (recheck)
+                if (path_check_good(p, false)) {
+                        log_debug("%s got triggered.", p->meta.id);
+                        path_enter_running(p);
+                        return;
+                }
 
         path_set_state(p, PATH_WAITING);
         return;
@@ -406,6 +425,25 @@ waiting:
 fail:
         log_warning("%s failed to enter waiting state: %s", p->meta.id, strerror(-r));
         path_enter_dead(p, false);
+}
+
+static void path_mkdir(Path *p) {
+        PathSpec *s;
+
+        assert(p);
+
+        if (!p->make_directory)
+                return;
+
+        LIST_FOREACH(spec, s, p->specs) {
+                int r;
+
+                if (s->type == PATH_EXISTS)
+                        continue;
+
+                if ((r = mkdir_p(s->path, p->directory_mode)) < 0)
+                        log_warning("mkdir(%s) failed: %s", s->path, strerror(-r));
+        }
 }
 
 static int path_start(Unit *u) {
@@ -417,8 +455,10 @@ static int path_start(Unit *u) {
         if (p->unit->meta.load_state != UNIT_LOADED)
                 return -ENOENT;
 
+        path_mkdir(p);
+
         p->failure = false;
-        path_enter_waiting(p, true, true, false);
+        path_enter_waiting(p, true, true);
 
         return 0;
 }
@@ -515,6 +555,8 @@ static void path_fd_event(Unit *u, int fd, uint32_t events, Watch *w) {
                 goto fail;
         }
 
+        assert(l > 0);
+
         if (!(buf = malloc(l))) {
                 log_error("Failed to allocate buffer: %s", strerror(-ENOMEM));
                 goto fail;
@@ -549,7 +591,7 @@ static void path_fd_event(Unit *u, int fd, uint32_t events, Watch *w) {
         if (changed)
                 path_enter_running(p);
         else
-                path_enter_waiting(p, false, true, false);
+                path_enter_waiting(p, false, true);
 
         free(buf);
 
@@ -598,7 +640,7 @@ void path_unit_notify(Unit *u, UnitActiveState new_state) {
                         /* Hmm, so inotify was triggered since the
                          * last activation, so I guess we need to
                          * recheck what is going on. */
-                        path_enter_waiting(p, false, p->inotify_triggered, false);
+                        path_enter_waiting(p, false, p->inotify_triggered);
                 }
         }
 
@@ -639,6 +681,7 @@ DEFINE_STRING_TABLE_LOOKUP(path_type, PathType);
 const UnitVTable path_vtable = {
         .suffix = ".path",
 
+        .init = path_init,
         .done = path_done,
         .load = path_load,
 

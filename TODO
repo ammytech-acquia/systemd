@@ -1,30 +1,152 @@
+* udev-kernel.socket + udev.control.socket seems not
+  to work, udevd is started but no fd is passed
+
 F15:
 
 * swap units that are activated by one name but shown in the kernel under another are semi-broken
 
-* dep cycle basic → udev-retry → auditd → iptables → basic
+F15 External:
 
-* isolate multi-user.target doesn't start a getty@tty1 if we run it from graphical.target
+* NFS, networkmanager ordering issue (PENDING)
 
-* finish syslog socket stuff
+* NM should pull in network.target (PENDING)
+  https://bugzilla.redhat.com/show_bug.cgi?id=692008
 
-* NFS, networkmanager ordering issue
+* bluetooth should be possible to disable (PENDING)
 
-* add fstab fields to add wait timeouts, change Wants to Requires by local-fs.target
+* get writev() /dev/kmsg support into the F15 kernel
+    http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=7e5b58bcbcb3d7518389c1d82fb6e926f5a9f72c
 
-* hook emergency.target into local-fs.target in some way as OnFailure with isolate
+* make anaconda write timeout=0 for encrypted devices
 
-* mount /dev/.run and /var/run as bind mounts
-
-* Make use of UnknownInterface
-
-* support chkconfig without forwarding to systemctl to facilitate upgrades
-
-* drop SIGHUP handling from rsyslog.service upstream
+* fix broken Sockets=syslog-ng.socket packaging
 
 Features:
+* possibly set timezone offset from systemd at init instead
+  of calling hwclock
 
-* consider services with no [Install] section and stored in /lib enabled by "systemctl is-enabled"
+* kernel: add device_type = "fb", "fbcon" to class "graphics"
+
+* verify that the AF_UNIX sockets of a service in the fs still exist
+  when we start a service in order to avoid confusion when a user
+  assumes starting a service is enough to make it accessible
+
+* drop -lrt req for sd-daemon.[ch]
+
+* Make it possible to set the keymap independently from the font on
+  the kernel cmdline. Right now setting one resets also the other.
+
+* add dbus call to convert snapshot into target
+
+* move nss-myhostname into systemd
+
+* figure out a standard place to configure timezone name, inform myllynen@redhat.com
+
+* add dbus call to convert snapshot into target
+
+* move /selinux to /sys/fs/selinux
+
+* unset cgroup agents on shutdown
+
+* add prefix match to sysctl, tmpfiles, ...
+
+* send out "finished" signal when we are finished booting
+
+* drop /.readahead on bigger upgrades with yum
+
+* add inode stat() check to readahead to suppress preloading changed files
+
+* allow list of paths in config_parse_condition_path()
+
+* introduce dbus calls for enabling/disabling a service
+
+* support notifications for services being enabled/disabled
+
+* GC unreferenced jobs (such as .device jobs)
+
+* support wildcard expansion in ListenStream= and friends
+
+* support wildcard expansion in EnvironmentFile= and friends
+
+* avoid DefaultStandardOutput=syslog to have any effect on StandardInput=socket services
+
+* fix alsa mixer restore to not print error when no config is stored
+
+* show enablement status in systemctl status
+
+* when failing to start a service due to ratelimiting, try again later, if restart=always is set
+
+* write blog stories about:
+  - enabling dbus services
+  - status update
+  - /etc/sysconfig and /etc/default
+  - how to write socket activated services
+
+* maybe add tiny dbus services similar to hostnamed for locale and wallclock/timezone?
+
+* allow port=0 in .socket units
+
+* rename systemd-logger to systemd-stdio-syslog-bridge
+
+* take BSD file lock on tty devices when using them?
+
+* avoid any flag files, or readahead files in /, we need to support r/o /
+  or / on tmpfs like Android setups.
+
+* move readahead files into /var, look for them with .path units
+
+* teach dbus to activate all services it finds in /etc/systemd/services/org-*.service
+
+* get process transport into dbus for systemctl -P/-H
+
+* document default dependencies
+
+* support systemd.whitelist=/systemd.blacklist= on the kernel command
+  line.
+
+* Find a way to replace /var/run, /var/lock directories with
+  symlinks during an RPM package upgrade (filesystem.rpm or systemd.rpm).
+  (lua code to create symlinks right away for new installations is in filesytem.rpm now)
+  We soon want to get rid of var-run.mount var-lock.mount units:
+    if mountpoint /run ; then
+          umount /var/run || :
+    else
+          mount --move /var/run /run || mount --bind /var/run /run
+    fi
+    mv /var/run /var/.run.save
+    ln -s /run /var/run
+    echo "R /var/.run.save" > /etc/tmpfiles.d/remove-run-save.conf
+
+* when key file cannot be found, read it from kbd in cryptsetup
+
+* add switch to systemctl to show enabled but not running services. Or
+  another switch that shows service that have been running since
+  booting but aren't running anymore.
+
+* reuse mkdtemp namespace dirs in /tmp?
+
+* recreate systemd's D-Bus private socket file on SIGUSR2
+
+* be more specific what failed:
+    ...
+    Unmounting file systems.
+    Not all file systems unmounted, 1 left.
+    Disabling swaps.
+    Detaching loop devices.
+    Detaching DM devices.
+    Cannot finalize remaining file systems and devices, trying to kill remaining processes.
+    Unmounting file systems.
+    Not all file systems unmounted, 1 left.
+    Cannot finalize remaining file systems and devices, giving up.
+    ...
+
+* check for compiled-in, but not active selinux, and don't print any warnings
+  about policy loading. Probably check for available selinux in /proc/filesystems,
+  and check for active selinux with getcon_raw() == "kernel"
+
+* Support --test based on current system state
+
+* systemctl enable as D-Bus call
 
 * consider services with any kind of link in /etc/systemd/system enabled
 
@@ -32,22 +154,20 @@ Features:
 
 * make sure timeouts are applied to Type=oneshot services.
 
-* maybe implement "systemctl mask" and "systemctl unmask", but not
-  document it? When doing that add switch to make this temporary by
-  placing mask links in /dev.
+* Implement:
+    systemctl mask <unit>
+    systemctl unmask <unit>
+  Also support --temp to make this temporary by placing mask links in /run.
 
 * detect LXC environment
 
-* invoke vhangup() before and after invoking getty
-
-* support "auto" and "comment=systemd.automount" at the same time for an fstab entry
-
 * Maybe store in unit files whether a service should be enabled by default on package installation
+  (belongs into a distro pattern though, not in an upstream package's service file)
 
 * perhaps add "systemctl reenable" as combination of "systemctl disable" and "systemctl enable"
 
 * need a way to apply mount options of api vfs from systemd unit files
-  (or some other modern source?) instead of fstab
+  (or some other modern source?) instead of fstab?
 
 * maybe introduce ExecRestartPre=
 
@@ -55,51 +175,47 @@ Features:
 
 * Patch systemd-fsck to use -C and pass console fd to it
 
-* support remote/ssh systemctl/systemadm, and local privileged access
-
 * configurable jitter for timer events
 
-* Support ProcessNeededForShutdown=true to allow stuff like mdmon
-  to be killed very late after the rootfs is read only (?)
+* Support ProcessNeededForShutdown=true to allow stuff like mdmon to
+  be killed very late after the rootfs is read only? If implement pass
+  this to shutdown binary via command line argument.
 
-* Integrate "mdadm --wait-clean". Maybe just let SIGTERM to mdmon trigger the
-  needed action
+* use pivot_root on shutdown so that we can unmount the root directory.
+   - copy binaries to, and pivot_root() to the "shutdown tmpfs"
+   - solve "mdadm --wait-clean" problem that way
 
 * dot output for --test showing the 'initial transaction'
 
 * calendar time support in timer, iCalendar semantics for the timer stuff (RFC2445)
-  - check timerfd() patch: http://lkml.org/lkml/2010/11/23/290
+    http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=99ee5315dac6211e972fa3f23bcc9a0343ff58c4
 
 * systemd --user
   - get PR_SET_ANCHOR merged: http://lkml.org/lkml/2010/2/2/165
 
 * add VT tracking:
-    - provide CK functionality
-    - start getty only when actual vt switch happens (same model as
-      socket on-demand activation). allocate the next free tty and
-      start a getty there. this way, pressing alt-f[1-12] will switch
-      through running X and getty sessions, and any unallocated
-      activated tty will start a new getty. the hardcoding of
-      getty[1-6] will entirely go away.
-    - http://git.kernel.org/?p=linux/kernel/git/gregkh/tty-2.6.git;a=commitdiff;h=fbc92a3455577ab17615cbcb91826399061bd789
+  - provide CK functionality
+  - start getty only when actual vt switch happens (same model as
+    socket on-demand activation). allocate the next free tty and
+    start a getty there. this way, pressing alt-f[1-12] will switch
+    through running X and getty sessions, and any unallocated
+    activated tty will start a new getty. the hardcoding of
+    getty[1-6] will entirely go away.
+  - http://git.kernel.org/?p=linux/kernel/git/torvalds/linux-2.6.git;a=commit;h=fbc92a3455577ab17615cbcb91826399061bd789
 
 * implicitly import "defaults" settings file into all types
 
 * port over to LISTEN_FDS/LISTEN_PID:
-   - uuidd    DONE
-   - dbus     DONE
-   - rsyslog  DONE
-   - rpcbind (/var/run/rpcbind.sock!) DONE
-   - cups     DONE
-   - avahi-daemon (/var/run/avahi-daemon/socket) DONE
-   - ssh      CLASSIC
+   - uuidd    HAVEPATCH
+   - rpcbind (/var/run/rpcbind.sock!) HAVEPATCH
+   - cups     HAVEPATCH
    - postfix, saslauthd
    - apache/samba
    - libvirtd (/var/run/libvirt/libvirt-sock-ro)
    - bluetoothd (/var/run/sdp! @/org/bluez/audio!)
    - distccd
 
-* fingerprint.target, wireless.target, gps.target
+* fingerprint.target, wireless.target, gps.target, netdevice.target
 
 * set_put(), hashmap_put() return values check. i.e. == 0 doesn't free()!
 
@@ -109,23 +225,19 @@ Features:
 
 * systemctl list-jobs - show dependencies
 
-* accountsservice is borked
-
 * auditd service files
 
 * add systemctl switch to dump transaction without executing it
 
-* suspend, resume
+* suspend, resume support?
 
 * readahead: btrfs/LVM SSD detection
 
 * add separate man page for [Install] settings
 
-* only add quotacheck deps to .mount units which mention grpquota/usrquota in the mount flags
-
-* systemctl condrestart should return 0 if service isn't running
-
 * allow runtime changing of log level and target
+
+* drop cap bounding set in readahead and other services
 
 External:
 
@@ -133,14 +245,15 @@ External:
 
 * snd-seq should go, https://bugzilla.redhat.com/show_bug.cgi?id=676095
 
-* gnome-shell python script/glxinfo/is-accelerated wech
+* gnome-shell python script/glxinfo/is-accelerated must die
 
 * make cryptsetup lower --iter-time
 
-* patch kernel for xattr support in /dev, /proc/, /sys and /sys/fs/cgroup.
+* patch kernel for xattr support in /dev, /proc/, /sys and /sys/fs/cgroup?
 
 * patch kernel for cpu feature modalias for autoloading aes/kvm/...
     http://git.kernel.org/?p=linux/kernel/git/ak/linux-misc-2.6.git;a=shortlog;h=refs/heads/cpuid-match
+  (Rafael J. Wysocki's sysdev rework is on the way. After that CPUs can be exported a proper bus.)
 
 * procps, psmisc, sysvinit-tools, hostname → util-linux-ng
 

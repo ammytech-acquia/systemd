@@ -36,6 +36,10 @@
 
 #include "macro.h"
 
+#ifdef ARCH_MIPS
+#include <asm/sgidefs.h>
+#endif
+
 #ifndef RLIMIT_RTTIME
 #define RLIMIT_RTTIME 15
 #endif
@@ -72,24 +76,55 @@
 #define AUDIT_SERVICE_STOP 1131 /* Service (daemon) stop */
 #endif
 
+#ifndef TIOCVHANGUP
+#define TIOCVHANGUP 0x5437
+#endif
+
+#ifndef IP_TRANSPARENT
+#define IP_TRANSPARENT 19
+#endif
+
 static inline int pivot_root(const char *new_root, const char *put_old) {
         return syscall(SYS_pivot_root, new_root, put_old);
 }
 
 #ifdef __x86_64__
-#ifndef __NR_fanotify_init
-#define __NR_fanotify_init 300
-#endif
-#ifndef __NR_fanotify_mark
-#define __NR_fanotify_mark 301
-#endif
+#  ifndef __NR_fanotify_init
+#    define __NR_fanotify_init 300
+#  endif
+#  ifndef __NR_fanotify_mark
+#    define __NR_fanotify_mark 301
+#  endif
+#elif defined _MIPS_SIM
+#  if _MIPS_SIM == _MIPS_SIM_ABI32
+#    ifndef __NR_fanotify_init
+#      define __NR_fanotify_init 4336
+#    endif
+#    ifndef __NR_fanotify_mark
+#      define __NR_fanotify_mark 4337
+#    endif
+#  elif _MIPS_SIM == _MIPS_SIM_NABI32
+#    ifndef __NR_fanotify_init
+#      define __NR_fanotify_init 6300
+#    endif
+#    ifndef __NR_fanotify_mark
+#      define __NR_fanotify_mark 6301
+#    endif
+#  elif _MIPS_SIM == _MIPS_SIM_ABI64
+#    ifndef __NR_fanotify_init
+#      define __NR_fanotify_init 5295
+#    endif
+#    ifndef __NR_fanotify_mark
+#      define __NR_fanotify_mark 5296
+#    endif
+#  endif
 #else
-#ifndef __NR_fanotify_init
-#define __NR_fanotify_init 338
-#endif
-#ifndef __NR_fanotify_mark
-#define __NR_fanotify_mark 339
-#endif
+#  ifndef __NR_fanotify_init
+#    define __NR_fanotify_init 338
+#  endif
+#  ifndef __NR_fanotify_mark
+#    define __NR_fanotify_mark 339
+#  endif
 #endif
 
 static inline int fanotify_init(unsigned int flags, unsigned int event_f_flags) {
@@ -98,7 +133,18 @@ static inline int fanotify_init(unsigned int flags, unsigned int event_f_flags) 
 
 static inline int fanotify_mark(int fanotify_fd, unsigned int flags, uint64_t mask,
                                 int dfd, const char *pathname) {
+#if defined _MIPS_SIM && _MIPS_SIM == _MIPS_SIM_ABI32
+        union {
+                uint64_t _64;
+                uint32_t _32[2];
+        } _mask;
+        _mask._64 = mask;
+
+        return syscall(__NR_fanotify_mark, fanotify_fd, flags,
+                       _mask._32[0], _mask._32[1], dfd, pathname);
+#else
         return syscall(__NR_fanotify_mark, fanotify_fd, flags, mask, dfd, pathname);
+#endif
 }
 
 #ifndef BTRFS_IOCTL_MAGIC
@@ -120,6 +166,10 @@ struct btrfs_ioctl_vol_args {
 
 #ifndef BTRFS_SUPER_MAGIC
 #define BTRFS_SUPER_MAGIC 0x9123683E
+#endif
+
+#ifndef MS_MOVE
+#define MS_MOVE 8192
 #endif
 
 #endif

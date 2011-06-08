@@ -2,12 +2,12 @@
 .\"     Title: pam_systemd
 .\"    Author: Lennart Poettering <lennart@poettering.net>
 .\" Generator: DocBook XSL Stylesheets v1.76.1 <http://docbook.sf.net/>
-.\"      Date: 03/08/2011
+.\"      Date: 06/16/2011
 .\"    Manual: pam_systemd
 .\"    Source: systemd
 .\"  Language: English
 .\"
-.TH "PAM_SYSTEMD" "8" "03/08/2011" "systemd" "pam_systemd"
+.TH "PAM_SYSTEMD" "8" "06/16/2011" "systemd" "pam_systemd"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -48,7 +48,7 @@ On login, this module ensures the following:
 .IP "  1." 4.2
 .\}
 If it does not exist yet, the user runtime directory
-/var/run/user/$USER
+/run/user/$USER
 is created and its ownership changed to the user that is logging in\&.
 .RE
 .sp
@@ -243,6 +243,11 @@ Takes a comma separated list of cgroup controllers in which hierarchies a user/s
 Takes a comma separated list of cgroup controllers in which hierarchies the logged in processes will be reset to the root cgroup\&. If ommited, defaults to \*(Aqcpu\*(Aq, meaning that a \*(Aqcpu\*(Aq cgroup grouping inherited from the login manager will be reset for the processes of the logged in user\&.
 .RE
 .PP
+\fBdebug=\fR
+.RS 4
+Takes a boolean argument\&. If true, logs debugging information\&.
+.RE
+.PP
 Note that setting
 \fIkill\-user=1\fR
 or even
@@ -254,7 +259,6 @@ If the options are omitted they default to
 \fBcreate\-session=1\fR,
 \fBkill\-session=0\fR,
 \fBkill\-user=0\fR,
-\fBkeep\-root=1\fR,
 \fBreset\-controllers=cpu\fR,
 \fBkill\-only\-users=\fR,
 \fBkill\-exclude\-users=root\fR\&.
