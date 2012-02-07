@@ -4,12 +4,16 @@
 #export DEB_BUILD_OPTIONS="nostrip"
 
 override_dh_auto_configure:
-	dh_auto_configure -- --with-rootdir= \
+	dh_auto_configure -- \
+		--with-rootprefix= \
+		--with-rootlibdir=/lib \
 		--with-udevrulesdir=/lib/udev/rules.d \
 		--enable-gtk \
 		--enable-libcryptsetup \
 		--enable-tcpwrap \
-		--enable-selinux
+		--enable-selinux \
+                --disable-coredump \
+		--with-distro=debian
 
 override_dh_auto_clean:
 	dh_auto_clean
@@ -21,12 +25,18 @@ override_dh_auto_clean:
 override_dh_install:
 	rm debian/tmp/usr/share/doc/systemd/LICENSE
 	rm debian/tmp/lib/security/pam_systemd.la
-	# udev already triggers hwclock during boot
-	rm debian/tmp/etc/systemd/system/sysinit.target.wants/hwclock-load.service
+	rm debian/tmp/usr/lib/*.la
 	rm debian/tmp/lib/systemd/system/sysinit.target.wants/systemd-vconsole-setup.service
+	chmod +x debian/debian-fixup
 	dh_install -O--parallel --fail-missing
 	dh_install -plibpam-systemd debian/pam-configs /usr/share
-	dh_install debian/ifup@.service /lib/systemd/system
+
+autoreconf:
+	intltoolize -f -c
+	autoreconf -f -i
+
+override_dh_autoreconf:
+	dh_autoreconf debian/rules -- autoreconf
 
 %:
-	dh $@ --parallel --with autoreconf
+	dh $@ --with autoreconf

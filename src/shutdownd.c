@@ -29,11 +29,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <systemd/sd-daemon.h>
+
 #include "shutdownd.h"
 #include "log.h"
 #include "macro.h"
 #include "util.h"
-#include "sd-daemon.h"
 #include "utmp-wtmp.h"
 
 static int read_packet(int fd, struct shutdownd_command *_c) {
@@ -100,6 +101,9 @@ static int read_packet(int fd, struct shutdownd_command *_c) {
 }
 
 static void warn_wall(usec_t n, struct shutdownd_command *c) {
+        char date[FORMAT_TIMESTAMP_MAX];
+        const char *prefix;
+        char *l = NULL;
 
         assert(c);
         assert(c->warn_wall);
@@ -107,28 +111,21 @@ static void warn_wall(usec_t n, struct shutdownd_command *c) {
         if (n >= c->elapse)
                 return;
 
-        if (c->wall_message[0])
-                utmp_wall(c->wall_message, NULL);
+        if (c->mode == 'H')
+                prefix = "The system is going down for system halt at ";
+        else if (c->mode == 'P')
+                prefix = "The system is going down for power-off at ";
+        else if (c->mode == 'r')
+                prefix = "The system is going down for reboot at ";
+        else
+                assert_not_reached("Unknown mode!");
+
+        if (asprintf(&l, "%s%s%s%s!", c->wall_message, c->wall_message[0] ? "\n" : "",
+                     prefix, format_timestamp(date, sizeof(date), c->elapse)) < 0)
+                log_error("Failed to allocate wall message");
         else {
-                char date[FORMAT_TIMESTAMP_MAX];
-                const char* prefix;
-                char *l = NULL;
-
-                if (c->mode == 'H')
-                        prefix = "The system is going down for system halt at ";
-                else if (c->mode == 'P')
-                        prefix = "The system is going down for power-off at ";
-                else if (c->mode == 'r')
-                        prefix = "The system is going down for reboot at ";
-                else
-                        assert_not_reached("Unknown mode!");
-
-                if (asprintf(&l, "%s%s!", prefix, format_timestamp(date, sizeof(date), c->elapse)) < 0)
-                        log_error("Failed to allocate wall message");
-                else {
-                        utmp_wall(l, NULL);
-                        free(l);
-                }
+                utmp_wall(l, NULL);
+                free(l);
         }
 }
 
@@ -177,7 +174,6 @@ int main(int argc, char *argv[]) {
         };
 
         int r = EXIT_FAILURE, n_fds;
-        int one = 1;
         struct shutdownd_command c;
         struct pollfd pollfd[_FD_MAX];
         bool exec_shutdown = false, unlink_nologin = false, failed = false;
@@ -193,9 +189,11 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        log_set_target(LOG_TARGET_SYSLOG_OR_KMSG);
+        log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
+
+        umask(0022);
 
         if ((n_fds = sd_listen_fds(true)) < 0) {
                 log_error("Failed to read listening file descriptors from environment: %s", strerror(-r));
@@ -204,11 +202,6 @@ int main(int argc, char *argv[]) {
 
         if (n_fds != 1) {
                 log_error("Need exactly one file descriptor.");
-                return EXIT_FAILURE;
-        }
-
-        if (setsockopt(SD_LISTEN_FDS_START, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one)) < 0) {
-                log_error("SO_PASSCRED failed: %m");
                 return EXIT_FAILURE;
         }
 
@@ -320,7 +313,7 @@ int main(int argc, char *argv[]) {
 
                         log_info("Creating /run/nologin, blocking further logins...");
 
-                        if ((e = write_one_line_file("/run/nologin", "System is going down.")) < 0)
+                        if ((e = write_one_line_file_atomic("/run/nologin", "System is going down.")) < 0)
                                 log_error("Failed to create /run/nologin: %s", strerror(-e));
                         else
                                 unlink_nologin = true;
@@ -348,7 +341,7 @@ finish:
         if (unlink_nologin)
                 unlink("/run/nologin");
 
-        if (exec_shutdown) {
+        if (exec_shutdown && !c.dry_run) {
                 char sw[3];
 
                 sw[0] = '-';

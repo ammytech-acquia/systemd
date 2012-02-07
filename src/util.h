@@ -25,6 +25,7 @@
 #include <inttypes.h>
 #include <time.h>
 #include <sys/time.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -66,14 +67,17 @@ typedef struct dual_timestamp {
 #define FORMAT_TIMESTAMP_MAX 64
 #define FORMAT_TIMESTAMP_PRETTY_MAX 256
 #define FORMAT_TIMESPAN_MAX 64
+#define FORMAT_BYTES_MAX 8
 
-#define ANSI_HIGHLIGHT_ON "\x1B[1;31m"
+#define ANSI_HIGHLIGHT_ON "\x1B[1;39m"
+#define ANSI_HIGHLIGHT_RED_ON "\x1B[1;31m"
 #define ANSI_HIGHLIGHT_GREEN_ON "\x1B[1;32m"
 #define ANSI_HIGHLIGHT_OFF "\x1B[0m"
 
 usec_t now(clockid_t clock);
 
 dual_timestamp* dual_timestamp_get(dual_timestamp *ts);
+dual_timestamp* dual_timestamp_from_realtime(dual_timestamp *ts, usec_t u);
 
 #define dual_timestamp_is_set(ts) ((ts)->realtime > 0)
 
@@ -133,7 +137,10 @@ void close_many(const int fds[], unsigned n_fd);
 
 int parse_boolean(const char *v);
 int parse_usec(const char *t, usec_t *usec);
+int parse_bytes(const char *t, off_t *bytes);
 int parse_pid(const char *s, pid_t* ret_pid);
+int parse_uid(const char *s, uid_t* ret_uid);
+#define parse_gid(s, ret_uid) parse_uid(s, ret_uid)
 
 int safe_atou(const char *s, unsigned *ret_u);
 int safe_atoi(const char *s, int *ret_i);
@@ -199,8 +206,9 @@ pid_t get_parent_of_pid(pid_t pid, pid_t *ppid);
 int get_starttime_of_pid(pid_t pid, unsigned long long *st);
 
 int write_one_line_file(const char *fn, const char *line);
+int write_one_line_file_atomic(const char *fn, const char *line);
 int read_one_line_file(const char *fn, char **line);
-int read_full_file(const char *fn, char **contents);
+int read_full_file(const char *fn, char **contents, size_t *size);
 
 int parse_env_file(const char *fname, const char *separator, ...) _sentinel_;
 int load_env_file(const char *fname, char ***l);
@@ -214,6 +222,7 @@ char **replace_env_argv(char **argv, char **env);
 
 int readlink_malloc(const char *p, char **r);
 int readlink_and_make_absolute(const char *p, char **r);
+int readlink_and_canonicalize(const char *p, char **r);
 
 char *file_name_from_path(const char *p);
 bool is_path(const char *p);
@@ -224,6 +233,7 @@ char *path_make_absolute_cwd(const char *p);
 
 char **strv_path_make_absolute_cwd(char **l);
 char **strv_path_canonicalize(char **l);
+char **strv_path_remove_empty(char **l);
 
 int reset_all_signal_handlers(void);
 
@@ -240,8 +250,10 @@ int parent_of_path(const char *path, char **parent);
 
 int rmdir_parents(const char *path, const char *stop);
 
-int get_process_name(pid_t pid, char **name);
-int get_process_cmdline(pid_t pid, size_t max_length, char **line);
+int get_process_comm(pid_t pid, char **name);
+int get_process_cmdline(pid_t pid, size_t max_length, bool comm_fallback, char **line);
+int get_process_exe(pid_t pid, char **name);
+int get_process_uid(pid_t pid, uid_t *uid);
 
 char hexchar(int x);
 int unhexchar(char c);
@@ -266,6 +278,9 @@ bool path_equal(const char *a, const char *b);
 
 char *ascii_strlower(char *path);
 
+bool dirent_is_file(const struct dirent *de);
+bool dirent_is_file_with_suffix(const struct dirent *de, const char *suffix);
+
 bool ignore_file(const char *filename);
 
 bool chars_intersect(const char *a, const char *b);
@@ -279,13 +294,13 @@ int make_null_stdio(void);
 
 unsigned long long random_ull(void);
 
-#define DEFINE_STRING_TABLE_LOOKUP(name,type)                           \
-        const char *name##_to_string(type i) {                          \
+#define __DEFINE_STRING_TABLE_LOOKUP(name,type,scope)                   \
+        scope const char *name##_to_string(type i) {                    \
                 if (i < 0 || i >= (type) ELEMENTSOF(name##_table))      \
                         return NULL;                                    \
                 return name##_table[i];                                 \
         }                                                               \
-        type name##_from_string(const char *s) {                        \
+        scope type name##_from_string(const char *s) {                  \
                 type i;                                                 \
                 unsigned u = 0;                                         \
                 assert(s);                                              \
@@ -300,6 +315,8 @@ unsigned long long random_ull(void);
         }                                                               \
         struct __useless_struct_to_allow_trailing_semicolon__
 
+#define DEFINE_STRING_TABLE_LOOKUP(name,type) __DEFINE_STRING_TABLE_LOOKUP(name,type,)
+#define DEFINE_PRIVATE_STRING_TABLE_LOOKUP(name,type) __DEFINE_STRING_TABLE_LOOKUP(name,type,static)
 
 int fd_nonblock(int fd, bool nonblock);
 int fd_cloexec(int fd, bool cloexec);
@@ -310,10 +327,12 @@ bool fstype_is_network(const char *fstype);
 
 int chvt(int vt);
 
-int read_one_char(FILE *f, char *ret, bool *need_nl);
+int read_one_char(FILE *f, char *ret, usec_t timeout, bool *need_nl);
 int ask(char *ret, const char *replies, const char *text, ...);
 
-int reset_terminal(int fd);
+int reset_terminal_fd(int fd, bool switch_to_text);
+int reset_terminal(const char *name);
+
 int open_terminal(const char *name, int mode);
 int acquire_terminal(const char *name, bool fail, bool force, bool ignore_tiocstty_eperm);
 int release_terminal(void);
@@ -325,11 +344,12 @@ int default_signals(int sig, ...);
 int sigaction_many(const struct sigaction *sa, ...);
 
 int close_pipe(int p[]);
+int fopen_temporary(const char *path, FILE **_f, char **_temp_path);
 
 ssize_t loop_read(int fd, void *buf, size_t nbytes, bool do_poll);
 ssize_t loop_write(int fd, const void *buf, size_t nbytes, bool do_poll);
 
-int path_is_mount_point(const char *path);
+int path_is_mount_point(const char *path, bool allow_symlink);
 
 bool is_device_path(const char *path);
 
@@ -345,24 +365,32 @@ char* getlogname_malloc(void);
 int getttyname_malloc(int fd, char **r);
 int getttyname_harder(int fd, char **r);
 
-int get_ctty_devnr(dev_t *d);
-int get_ctty(char **r, dev_t *_devnr);
+int get_ctty_devnr(pid_t pid, dev_t *d);
+int get_ctty(pid_t, dev_t *_devnr, char **r);
 
 int chmod_and_chown(const char *path, mode_t mode, uid_t uid, gid_t gid);
+int fchmod_and_fchown(int fd, mode_t mode, uid_t uid, gid_t gid);
 
-int rm_rf(const char *path, bool only_dirs, bool delete_root);
+int rm_rf(const char *path, bool only_dirs, bool delete_root, bool honour_sticky);
+
+int pipe_eof(int fd);
 
 cpu_set_t* cpu_set_malloc(unsigned *ncpus);
 
-void status_vprintf(const char *format, va_list ap);
-void status_printf(const char *format, ...);
+void status_vprintf(const char *status, bool ellipse, const char *format, va_list ap);
+void status_printf(const char *status, bool ellipse, const char *format, ...);
 void status_welcome(void);
 
-int columns(void);
+int fd_columns(int fd);
+unsigned columns(void);
+
+int fd_lines(int fd);
+unsigned lines(void);
 
 int running_in_chroot(void);
 
-char *ellipsize(const char *s, unsigned length, unsigned percent);
+char *ellipsize(const char *s, size_t length, unsigned percent);
+char *ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigned percent);
 
 int touch(const char *path);
 
@@ -375,6 +403,7 @@ int wait_for_terminate_and_warn(const char *name, pid_t pid);
 _noreturn_ void freeze(void);
 
 bool null_or_empty(struct stat *st);
+int null_or_empty_path(const char *fn);
 
 DIR *xopendirat(int dirfd, const char *name, int flags);
 
@@ -386,11 +415,9 @@ char *fstab_node_to_udev_node(const char *p);
 void filter_environ(const char *prefix);
 
 bool tty_is_vc(const char *tty);
+bool tty_is_vc_resolve(const char *tty);
+int vtnr_from_tty(const char *tty);
 const char *default_term_for_tty(const char *tty);
-
-int detect_vm(const char **id);
-int detect_container(const char **id);
-int detect_virtualization(const char **id);
 
 void execute_directory(const char *directory, DIR *_d, char *argv[]);
 
@@ -401,6 +428,8 @@ bool nulstr_contains(const char*nulstr, const char *needle);
 bool plymouth_running(void);
 
 void parse_syslog_priority(char **p, int *priority);
+void skip_syslog_pid(char **buf);
+void skip_syslog_date(char **buf);
 
 int have_effective_cap(int value);
 
@@ -408,6 +437,53 @@ bool hostname_is_valid(const char *s);
 char* hostname_cleanup(char *s);
 
 char* strshorten(char *s, size_t l);
+
+int terminal_vhangup_fd(int fd);
+int terminal_vhangup(const char *name);
+
+int vt_disallocate(const char *name);
+
+int copy_file(const char *from, const char *to);
+int symlink_or_copy(const char *from, const char *to);
+int symlink_or_copy_atomic(const char *from, const char *to);
+
+int fchmod_umask(int fd, mode_t mode);
+
+int conf_files_list(char ***strv, const char *suffix, const char *dir, ...);
+
+int hwclock_is_localtime(void);
+int hwclock_apply_localtime_delta(int *min);
+int hwclock_reset_localtime_delta(void);
+int hwclock_get_time(struct tm *tm);
+int hwclock_set_time(const struct tm *tm);
+
+int audit_session_from_pid(pid_t pid, uint32_t *id);
+int audit_loginuid_from_pid(pid_t pid, uid_t *uid);
+
+bool display_is_local(const char *display);
+int socket_from_display(const char *display, char **path);
+
+int get_user_creds(const char **username, uid_t *uid, gid_t *gid, const char **home);
+int get_group_creds(const char **groupname, gid_t *gid);
+
+int glob_exists(const char *path);
+
+int dirent_ensure_type(DIR *d, struct dirent *de);
+
+int in_search_path(const char *path, char **search);
+int get_files_in_directory(const char *path, char ***list);
+
+char *join(const char *x, ...) _sentinel_;
+
+bool is_main_thread(void);
+
+bool in_charset(const char *s, const char* charset);
+
+int block_get_whole_disk(dev_t d, dev_t *ret);
+
+int file_is_priv_sticky(const char *p);
+
+int strdup_or_null(const char *a, char **b);
 
 #define NULSTR_FOREACH(i, l)                                    \
         for ((i) = (l); (i) && *(i); (i) = strchr((i), 0)+1)
@@ -440,5 +516,27 @@ const char *signal_to_string(int i);
 int signal_from_string(const char *s);
 
 int signal_from_string_try_harder(const char *s);
+
+extern int saved_argc;
+extern char **saved_argv;
+
+bool kexec_loaded(void);
+
+int prot_from_flags(int flags);
+
+unsigned long cap_last_cap(void);
+
+char *format_bytes(char *buf, size_t l, off_t t);
+
+int fd_wait_for_event(int fd, int event, usec_t timeout);
+
+void* memdup(const void *p, size_t l);
+
+int rtc_open(int flags);
+
+int is_kernel_thread(pid_t pid);
+
+int fd_inc_sndbuf(int fd, size_t n);
+int fd_inc_rcvbuf(int fd, size_t n);
 
 #endif

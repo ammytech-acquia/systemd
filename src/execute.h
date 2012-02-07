@@ -35,11 +35,10 @@ typedef struct ExecContext ExecContext;
 #include <sched.h>
 
 struct CGroupBonding;
+struct CGroupAttribute;
 
 #include "list.h"
 #include "util.h"
-
-#define LOGGER_SOCKET "/run/systemd/logger"
 
 typedef enum KillMode {
         KILL_CONTROL_GROUP = 0,
@@ -75,6 +74,8 @@ typedef enum ExecOutput {
         EXEC_OUTPUT_SYSLOG_AND_CONSOLE,
         EXEC_OUTPUT_KMSG,
         EXEC_OUTPUT_KMSG_AND_CONSOLE,
+        EXEC_OUTPUT_JOURNAL,
+        EXEC_OUTPUT_JOURNAL_AND_CONSOLE,
         EXEC_OUTPUT_SOCKET,
         _EXEC_OUTPUT_MAX,
         _EXEC_OUTPUT_INVALID = -1
@@ -123,6 +124,12 @@ struct ExecContext {
 
         char *tty_path;
 
+        bool tty_reset;
+        bool tty_vhangup;
+        bool tty_vt_disallocate;
+
+        bool ignore_sigpipe;
+
         /* Since resolving these names might might involve socket
          * connections and we don't want to deadlock ourselves these
          * names are resolved on execution only and in the child
@@ -155,6 +162,10 @@ struct ExecContext {
         bool cpu_sched_reset_on_fork;
         bool non_blocking;
         bool private_tmp;
+        bool private_network;
+
+        bool control_group_modify;
+        int control_group_persistent;
 
         /* This is not exposed to the user but available
          * internally. We need it to make sure that whenever we spawn
@@ -180,6 +191,7 @@ int exec_spawn(ExecCommand *command,
                bool apply_tty_stdin,
                bool confirm_spawn,
                struct CGroupBonding *cgroup_bondings,
+               struct CGroupAttribute *cgroup_attributes,
                pid_t *ret);
 
 void exec_command_done(ExecCommand *c);
@@ -198,18 +210,19 @@ int exec_command_set(ExecCommand *c, const char *path, ...);
 void exec_context_init(ExecContext *c);
 void exec_context_done(ExecContext *c);
 void exec_context_dump(ExecContext *c, FILE* f, const char *prefix);
+void exec_context_tty_reset(const ExecContext *context);
 
 int exec_context_load_environment(const ExecContext *c, char ***l);
 
 void exec_status_start(ExecStatus *s, pid_t pid);
-void exec_status_exit(ExecStatus *s, pid_t pid, int code, int status, const char *utmp_id);
+void exec_status_exit(ExecStatus *s, ExecContext *context, pid_t pid, int code, int status);
 void exec_status_dump(ExecStatus *s, FILE *f, const char *prefix);
 
 const char* exec_output_to_string(ExecOutput i);
-int exec_output_from_string(const char *s);
+ExecOutput exec_output_from_string(const char *s);
 
 const char* exec_input_to_string(ExecInput i);
-int exec_input_from_string(const char *s);
+ExecInput exec_input_from_string(const char *s);
 
 const char *kill_mode_to_string(KillMode k);
 KillMode kill_mode_from_string(const char *s);

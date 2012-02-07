@@ -1,3 +1,144 @@
+systemd (43-1) experimental; urgency=low
+
+  [ Tollef Fog Heen ]
+  * Target upload at experimental due to libkmod dependency
+  * New upstream release
+    - Update bash-completion for new verbs and arguments. Closes: #650739
+    - Fixes local DoS (CVE-2012-1101).  Closes: #662029
+    - No longer complains if the kernel lacks audit support.  Closes: #642503
+  * Fix up git-to-source package conversion script which makes gitpkg
+    happier.
+  * Add libkmod-dev to build-depends
+  * Add symlink from /bin/systemd to /lib/systemd/systemd.
+  * Add --with-distro=debian to configure flags, due to no /etc/os-release
+    yet.
+  * Add new symbols for libsystemd-login0 to symbols file.
+  * Install a tmpfiles.d file for the /dev/initctl → /run/initctl
+    migration.  Closes: #657979
+  * Disable coredump handling, it's not ready yet.
+  * If /run is a symlink, don't try to do the /var/run → /run migration.
+    Ditto for /var/lock → /run/lock.  Closes: #647495
+
+  [ Michael Biebl ]
+  * Add Build-Depends on liblzma-dev for journal log compression.
+  * Add Build-Depends on libgee-dev, required to build systemadm.
+  * Bump Standards-Version to 3.9.2. No further changes.
+  * Add versioned Build-Depends on automake and autoconf to ensure we have
+    recent enough versions. Closes: #657284
+  * Add packages for libsystemd-journal and libsystemd-id128.
+  * Update symbols file for libsystemd-login.
+  * Update configure flags, use rootprefix instead of rootdir.
+  * Copy intltool files instead of symlinking them.
+  * Re-indent init-functions script.
+  * Remove workarounds for services using X-Interactive. The LSB X-Interactive
+    support turned out to be broken and has been removed upstream so we no
+    longer need any special handling for those type of services.
+  * Install new systemd-journalctl, systemd-cat and systemd-cgtop binaries.
+  * Install /var/lib/systemd directory.
+  * Install /var/log/journal directory where the journal files are stored
+    persistently.
+  * Setup systemd-journald to not read from /proc/kmsg (ImportKernel=no).
+  * Avoid error messages from systemctl in postinst if systemd is not running
+    by checking for /sys/fs/cgroup/systemd before executing systemctl.
+    Closes: #642749
+  * Stop installing lib-init-rw (auto)mount units and try to cleanup
+    /lib/init/rw in postinst. Bump dependency on initscripts accordingly.
+    Closes: #643699
+  * Disable pam_systemd for non-interactive sessions to work around an issue
+    with sudo.
+  * Use new dh_installdeb maintscript facility to handle obsolete conffiles.
+    Bump Build-Depends on debhelper accordingly.
+  * Rename bash completion file systemctl-bash-completion.sh →
+    systemd-bash-completion.sh.
+  * Update /sbin/init symlink. The systemd binary was moved to $pkglibdir.
+
+ -- Tollef Fog Heen <tfheen@debian.org>  Tue, 07 Feb 2012 21:36:34 +0100
+
+systemd (37-1.1) unstable; urgency=low
+
+  * Non-maintainer upload with Tollef's consent.
+  * Remove --parallel to workaround a bug in automake 1.11.3 which doesn't
+    generate parallel-safe build rules. Closes: #661842
+  * Create a compat symlink /run/initctl → /dev/initctl to work with newer
+    versions of sysvinit. Closes: #657979
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 03 Mar 2012 17:42:10 +0100
+
+systemd (37-1) unstable; urgency=low
+
+  [ Tollef Fog Heen ]
+  * New upstream version
+  * Change the type of the debian-fixup service to oneshot.
+    Closes: #642961
+  * Add ConditionPathIsDirectory to lib-init-rw.automount and
+    lib-init-rw.mount so we only activate the unit if the directory
+    exists.  Closes: #633059
+  * If a sysv service exists in both rcS and rcN.d runlevels, drop the
+    rcN.d ones to avoid loops.  Closes: #637037
+  * Blacklist fuse init script, we do the same work already internally.
+    Closes: #643700
+  * Update README.Debian slightly for /run rather than /lib/init/rw
+
+  [ Josh Triplett ]
+  * Do a one-time migration of the $TMPTIME setting from /etc/default/rcS to
+    /etc/tmpfiles.d/tmp.conf. If /etc/default/rcS has a TMPTIME setting of
+    "infinite" or equivalent, migrate it to an /etc/tmpfiles.d/tmp.conf that
+    overrides the default /usr/lib/tmpfiles.d/tmp.conf and avoids clearing
+    /tmp.  Closes: #643698
+
+ -- Tollef Fog Heen <tfheen@debian.org>  Wed, 28 Sep 2011 20:04:13 +0200
+
+systemd (36-1) unstable; urgency=low
+
+  [ Tollef Fog Heen ]
+  * New upstream release. Closes: #634618
+    - Various man page fixes. Closes: #623521
+  * Add debian-fixup service that symlinks mtab to /proc/mounts and
+    migrates /var/run and /var/lock to symlinks to /run
+
+  [ Michael Biebl ]
+  * Build for libnotify 0.7.
+  * Bump Build-Depends on libudev to (>= 172).
+  * Add Build-Depends on libacl1-dev. Required for building systemd-logind
+    with ACL support.
+  * Split libsystemd-login and libsystemd-daemon into separate binary
+    packages.
+  * As autoreconf doesn't like intltool, override dh_autoreconf and call
+    intltoolize and autoreconf ourselves.
+  * Add Build-Depends on intltool.
+  * Do a one-time migration of the hwclock configuration. If UTC is set to
+    "no" in /etc/default/rcS, create /etc/adjtime and add the "LOCAL" setting.
+  * Remove /cgroup cleanup code from postinst.
+  * Add Build-Depends on gperf.
+
+ -- Tollef Fog Heen <tfheen@debian.org>  Wed, 14 Sep 2011 08:25:17 +0200
+
+systemd (29-1) unstable; urgency=low
+
+  [ Tollef Fog Heen ]
+  * New upstream version, Closes: #630510
+    - Includes typo fixes in documentation.  Closes: #623520
+  * Fall back to the init script reload function if a native .service file
+    doesn't know how to reload.  Closes: #628186
+  * Add hard dependency on udev.  Closes: #627921
+
+  [ Michael Biebl ]
+  * hwclock-load.service is no longer installed, so we don't need to remove it
+    anymore in debian/rules.
+  * Install /usr/lib directory for binfmt.d, modules-load.d, tmpfiles.d and
+    sysctl.d.
+  * Remove obsolete conffiles from /etc/tmpfiles.d on upgrades. Those files
+    are installed in /usr/lib/tmpfiles.d now.
+  * Depend on util-linux (>= 2.19.1-2) which provides whole-disk locking
+    support in fsck and remove our revert patch.
+  * Don't choke when systemd was compiled with a different CAP_LAST_CAP then
+    what it is run with. Patch cherry-picked from upstream Git.
+    Closes: #628081
+  * Enable dev-hugepages.automount and dev-mqueue.automount only when enabled
+    in kernel. Patch cherry-picked from upstream Git.  Closes: #624522
+
+ -- Tollef Fog Heen <tfheen@debian.org>  Wed, 08 Jun 2011 16:14:31 +0200
+
 systemd (25-2) experimental; urgency=low
 
   * Handle downgrades more gracefully by removing diversion of

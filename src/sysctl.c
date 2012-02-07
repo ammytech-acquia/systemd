@@ -25,11 +25,16 @@
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
+#include <getopt.h>
 
 #include "log.h"
+#include "strv.h"
 #include "util.h"
+#include "strv.h"
 
 #define PROC_SYS_PREFIX "/proc/sys/"
+
+static char **arg_prefixes = NULL;
 
 static int apply_sysctl(const char *property, const char *value) {
         char *p, *n;
@@ -37,7 +42,8 @@ static int apply_sysctl(const char *property, const char *value) {
 
         log_debug("Setting '%s' to '%s'", property, value);
 
-        if (!(p = new(char, sizeof(PROC_SYS_PREFIX) + strlen(property)))) {
+        p = new(char, sizeof(PROC_SYS_PREFIX) + strlen(property));
+        if (!p) {
                 log_error("Out of memory");
                 return -ENOMEM;
         }
@@ -49,7 +55,25 @@ static int apply_sysctl(const char *property, const char *value) {
                 if (*n == '.')
                         *n = '/';
 
-        if ((k = write_one_line_file(p, value)) < 0) {
+        if (!strv_isempty(arg_prefixes)) {
+                char **i;
+                bool good = false;
+
+                STRV_FOREACH(i, arg_prefixes)
+                        if (path_startswith(p, *i)) {
+                                good = true;
+                                break;
+                        }
+
+                if (!good) {
+                        log_debug("Skipping %s", p);
+                        free(p);
+                        return 0;
+                }
+        }
+
+        k = write_one_line_file(p, value);
+        if (k < 0) {
 
                 log_full(k == -ENOENT ? LOG_DEBUG : LOG_WARNING,
                          "Failed to write '%s' to '%s': %s", value, p, strerror(-k));
@@ -77,6 +101,7 @@ static int apply_file(const char *path, bool ignore_enoent) {
                 return -errno;
         }
 
+        log_debug("apply: %s\n", path);
         while (!feof(f)) {
                 char l[LINE_MAX], *p, *value;
                 int k;
@@ -119,61 +144,82 @@ finish:
         return r;
 }
 
-static int scandir_filter(const struct dirent *d) {
-        assert(d);
+static int help(void) {
 
-        if (ignore_file(d->d_name))
-                return 0;
+        printf("%s [OPTIONS...] [CONFIGURATION FILE...]\n\n"
+               "Applies kernel sysctl settings.\n\n"
+               "  -h --help             Show this help\n"
+               "     --prefix=PATH      Only apply rules that apply to paths with the specified prefix\n",
+               program_invocation_short_name);
 
-        if (d->d_type != DT_REG &&
-            d->d_type != DT_LNK &&
-            d->d_type != DT_UNKNOWN)
-                return 0;
-
-        return endswith(d->d_name, ".conf");
+        return 0;
 }
 
-static int apply_tree(const char *path) {
-        struct dirent **de = NULL;
-        int n, i, r = 0;
+static int parse_argv(int argc, char *argv[]) {
 
-        if ((n = scandir(path, &de, scandir_filter, alphasort)) < 0) {
+        enum {
+                ARG_PREFIX
+        };
 
-                if (errno == ENOENT)
+        static const struct option options[] = {
+                { "help",      no_argument,       NULL, 'h'           },
+                { "prefix",    required_argument, NULL, ARG_PREFIX    },
+                { NULL,        0,                 NULL, 0             }
+        };
+
+        int c;
+
+        assert(argc >= 0);
+        assert(argv);
+
+        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0) {
+
+                switch (c) {
+
+                case 'h':
+                        help();
                         return 0;
 
-                log_error("Failed to enumerate %s files: %m", path);
-                return -errno;
-        }
+                case ARG_PREFIX: {
+                        char *p;
+                        char **l;
 
-        for (i = 0; i < n; i++) {
-                char *fn;
-                int k;
+                        for (p = optarg; *p; p++)
+                                if (*p == '.')
+                                        *p = '/';
 
-                k = asprintf(&fn, "%s/%s", path, de[i]->d_name);
-                free(de[i]);
+                        l = strv_append(arg_prefixes, optarg);
+                        if (!l) {
+                                log_error("Out of memory");
+                                return -ENOMEM;
+                        }
 
-                if (k < 0) {
-                        log_error("Failed to allocate file name.");
+                        strv_free(arg_prefixes);
+                        arg_prefixes = l;
 
-                        if (r == 0)
-                                r = -ENOMEM;
-                        continue;
+                        break;
                 }
 
-                if ((k = apply_file(fn, true)) < 0 && r == 0)
-                        r = k;
+                case '?':
+                        return -EINVAL;
+
+                default:
+                        log_error("Unknown option code %c", c);
+                        return -EINVAL;
+                }
         }
 
-        free(de);
-
-        return r;
+        return 1;
 }
 
 int main(int argc, char *argv[]) {
         int r = 0;
 
-        if (argc > 2) {
+        r = parse_argv(argc, argv);
+        if (r <= 0)
+                return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+
+        if (argc-optind > 1) {
                 log_error("This program expects one or no arguments.");
                 return EXIT_FAILURE;
         }
@@ -182,16 +228,39 @@ int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
 
-        if (argc > 1)
-                r = apply_file(argv[1], false);
+        umask(0022);
+
+        if (argc > optind)
+                r = apply_file(argv[optind], false);
         else {
-                int k;
+                char **files, **f;
 
-                r = apply_file("/etc/sysctl.conf", true);
+                r = conf_files_list(&files, ".conf",
+                                    "/run/sysctl.d",
+                                    "/etc/sysctl.d",
+                                    "/usr/local/lib/sysctl.d",
+                                    "/usr/lib/sysctl.d",
+                                    "/lib/sysctl.d",
+                                    NULL);
+                if (r < 0) {
+                        log_error("Failed to enumerate sysctl.d files: %s", strerror(-r));
+                        goto finish;
+                }
 
-                if ((k = apply_tree("/etc/sysctl.d")) < 0 && r == 0)
-                        r = k;
+                STRV_FOREACH(f, files) {
+                        int k;
+
+                        k = apply_file(*f, true);
+                        if (k < 0 && r == 0)
+                                r = k;
+                }
+
+                apply_file("/etc/sysctl.conf", true);
+
+                strv_free(files);
         }
+finish:
+        strv_free(arg_prefixes);
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

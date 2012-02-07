@@ -78,7 +78,7 @@
 
                 <para>All swap units automatically get the appropriate
                 dependencies on the devices (resp. on the mount points
-                of the files) they are actived from.</para>
+                of the files) they are activated from.</para>
 
                 <para>Swap units with
                 <varname>DefaultDependencies=</varname> enabled
@@ -166,7 +166,7 @@
                                 a time span value such as "5min
                                 20s". Pass 0 to disable the timeout
                                 logic. Defaults to
-                                3min.</para></listitem>
+                                90s.</para></listitem>
                         </varlistentry>
 
                         <varlistentry>

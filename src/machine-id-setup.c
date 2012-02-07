@@ -27,21 +27,25 @@
 #include <fcntl.h>
 #include <sys/mount.h>
 
+#include <systemd/sd-id128.h>
+
 #include "machine-id-setup.h"
 #include "macro.h"
 #include "util.h"
 #include "log.h"
 
 static int generate(char id[34]) {
-        int fd;
-        char buf[16];
-        char *p, *q;
+        int fd, r;
+        unsigned char *p;
+        sd_id128_t buf;
+        char *q;
         ssize_t k;
 
         assert(id);
 
         /* First, try reading the D-Bus machine id, unless it is a symlink */
-        if ((fd = open("/var/lib/dbus/machine-id", O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW)) >= 0) {
+        fd = open("/var/lib/dbus/machine-id", O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+        if (fd >= 0) {
 
                 k = loop_read(fd, id, 33, false);
                 close_nointr_nofail(fd);
@@ -56,20 +60,13 @@ static int generate(char id[34]) {
         }
 
         /* If that didn't work, generate a random machine id */
-        if ((fd = open("/dev/urandom", O_RDONLY|O_CLOEXEC|O_NOCTTY)) < 0) {
-                log_error("Failed to open /dev/urandom: %m");
-                return -errno;
+        r = sd_id128_randomize(&buf);
+        if (r < 0) {
+                log_error("Failed to open /dev/urandom: %s", strerror(-r));
+                return r;
         }
 
-        k = loop_read(fd, buf, sizeof(buf), false);
-        close_nointr_nofail(fd);
-
-        if (k != sizeof(buf)) {
-                log_error("Failed to read /dev/urandom: %s", strerror(k < 0 ? -k : EIO));
-                return k < 0 ? (int) k : -EIO;
-        }
-
-        for (p = buf, q = id; p < buf + sizeof(buf); p++, q += 2) {
+        for (p = buf.bytes, q = id; p < buf.bytes + sizeof(buf); p++, q += 2) {
                 q[0] = hexchar(*p >> 4);
                 q[1] = hexchar(*p & 15);
         }
@@ -96,10 +93,12 @@ int machine_id_setup(void) {
          * will be owned by root it doesn't matter much, but maybe
          * people look. */
 
-        if ((fd = open("/etc/machine-id", O_RDWR|O_CREAT|O_CLOEXEC|O_NOCTTY, 0444)) >= 0)
+        fd = open("/etc/machine-id", O_RDWR|O_CREAT|O_CLOEXEC|O_NOCTTY, 0444);
+        if (fd >= 0)
                 writable = true;
         else {
-                if ((fd = open("/etc/machine-id", O_RDONLY|O_CLOEXEC|O_NOCTTY)) < 0) {
+                fd = open("/etc/machine-id", O_RDONLY|O_CLOEXEC|O_NOCTTY);
+                if (fd < 0) {
                         umask(m);
                         log_error("Cannot open /etc/machine-id: %m");
                         return -errno;
@@ -126,7 +125,8 @@ int machine_id_setup(void) {
         /* Hmm, so, the id currently stored is not useful, then let's
          * generate one */
 
-        if ((r = generate(id)) < 0)
+        r = generate(id);
+        if (r < 0)
                 goto finish;
 
         if (S_ISREG(st.st_mode) && writable) {
@@ -146,7 +146,11 @@ int machine_id_setup(void) {
 
         mkdir_p("/run/systemd", 0755);
 
-        if ((r = write_one_line_file("/run/systemd/machine-id", id)) < 0) {
+        m = umask(0022);
+        r = write_one_line_file("/run/systemd/machine-id", id);
+        umask(m);
+
+        if (r < 0) {
                 log_error("Cannot write /run/systemd/machine-id: %s", strerror(-r));
 
                 unlink("/run/systemd/machine-id");

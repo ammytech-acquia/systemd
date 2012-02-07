@@ -74,7 +74,10 @@ void hashmap_clear(Hashmap *h);
 void *hashmap_steal_first(Hashmap *h);
 void *hashmap_steal_first_key(Hashmap *h);
 void* hashmap_first(Hashmap *h);
+void* hashmap_first_key(Hashmap *h);
 void* hashmap_last(Hashmap *h);
+
+char **hashmap_get_strv(Hashmap *h);
 
 #define HASHMAP_FOREACH(e, h, i) \
         for ((i) = ITERATOR_FIRST, (e) = hashmap_iterate((h), &(i), NULL); (e); (e) = hashmap_iterate((h), &(i), NULL))

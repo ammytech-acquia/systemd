@@ -389,6 +389,7 @@ int socket_address_listen(
                 SocketAddressBindIPv6Only only,
                 const char *bind_to_device,
                 bool free_bind,
+                bool transparent,
                 mode_t directory_mode,
                 mode_t socket_mode,
                 const char *label,
@@ -433,6 +434,12 @@ int socket_address_listen(
                         if (setsockopt(fd, IPPROTO_IP, IP_FREEBIND, &one, sizeof(one)) < 0)
                                 log_warning("IP_FREEBIND failed: %m");
                 }
+
+                if (transparent) {
+                        one = 1;
+                        if (setsockopt(fd, IPPROTO_IP, IP_TRANSPARENT, &one, sizeof(one)) < 0)
+                                log_warning("IP_TRANSPARENT failed: %m");
+                }
         }
 
         one = 1;
@@ -451,7 +458,7 @@ int socket_address_listen(
                 /* Include the original umask in our mask */
                 umask(~socket_mode | old_mask);
 
-                r = bind(fd, &a->sockaddr.sa, a->size);
+                r = label_bind(fd, &a->sockaddr.sa, a->size);
 
                 if (r < 0 && errno == EADDRINUSE) {
                         /* Unlink and try again */

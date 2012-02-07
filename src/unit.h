@@ -25,13 +25,13 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-typedef union Unit Unit;
-typedef struct Meta Meta;
+typedef struct Unit Unit;
 typedef struct UnitVTable UnitVTable;
 typedef enum UnitType UnitType;
 typedef enum UnitLoadState UnitLoadState;
 typedef enum UnitActiveState UnitActiveState;
 typedef enum UnitDependency UnitDependency;
+typedef struct UnitRef UnitRef;
 
 #include "set.h"
 #include "util.h"
@@ -39,6 +39,7 @@ typedef enum UnitDependency UnitDependency;
 #include "socket-util.h"
 #include "execute.h"
 #include "condition.h"
+#include "install.h"
 
 enum UnitType {
         UNIT_SERVICE = 0,
@@ -118,6 +119,14 @@ enum UnitDependency {
         /* On Failure */
         UNIT_ON_FAILURE,
 
+        /* Triggers (i.e. a socket triggers a service) */
+        UNIT_TRIGGERS,
+        UNIT_TRIGGERED_BY,
+
+        /* Propagate reloads */
+        UNIT_PROPAGATE_RELOAD_TO,
+        UNIT_PROPAGATE_RELOAD_FROM,
+
         /* Reference information for GC logic */
         UNIT_REFERENCES,              /* Inverse of 'references' is 'referenced_by' */
         UNIT_REFERENCED_BY,
@@ -129,8 +138,9 @@ enum UnitDependency {
 #include "manager.h"
 #include "job.h"
 #include "cgroup.h"
+#include "cgroup-attr.h"
 
-struct Meta {
+struct Unit {
         Manager *manager;
 
         UnitType type;
@@ -154,6 +164,9 @@ struct Meta {
 
         usec_t job_timeout;
 
+        /* References to this */
+        LIST_HEAD(UnitRef, refs);
+
         /* Conditions to check */
         LIST_HEAD(Condition, conditions);
 
@@ -166,21 +179,22 @@ struct Meta {
 
         /* Counterparts in the cgroup filesystem */
         CGroupBonding *cgroup_bondings;
+        CGroupAttribute *cgroup_attributes;
 
         /* Per type list */
-        LIST_FIELDS(Meta, units_per_type);
+        LIST_FIELDS(Unit, units_by_type);
 
         /* Load queue */
-        LIST_FIELDS(Meta, load_queue);
+        LIST_FIELDS(Unit, load_queue);
 
         /* D-Bus queue */
-        LIST_FIELDS(Meta, dbus_queue);
+        LIST_FIELDS(Unit, dbus_queue);
 
         /* Cleanup queue */
-        LIST_FIELDS(Meta, cleanup_queue);
+        LIST_FIELDS(Unit, cleanup_queue);
 
         /* GC queue */
-        LIST_FIELDS(Meta, gc_queue);
+        LIST_FIELDS(Unit, gc_queue);
 
         /* Used during GC sweeps */
         unsigned gc_marker;
@@ -191,6 +205,9 @@ struct Meta {
 
         /* Error code when we didn't manage to load the unit (negative) */
         int load_error;
+
+        /* Cached unit file state */
+        UnitFileState unit_file_state;
 
         /* Garbage collect us we nobody wants or requires us anymore */
         bool stop_when_unneeded;
@@ -213,6 +230,9 @@ struct Meta {
         /* Ignore this unit when isolating */
         bool ignore_on_isolate;
 
+        /* Ignore this unit when snapshotting */
+        bool ignore_on_snapshot;
+
         /* Did the last condition check suceed? */
         bool condition_result;
 
@@ -228,6 +248,15 @@ struct Meta {
         bool in_audit:1;
 };
 
+struct UnitRef {
+        /* Keeps tracks of references to a unit. This is useful so
+         * that we can merge two units if necessary and correct all
+         * references to them */
+
+        Unit* unit;
+        LIST_FIELDS(UnitRef, refs);
+};
+
 #include "service.h"
 #include "timer.h"
 #include "socket.h"
@@ -239,22 +268,15 @@ struct Meta {
 #include "swap.h"
 #include "path.h"
 
-union Unit {
-        Meta meta;
-        Service service;
-        Timer timer;
-        Socket socket;
-        Target target;
-        Device device;
-        Mount mount;
-        Automount automount;
-        Snapshot snapshot;
-        Swap swap;
-        Path path;
-};
-
 struct UnitVTable {
         const char *suffix;
+
+        /* How much memory does an object of this unit type need */
+        size_t object_size;
+
+        /* Config file sections this unit type understands, separated
+         * by NUL chars */
+        const char *sections;
 
         /* This should reset all type-specific variables. This should
          * not allocate memory, and is called with zero-initialized
@@ -314,6 +336,9 @@ struct UnitVTable {
         void (*sigchld_event)(Unit *u, pid_t pid, int code, int status);
         void (*timer_event)(Unit *u, uint64_t n_elapsed, Watch *w);
 
+        /* Check whether unit needs a daemon reload */
+        bool (*need_daemon_reload)(Unit *u);
+
         /* Reset failed state if we are in failed state */
         void (*reset_failed)(Unit *u);
 
@@ -364,9 +389,6 @@ struct UnitVTable {
         /* Instances make no sense for this type */
         bool no_instances:1;
 
-        /* Exclude this type from snapshots */
-        bool no_snapshots:1;
-
         /* Exclude from automatic gc */
         bool no_gc:1;
 
@@ -376,19 +398,19 @@ struct UnitVTable {
 
 extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
 
-#define UNIT_VTABLE(u) unit_vtable[(u)->meta.type]
+#define UNIT_VTABLE(u) unit_vtable[(u)->type]
 
 /* For casting a unit into the various unit types */
 #define DEFINE_CAST(UPPERCASE, MixedCase)                               \
         static inline MixedCase* UPPERCASE(Unit *u) {                   \
-                if (_unlikely_(!u || u->meta.type != UNIT_##UPPERCASE)) \
+                if (_unlikely_(!u || u->type != UNIT_##UPPERCASE))      \
                         return NULL;                                    \
                                                                         \
                 return (MixedCase*) u;                                  \
         }
 
 /* For casting the various unit types into a unit */
-#define UNIT(u) ((Unit*) (&(u)->meta))
+#define UNIT(u) (&(u)->meta)
 
 DEFINE_CAST(SOCKET, Socket);
 DEFINE_CAST(TIMER, Timer);
@@ -401,7 +423,7 @@ DEFINE_CAST(SNAPSHOT, Snapshot);
 DEFINE_CAST(SWAP, Swap);
 DEFINE_CAST(PATH, Path);
 
-Unit *unit_new(Manager *m);
+Unit *unit_new(Manager *m, size_t size);
 void unit_free(Unit *u);
 
 int unit_add_name(Unit *u, const char *name);
@@ -421,6 +443,7 @@ int unit_add_cgroup(Unit *u, CGroupBonding *b);
 int unit_add_cgroup_from_text(Unit *u, const char *name);
 int unit_add_default_cgroups(Unit *u);
 CGroupBonding* unit_get_default_cgroup(Unit *u);
+int unit_add_cgroup_attribute(Unit *u, const char *controller, const char *name, const char *value, CGroupAttributeMapCallback map_callback);
 
 int unit_choose_id(Unit *u, const char *name);
 int unit_set_description(Unit *u, const char *description);
@@ -498,7 +521,7 @@ int unit_add_node_link(Unit *u, const char *what, bool wants);
 
 int unit_coldplug(Unit *u);
 
-void unit_status_printf(Unit *u, const char *format, ...);
+void unit_status_printf(Unit *u, const char *status, const char *format, ...);
 
 bool unit_need_daemon_reload(Unit *u);
 
@@ -519,6 +542,13 @@ bool unit_name_is_valid(const char *n, bool template_ok);
 void unit_trigger_on_failure(Unit *u);
 
 bool unit_condition_test(Unit *u);
+
+UnitFileState unit_get_unit_file_state(Unit *u);
+
+Unit* unit_ref_set(UnitRef *ref, Unit *u);
+void unit_ref_unset(UnitRef *ref);
+
+#define UNIT_DEREF(ref) ((ref).unit)
 
 const char *unit_load_state_to_string(UnitLoadState i);
 UnitLoadState unit_load_state_from_string(const char *s);

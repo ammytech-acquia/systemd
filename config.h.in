@@ -9,6 +9,12 @@
 /* Target Distribution */
 #undef DISTRIBUTION
 
+/* ACL available */
+#undef HAVE_ACL
+
+/* Define to 1 if you have the <acl/libacl.h> header file. */
+#undef HAVE_ACL_LIBACL_H
+
 /* AUDIT available */
 #undef HAVE_AUDIT
 
@@ -48,6 +54,9 @@
 /* Define if SELinux is available */
 #undef HAVE_SELINUX
 
+/* Define if /bin, /sbin aren't symlinks into /usr */
+#undef HAVE_SPLIT_USR
+
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
 
@@ -63,6 +72,9 @@
 /* SysV init scripts and rcN.d links are supported. */
 #undef HAVE_SYSV_COMPAT
 
+/* Define to 1 if you have the <sys/acl.h> header file. */
+#undef HAVE_SYS_ACL_H
+
 /* Define to 1 if you have the <sys/capability.h> header file. */
 #undef HAVE_SYS_CAPABILITY_H
 
@@ -74,6 +86,9 @@
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
+
+/* Define if XZ is available */
+#undef HAVE_XZ
 
 /* Define to the sub-directory in which libtool stores uninstalled libraries.
    */
@@ -109,6 +124,9 @@
 /* Target is ALTLinux */
 #undef TARGET_ALTLINUX
 
+/* Target is Ångström */
+#undef TARGET_ANGSTROM
+
 /* Target is ArchLinux */
 #undef TARGET_ARCH
 
@@ -123,6 +141,9 @@
 
 /* Target is Gentoo */
 #undef TARGET_GENTOO
+
+/* Target is Mageia */
+#undef TARGET_MAGEIA
 
 /* Target is Mandriva */
 #undef TARGET_MANDRIVA
@@ -166,6 +187,12 @@
 
 /* Version number of package */
 #undef VERSION
+
+/* Number of bits in a file offset, on hosts where this is settable. */
+#undef _FILE_OFFSET_BITS
+
+/* Define for large files, on AIX-style hosts. */
+#undef _LARGE_FILES
 
 /* Define to 1 if on MINIX. */
 #undef _MINIX

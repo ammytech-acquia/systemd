@@ -2,12 +2,12 @@
 .\"     Title: systemd.swap
 .\"    Author: Lennart Poettering <lennart@poettering.net>
 .\" Generator: DocBook XSL Stylesheets v1.76.1 <http://docbook.sf.net/>
-.\"      Date: 04/21/2011
+.\"      Date: 02/15/2012
 .\"    Manual: systemd.swap
 .\"    Source: systemd
 .\"  Language: English
 .\"
-.TH "SYSTEMD\&.SWAP" "5" "04/21/2011" "systemd" "systemd.swap"
+.TH "SYSTEMD\&.SWAP" "5" "02/15/2012" "systemd" "systemd.swap"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -48,7 +48,7 @@ must be configured in a unit file
 dev\-sda5\&.swap\&. For details about the escaping logic used to convert a file system path to a unit name see
 \fBsystemd.unit\fR(5)\&.
 .PP
-All swap units automatically get the appropriate dependencies on the devices (resp\&. on the mount points of the files) they are actived from\&.
+All swap units automatically get the appropriate dependencies on the devices (resp\&. on the mount points of the files) they are activated from\&.
 .PP
 Swap units with
 \fIDefaultDependencies=\fR
@@ -98,7 +98,7 @@ Swap priority to use when activating the swap device or file\&. This takes an in
 .RS 4
 Configures the time to wait for the swapon command to finish\&. If a command does not exit within the configured time the swap will be considered failed and be shut down again\&. All commands still running will be terminated forcibly via SIGTERM, and after another delay of this time with SIGKILL\&. (See
 \fBKillMode=\fR
-below\&.) Takes a unit\-less value in seconds, or a time span value such as "5min 20s"\&. Pass 0 to disable the timeout logic\&. Defaults to 3min\&.
+below\&.) Takes a unit\-less value in seconds, or a time span value such as "5min 20s"\&. Pass 0 to disable the timeout logic\&. Defaults to 90s\&.
 .RE
 .PP
 \fIKillMode=\fR

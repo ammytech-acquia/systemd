@@ -26,96 +26,78 @@
 #include <sys/stat.h>
 #include <limits.h>
 #include <dirent.h>
+#include <libkmod.h>
 
 #include "log.h"
 #include "util.h"
 #include "strv.h"
 
-/* This reads all module names listed in /etc/modules-load.d/?*.conf and
- * loads them into the kernel. This follows roughly Debian's way to
- * handle modules, but uses a directory of fragments instead of a
- * single /etc/modules file. */
-
-static int scandir_filter(const struct dirent *d) {
-        assert(d);
-
-        if (ignore_file(d->d_name))
-                return 0;
-
-        if (d->d_type != DT_REG &&
-            d->d_type != DT_LNK &&
-            d->d_type != DT_UNKNOWN)
-                return 0;
-
-        return endswith(d->d_name, ".conf");
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+static void systemd_kmod_log(void *data, int priority, const char *file, int line,
+                             const char *fn, const char *format, va_list args)
+{
+        log_meta(priority, file, line, fn, format, args);
 }
+#pragma GCC diagnostic pop
 
 int main(int argc, char *argv[]) {
-        struct dirent **de = NULL;
-        int r = EXIT_FAILURE, n, i;
-        char **arguments = NULL;
-        unsigned n_arguments = 0, n_allocated = 0;
+        int r = EXIT_FAILURE;
+        char **files, **fn;
+        struct kmod_ctx *ctx;
+        const int probe_flags = KMOD_PROBE_APPLY_BLACKLIST|KMOD_PROBE_IGNORE_LOADED;
 
         if (argc > 1) {
                 log_error("This program takes no argument.");
                 return EXIT_FAILURE;
         }
 
-        log_set_target(LOG_TARGET_SYSLOG_OR_KMSG);
+        log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
 
-        if (!(arguments = strv_new("/sbin/modprobe", "-sab", "--", NULL))) {
-                log_error("Failed to allocate string array");
+        umask(0022);
+
+        if (!(ctx = kmod_new(NULL, NULL))) {
+                log_error("Failed to allocate memory for kmod.");
                 goto finish;
         }
 
-        n_arguments = n_allocated = 3;
+        kmod_load_resources(ctx);
 
-        if ((n = scandir("/etc/modules-load.d/", &de, scandir_filter, alphasort)) < 0) {
+        kmod_set_log_fn(ctx, systemd_kmod_log, NULL);
 
-                if (errno == ENOENT)
-                        r = EXIT_SUCCESS;
-                else
-                        log_error("Failed to enumerate /etc/modules-load.d/ files: %m");
-
+        if (conf_files_list(&files, ".conf",
+                            "/run/modules-load.d",
+                            "/etc/modules-load.d",
+                            "/usr/local/lib/modules-load.d",
+                            "/usr/lib/modules-load.d",
+                            "/lib/modules-load.d",
+                            NULL) < 0) {
+                log_error("Failed to enumerate modules-load.d files: %s", strerror(-r));
                 goto finish;
         }
 
         r = EXIT_SUCCESS;
 
-        for (i = 0; i < n; i++) {
-                int k;
-                char *fn;
+        STRV_FOREACH(fn, files) {
                 FILE *f;
 
-                k = asprintf(&fn, "/etc/modules-load.d/%s", de[i]->d_name);
-                free(de[i]);
-
-                if (k < 0) {
-                        log_error("Failed to allocate file name.");
-                        r = EXIT_FAILURE;
-                        continue;
-                }
-
-                f = fopen(fn, "re");
-
+                f = fopen(*fn, "re");
                 if (!f) {
-                        if (errno == ENOENT) {
-                                free(fn);
+                        if (errno == ENOENT)
                                 continue;
-                        }
 
-                        log_error("Failed to open %s: %m", fn);
-                        free(fn);
+                        log_error("Failed to open %s: %m", *fn);
                         r = EXIT_FAILURE;
                         continue;
                 }
 
-                free(fn);
-
+                log_debug("apply: %s\n", *fn);
                 for (;;) {
-                        char line[LINE_MAX], *l, *t;
+                        char line[LINE_MAX], *l;
+                        struct kmod_list *itr, *modlist = NULL;
+                        int err;
 
                         if (!(fgets(line, sizeof(line), f)))
                                 break;
@@ -124,52 +106,45 @@ int main(int argc, char *argv[]) {
                         if (*l == '#' || *l == 0)
                                 continue;
 
-                        if (!(t = strdup(l))) {
-                                log_error("Failed to allocate module name.");
+                        err = kmod_module_new_from_lookup(ctx, l, &modlist);
+                        if (err < 0) {
+                                log_error("Failed to lookup alias '%s'", l);
+                                r = EXIT_FAILURE;
                                 continue;
                         }
 
-                        if (n_arguments >= n_allocated) {
-                                char **a;
-                                unsigned m;
+                        kmod_list_foreach(itr, modlist) {
+                                struct kmod_module *mod = kmod_module_get_module(itr);
+                                err = kmod_module_probe_insert_module(mod, probe_flags,
+                                                                      NULL, NULL, NULL, NULL);
 
-                                m = MAX(16U, n_arguments*2);
-
-                                if (!(a = realloc(arguments, sizeof(char*) * (m+1)))) {
-                                        log_error("Failed to increase module array size.");
-                                        free(t);
+                                if (err == 0)
+                                        log_info("Inserted module '%s'", kmod_module_get_name(mod));
+                                else if (err == KMOD_PROBE_APPLY_BLACKLIST)
+                                        log_info("Module '%s' is blacklisted", kmod_module_get_name(mod));
+                                else {
+                                        log_error("Failed to insert '%s': %s", kmod_module_get_name(mod),
+                                                        strerror(-err));
                                         r = EXIT_FAILURE;
-                                        continue;
                                 }
 
-                                arguments = a;
-                                n_allocated = m;
+                                kmod_module_unref(mod);
                         }
 
-                        arguments[n_arguments++] = t;
+                        kmod_module_unref_list(modlist);
                 }
 
                 if (ferror(f)) {
-                        r = EXIT_FAILURE;
                         log_error("Failed to read from file: %m");
+                        r = EXIT_FAILURE;
                 }
 
                 fclose(f);
         }
 
-        free(de);
-
 finish:
-
-        if (n_arguments > 3) {
-                arguments[n_arguments] = NULL;
-                execv("/sbin/modprobe", arguments);
-
-                log_error("Failed to execute /sbin/modprobe: %m");
-                r = EXIT_FAILURE;
-        }
-
-        strv_free(arguments);
+        strv_free(files);
+        kmod_unref(ctx);
 
         return r;
 }

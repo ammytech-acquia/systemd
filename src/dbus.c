@@ -48,6 +48,11 @@
 
 #define CONNECTIONS_MAX 52
 
+/* Well-known address (http://dbus.freedesktop.org/doc/dbus-specification.html#message-bus-types) */
+#define DBUS_SYSTEM_BUS_DEFAULT_ADDRESS "unix:path=/var/run/dbus/system_bus_socket"
+/* Only used as a fallback */
+#define DBUS_SESSION_BUS_DEFAULT_ADDRESS "autolaunch:"
+
 static const char bus_properties_interface[] = BUS_PROPERTIES_INTERFACE;
 static const char bus_introspectable_interface[] = BUS_INTROSPECTABLE_INTERFACE;
 
@@ -91,41 +96,6 @@ static void bus_dispatch_status(DBusConnection *bus, DBusDispatchStatus status, 
                 set_move_one(m->bus_connections_for_dispatch, m->bus_connections, bus);
 }
 
-static uint32_t bus_flags_to_events(DBusWatch *bus_watch) {
-        unsigned flags;
-        uint32_t events = 0;
-
-        assert(bus_watch);
-
-        /* no watch flags for disabled watches */
-        if (!dbus_watch_get_enabled(bus_watch))
-                return 0;
-
-        flags = dbus_watch_get_flags(bus_watch);
-
-        if (flags & DBUS_WATCH_READABLE)
-                events |= EPOLLIN;
-        if (flags & DBUS_WATCH_WRITABLE)
-                events |= EPOLLOUT;
-
-        return events | EPOLLHUP | EPOLLERR;
-}
-
-static unsigned events_to_bus_flags(uint32_t events) {
-        unsigned flags = 0;
-
-        if (events & EPOLLIN)
-                flags |= DBUS_WATCH_READABLE;
-        if (events & EPOLLOUT)
-                flags |= DBUS_WATCH_WRITABLE;
-        if (events & EPOLLHUP)
-                flags |= DBUS_WATCH_HANGUP;
-        if (events & EPOLLERR)
-                flags |= DBUS_WATCH_ERROR;
-
-        return flags;
-}
-
 void bus_watch_event(Manager *m, Watch *w, int events) {
         assert(m);
         assert(w);
@@ -136,7 +106,7 @@ void bus_watch_event(Manager *m, Watch *w, int events) {
         if (!dbus_watch_get_enabled(w->data.bus_watch))
                 return;
 
-        dbus_watch_handle(w->data.bus_watch, events_to_bus_flags(events));
+        dbus_watch_handle(w->data.bus_watch, bus_events_to_flags(events));
 }
 
 static dbus_bool_t bus_add_watch(DBusWatch *bus_watch, void *data) {
@@ -196,7 +166,8 @@ static void bus_remove_watch(DBusWatch *bus_watch, void *data) {
         assert(bus_watch);
         assert(m);
 
-        if (!(w = dbus_watch_get_data(bus_watch)))
+        w = dbus_watch_get_data(bus_watch);
+        if (!w)
                 return;
 
         assert(w->type == WATCH_DBUS_WATCH);
@@ -216,7 +187,10 @@ static void bus_toggle_watch(DBusWatch *bus_watch, void *data) {
         assert(bus_watch);
         assert(m);
 
-        assert_se(w = dbus_watch_get_data(bus_watch));
+        w = dbus_watch_get_data(bus_watch);
+        if (!w)
+                return;
+
         assert(w->type == WATCH_DBUS_WATCH);
 
         zero(ev);
@@ -304,10 +278,12 @@ static void bus_remove_timeout(DBusTimeout *timeout, void *data) {
         assert(timeout);
         assert(m);
 
-        if (!(w = dbus_timeout_get_data(timeout)))
+        w = dbus_timeout_get_data(timeout);
+        if (!w)
                 return;
 
         assert(w->type == WATCH_DBUS_TIMEOUT);
+
         assert_se(epoll_ctl(m->epoll_fd, EPOLL_CTL_DEL, w->fd, NULL) >= 0);
         close_nointr_nofail(w->fd);
         free(w);
@@ -321,7 +297,10 @@ static void bus_toggle_timeout(DBusTimeout *timeout, void *data) {
         assert(timeout);
         assert(m);
 
-        assert_se(w = dbus_timeout_get_data(timeout));
+        w = dbus_timeout_get_data(timeout);
+        if (!w)
+                return;
+
         assert(w->type == WATCH_DBUS_TIMEOUT);
 
         if ((r = bus_timeout_arm(m, w)) < 0)
@@ -358,7 +337,7 @@ static DBusHandlerResult api_bus_message_filter(DBusConnection *connection, DBus
                                            DBUS_TYPE_STRING, &old_owner,
                                            DBUS_TYPE_STRING, &new_owner,
                                            DBUS_TYPE_INVALID))
-                        log_error("Failed to parse NameOwnerChanged message: %s", error.message);
+                        log_error("Failed to parse NameOwnerChanged message: %s", bus_error_message(&error));
                 else  {
                         if (set_remove(BUS_CONNECTION_SUBSCRIBED(m, connection), (char*) name))
                                 log_debug("Subscription client vanished: %s (left: %u)", name, set_size(BUS_CONNECTION_SUBSCRIBED(m, connection)));
@@ -377,7 +356,7 @@ static DBusHandlerResult api_bus_message_filter(DBusConnection *connection, DBus
                 if (!dbus_message_get_args(message, &error,
                                            DBUS_TYPE_STRING, &name,
                                            DBUS_TYPE_INVALID))
-                        log_error("Failed to parse ActivationRequest message: %s", error.message);
+                        log_error("Failed to parse ActivationRequest message: %s", bus_error_message(&error));
                 else  {
                         int r;
                         Unit *u;
@@ -391,7 +370,7 @@ static DBusHandlerResult api_bus_message_filter(DBusConnection *connection, DBus
                         } else {
                                 r = manager_load_unit(m, name, NULL, &error, &u);
 
-                                if (r >= 0 && u->meta.refuse_manual_start)
+                                if (r >= 0 && u->refuse_manual_start)
                                         r = -EPERM;
 
                                 if (r >= 0)
@@ -472,7 +451,7 @@ static DBusHandlerResult system_bus_message_filter(DBusConnection *connection, D
                 if (!dbus_message_get_args(message, &error,
                                            DBUS_TYPE_STRING, &cgroup,
                                            DBUS_TYPE_INVALID))
-                        log_error("Failed to parse Released message: %s", error.message);
+                        log_error("Failed to parse Released message: %s", bus_error_message(&error));
                 else
                         cgroup_notify_empty(m, cgroup);
         }
@@ -508,7 +487,7 @@ static DBusHandlerResult private_bus_message_filter(DBusConnection *connection, 
                 if (!dbus_message_get_args(message, &error,
                                            DBUS_TYPE_STRING, &cgroup,
                                            DBUS_TYPE_INVALID))
-                        log_error("Failed to parse Released message: %s", error.message);
+                        log_error("Failed to parse Released message: %s", bus_error_message(&error));
                 else
                         cgroup_notify_empty(m, cgroup);
 
@@ -566,7 +545,7 @@ static void request_name_pending_cb(DBusPendingCall *pending, void *userdata) {
         case DBUS_MESSAGE_TYPE_ERROR:
 
                 assert_se(dbus_set_error_from_message(&error, reply));
-                log_warning("RequestName() failed: %s", error.message);
+                log_warning("RequestName() failed: %s", bus_error_message(&error));
                 break;
 
         case DBUS_MESSAGE_TYPE_METHOD_RETURN: {
@@ -576,7 +555,7 @@ static void request_name_pending_cb(DBusPendingCall *pending, void *userdata) {
                                            &error,
                                            DBUS_TYPE_UINT32, &r,
                                            DBUS_TYPE_INVALID)) {
-                        log_error("Failed to parse RequestName() reply: %s", error.message);
+                        log_error("Failed to parse RequestName() reply: %s", bus_error_message(&error));
                         break;
                 }
 
@@ -598,7 +577,12 @@ static void request_name_pending_cb(DBusPendingCall *pending, void *userdata) {
 
 static int request_name(Manager *m) {
         const char *name = "org.freedesktop.systemd1";
-        uint32_t flags = 0;
+        /* Allow replacing of our name, to ease implementation of
+         * reexecution, where we keep the old connection open until
+         * after the new connection is set up and the name installed
+         * to allow clients to synchronously wait for reexecution to
+         * finish */
+        uint32_t flags = DBUS_NAME_FLAG_ALLOW_REPLACEMENT|DBUS_NAME_FLAG_REPLACE_EXISTING;
         DBusMessage *message = NULL;
         DBusPendingCall *pending = NULL;
 
@@ -658,7 +642,7 @@ static void query_name_list_pending_cb(DBusPendingCall *pending, void *userdata)
         case DBUS_MESSAGE_TYPE_ERROR:
 
                 assert_se(dbus_set_error_from_message(&error, reply));
-                log_warning("ListNames() failed: %s", error.message);
+                log_warning("ListNames() failed: %s", bus_error_message(&error));
                 break;
 
         case DBUS_MESSAGE_TYPE_METHOD_RETURN: {
@@ -752,8 +736,8 @@ static int bus_setup_loop(Manager *m, DBusConnection *bus) {
         return 0;
 }
 
-static dbus_bool_t allow_only_root(DBusConnection *connection, unsigned long uid, void *data) {
-        return uid == 0;
+static dbus_bool_t allow_only_same_user(DBusConnection *connection, unsigned long uid, void *data) {
+        return uid == 0 || uid == geteuid();
 }
 
 static void bus_new_connection(
@@ -770,7 +754,7 @@ static void bus_new_connection(
                 return;
         }
 
-        dbus_connection_set_unix_user_function(new_connection, allow_only_root, NULL, NULL);
+        dbus_connection_set_unix_user_function(new_connection, allow_only_same_user, NULL, NULL);
 
         if (bus_setup_loop(m, new_connection) < 0)
                 return;
@@ -788,37 +772,19 @@ static void bus_new_connection(
         dbus_connection_ref(new_connection);
 }
 
-static int bus_init_system(Manager *m) {
-        DBusError error;
-        int r;
-
-        assert(m);
-
-        dbus_error_init(&error);
-
-        if (m->system_bus)
-                return 0;
-
-        if (m->running_as == MANAGER_SYSTEM && m->api_bus)
-                m->system_bus = m->api_bus;
-        else {
-                if (!(m->system_bus = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error))) {
-                        log_debug("Failed to get system D-Bus connection, retrying later: %s", error.message);
-                        r = 0;
-                        goto fail;
-                }
-
-                if ((r = bus_setup_loop(m, m->system_bus)) < 0)
-                        goto fail;
-        }
+static int init_registered_system_bus(Manager *m) {
+        char *id;
 
         if (!dbus_connection_add_filter(m->system_bus, system_bus_message_filter, m, NULL)) {
                 log_error("Not enough memory");
-                r = -EIO;
-                goto fail;
+                return -ENOMEM;
         }
 
         if (m->running_as != MANAGER_SYSTEM) {
+                DBusError error;
+
+                dbus_error_init(&error);
+
                 dbus_bus_add_match(m->system_bus,
                                    "type='signal',"
                                    "interface='org.freedesktop.systemd1.Agent',"
@@ -827,60 +793,29 @@ static int bus_init_system(Manager *m) {
                                    &error);
 
                 if (dbus_error_is_set(&error)) {
-                        log_error("Failed to register match: %s", error.message);
-                        r = -EIO;
-                        goto fail;
+                        log_error("Failed to register match: %s", bus_error_message(&error));
+                        dbus_error_free(&error);
+                        return -1;
                 }
         }
 
-        if (m->api_bus != m->system_bus) {
-                char *id;
-                log_debug("Successfully connected to system D-Bus bus %s as %s",
-                         strnull((id = dbus_connection_get_server_id(m->system_bus))),
-                         strnull(dbus_bus_get_unique_name(m->system_bus)));
-                dbus_free(id);
-        }
+        log_debug("Successfully connected to system D-Bus bus %s as %s",
+                 strnull((id = dbus_connection_get_server_id(m->system_bus))),
+                 strnull(dbus_bus_get_unique_name(m->system_bus)));
+        dbus_free(id);
 
         return 0;
-
-fail:
-        bus_done_system(m);
-        dbus_error_free(&error);
-
-        return r;
 }
 
-static int bus_init_api(Manager *m) {
-        DBusError error;
+static int init_registered_api_bus(Manager *m) {
         int r;
-
-        assert(m);
-
-        dbus_error_init(&error);
-
-        if (m->api_bus)
-                return 0;
-
-        if (m->running_as == MANAGER_SYSTEM && m->system_bus)
-                m->api_bus = m->system_bus;
-        else {
-                if (!(m->api_bus = dbus_bus_get_private(m->running_as == MANAGER_USER ? DBUS_BUS_SESSION : DBUS_BUS_SYSTEM, &error))) {
-                        log_debug("Failed to get API D-Bus connection, retrying later: %s", error.message);
-                        r = 0;
-                        goto fail;
-                }
-
-                if ((r = bus_setup_loop(m, m->api_bus)) < 0)
-                        goto fail;
-        }
 
         if (!dbus_connection_register_object_path(m->api_bus, "/org/freedesktop/systemd1", &bus_manager_vtable, m) ||
             !dbus_connection_register_fallback(m->api_bus, "/org/freedesktop/systemd1/unit", &bus_unit_vtable, m) ||
             !dbus_connection_register_fallback(m->api_bus, "/org/freedesktop/systemd1/job", &bus_job_vtable, m) ||
             !dbus_connection_add_filter(m->api_bus, api_bus_message_filter, m, NULL)) {
                 log_error("Not enough memory");
-                r = -ENOMEM;
-                goto fail;
+                return -ENOMEM;
         }
 
         /* Get NameOwnerChange messages */
@@ -890,13 +825,7 @@ static int bus_init_api(Manager *m) {
                            "interface='"DBUS_INTERFACE_DBUS"',"
                            "member='NameOwnerChanged',"
                            "path='"DBUS_PATH_DBUS"'",
-                           &error);
-
-        if (dbus_error_is_set(&error)) {
-                log_error("Failed to register match: %s", error.message);
-                r = -EIO;
-                goto fail;
-        }
+                           NULL);
 
         /* Get activation requests */
         dbus_bus_add_match(m->api_bus,
@@ -905,33 +834,225 @@ static int bus_init_api(Manager *m) {
                            "interface='org.freedesktop.systemd1.Activator',"
                            "member='ActivationRequest',"
                            "path='"DBUS_PATH_DBUS"'",
-                           &error);
+                           NULL);
 
-        if (dbus_error_is_set(&error)) {
-                log_error("Failed to register match: %s", error.message);
-                r = -EIO;
-                goto fail;
-        }
+        r = request_name(m);
+        if (r < 0)
+                return r;
 
-        if ((r = request_name(m)) < 0)
-                goto fail;
+        r = query_name_list(m);
+        if (r < 0)
+                return r;
 
-        if ((r = query_name_list(m)) < 0)
-                goto fail;
-
-        if (m->api_bus != m->system_bus) {
+        if (m->running_as == MANAGER_USER) {
                 char *id;
                 log_debug("Successfully connected to API D-Bus bus %s as %s",
                          strnull((id = dbus_connection_get_server_id(m->api_bus))),
                          strnull(dbus_bus_get_unique_name(m->api_bus)));
                 dbus_free(id);
-        }
+        } else
+                log_debug("Successfully initialized API on the system bus");
 
         return 0;
+}
 
+static void bus_register_cb(DBusPendingCall *pending, void *userdata) {
+        Manager *m = userdata;
+        DBusConnection **conn;
+        DBusMessage *reply;
+        DBusError error;
+        const char *name;
+        int r = 0;
+
+        dbus_error_init(&error);
+
+        conn = dbus_pending_call_get_data(pending, m->conn_data_slot);
+        assert(conn == &m->system_bus || conn == &m->api_bus);
+
+        reply = dbus_pending_call_steal_reply(pending);
+
+        switch (dbus_message_get_type(reply)) {
+        case DBUS_MESSAGE_TYPE_ERROR:
+                assert_se(dbus_set_error_from_message(&error, reply));
+                log_warning("Failed to register to bus: %s", bus_error_message(&error));
+                r = -1;
+                break;
+        case DBUS_MESSAGE_TYPE_METHOD_RETURN:
+                if (!dbus_message_get_args(reply, &error,
+                                           DBUS_TYPE_STRING, &name,
+                                           DBUS_TYPE_INVALID)) {
+                        log_error("Failed to parse Hello reply: %s", bus_error_message(&error));
+                        r = -1;
+                        break;
+                }
+
+                log_debug("Received name %s in reply to Hello", name);
+                if (!dbus_bus_set_unique_name(*conn, name)) {
+                        log_error("Failed to set unique name");
+                        r = -1;
+                        break;
+                }
+
+                if (conn == &m->system_bus) {
+                        r = init_registered_system_bus(m);
+                        if (r == 0 && m->running_as == MANAGER_SYSTEM)
+                                r = init_registered_api_bus(m);
+                } else
+                        r = init_registered_api_bus(m);
+
+                break;
+        default:
+                assert_not_reached("Invalid reply message");
+        }
+
+        dbus_message_unref(reply);
+        dbus_error_free(&error);
+
+        if (r < 0) {
+                if (conn == &m->system_bus) {
+                        log_debug("Failed setting up the system bus");
+                        bus_done_system(m);
+                } else {
+                        log_debug("Failed setting up the API bus");
+                        bus_done_api(m);
+                }
+        }
+}
+
+static int manager_bus_async_register(Manager *m, DBusConnection **conn) {
+        DBusMessage *message = NULL;
+        DBusPendingCall *pending = NULL;
+
+        message = dbus_message_new_method_call(DBUS_SERVICE_DBUS,
+                                               DBUS_PATH_DBUS,
+                                               DBUS_INTERFACE_DBUS,
+                                               "Hello");
+        if (!message)
+                goto oom;
+
+        if (!dbus_connection_send_with_reply(*conn, message, &pending, -1))
+                goto oom;
+
+        if (!dbus_pending_call_set_data(pending, m->conn_data_slot, conn, NULL))
+                goto oom;
+
+        if (!dbus_pending_call_set_notify(pending, bus_register_cb, m, NULL))
+                goto oom;
+
+        dbus_message_unref(message);
+        dbus_pending_call_unref(pending);
+
+        return 0;
+oom:
+        if (pending) {
+                dbus_pending_call_cancel(pending);
+                dbus_pending_call_unref(pending);
+        }
+
+        if (message)
+                dbus_message_unref(message);
+
+        return -ENOMEM;
+}
+
+static DBusConnection* manager_bus_connect_private(Manager *m, DBusBusType type) {
+        const char *address;
+        DBusConnection *connection;
+        DBusError error;
+
+        switch (type) {
+        case DBUS_BUS_SYSTEM:
+                address = getenv("DBUS_SYSTEM_BUS_ADDRESS");
+                if (!address || !address[0])
+                        address = DBUS_SYSTEM_BUS_DEFAULT_ADDRESS;
+                break;
+        case DBUS_BUS_SESSION:
+                address = getenv("DBUS_SESSION_BUS_ADDRESS");
+                if (!address || !address[0])
+                        address = DBUS_SESSION_BUS_DEFAULT_ADDRESS;
+                break;
+        default:
+                assert_not_reached("Invalid bus type");
+        }
+
+        dbus_error_init(&error);
+
+        connection = dbus_connection_open_private(address, &error);
+        if (!connection) {
+                log_warning("Failed to open private bus connection: %s", bus_error_message(&error));
+                goto fail;
+        }
+
+        return connection;
+fail:
+        if (connection)
+                dbus_connection_close(connection);
+        dbus_error_free(&error);
+        return NULL;
+}
+
+static int bus_init_system(Manager *m) {
+        int r;
+
+        if (m->system_bus)
+                return 0;
+
+        m->system_bus = manager_bus_connect_private(m, DBUS_BUS_SYSTEM);
+        if (!m->system_bus) {
+                log_debug("Failed to connect to system D-Bus, retrying later");
+                r = 0;
+                goto fail;
+        }
+
+        r = bus_setup_loop(m, m->system_bus);
+        if (r < 0)
+                goto fail;
+
+        r = manager_bus_async_register(m, &m->system_bus);
+        if (r < 0)
+                goto fail;
+
+        return 0;
+fail:
+        bus_done_system(m);
+
+        return r;
+}
+
+static int bus_init_api(Manager *m) {
+        int r;
+
+        if (m->api_bus)
+                return 0;
+
+        if (m->running_as == MANAGER_SYSTEM) {
+                m->api_bus = m->system_bus;
+                /* In this mode there is no distinct connection to the API bus,
+                 * the API is published on the system bus.
+                 * bus_register_cb() is aware of that and will init the API
+                 * when the system bus gets registered.
+                 * No need to setup anything here. */
+                return 0;
+        }
+
+        m->api_bus = manager_bus_connect_private(m, DBUS_BUS_SESSION);
+        if (!m->api_bus) {
+                log_debug("Failed to connect to API D-Bus, retrying later");
+                r = 0;
+                goto fail;
+        }
+
+        r = bus_setup_loop(m, m->api_bus);
+        if (r < 0)
+                goto fail;
+
+        r = manager_bus_async_register(m, &m->api_bus);
+        if (r < 0)
+                goto fail;
+
+        return 0;
 fail:
         bus_done_api(m);
-        dbus_error_free(&error);
 
         return r;
 }
@@ -951,13 +1072,36 @@ static int bus_init_private(Manager *m) {
         if (m->private_bus)
                 return 0;
 
-        /* We want the private bus only when running as init */
-        if (getpid() != 1)
-                return 0;
+        if (m->running_as == MANAGER_SYSTEM) {
 
-        unlink("/run/systemd/private");
-        if (!(m->private_bus = dbus_server_listen("unix:path=/run/systemd/private", &error))) {
-                log_error("Failed to create private D-Bus server: %s", error.message);
+                /* We want the private bus only when running as init */
+                if (getpid() != 1)
+                        return 0;
+
+                unlink("/run/systemd/private");
+                m->private_bus = dbus_server_listen("unix:path=/run/systemd/private", &error);
+        } else {
+                const char *e;
+                char *p;
+
+                e = getenv("XDG_RUNTIME_DIR");
+                if (!e)
+                        return 0;
+
+                if (asprintf(&p, "unix:path=%s/systemd/private", e) < 0) {
+                        log_error("Not enough memory");
+                        r = -ENOMEM;
+                        goto fail;
+                }
+
+                mkdir_parents(p+10, 0755);
+                unlink(p+10);
+                m->private_bus = dbus_server_listen(p, &error);
+                free(p);
+        }
+
+        if (!m->private_bus) {
+                log_error("Failed to create private D-Bus server: %s", bus_error_message(&error));
                 r = -EIO;
                 goto fail;
         }
@@ -987,22 +1131,20 @@ int bus_init(Manager *m, bool try_bus_connect) {
         int r;
 
         if (set_ensure_allocated(&m->bus_connections, trivial_hash_func, trivial_compare_func) < 0 ||
-            set_ensure_allocated(&m->bus_connections_for_dispatch, trivial_hash_func, trivial_compare_func) < 0) {
-                log_error("Not enough memory");
-                return -ENOMEM;
-        }
+            set_ensure_allocated(&m->bus_connections_for_dispatch, trivial_hash_func, trivial_compare_func) < 0)
+                goto oom;
 
         if (m->name_data_slot < 0)
-                if (!dbus_pending_call_allocate_data_slot(&m->name_data_slot)) {
-                        log_error("Not enough memory");
-                        return -ENOMEM;
-                }
+                if (!dbus_pending_call_allocate_data_slot(&m->name_data_slot))
+                        goto oom;
+
+        if (m->conn_data_slot < 0)
+                if (!dbus_pending_call_allocate_data_slot(&m->conn_data_slot))
+                        goto oom;
 
         if (m->subscribed_data_slot < 0)
-                if (!dbus_connection_allocate_data_slot(&m->subscribed_data_slot)) {
-                        log_error("Not enough memory");
-                        return -ENOMEM;
-                }
+                if (!dbus_connection_allocate_data_slot(&m->subscribed_data_slot))
+                        goto oom;
 
         if (try_bus_connect) {
                 if ((r = bus_init_system(m)) < 0 ||
@@ -1014,6 +1156,9 @@ int bus_init(Manager *m, bool try_bus_connect) {
                 return r;
 
         return 0;
+oom:
+        log_error("Not enough memory");
+        return -ENOMEM;
 }
 
 static void shutdown_connection(Manager *m, DBusConnection *c) {
@@ -1051,48 +1196,46 @@ static void shutdown_connection(Manager *m, DBusConnection *c) {
         }
 
         dbus_connection_set_dispatch_status_function(c, NULL, NULL, NULL);
-        dbus_connection_flush(c);
+        /* system manager cannot afford to block on DBus */
+        if (m->running_as != MANAGER_SYSTEM)
+                dbus_connection_flush(c);
         dbus_connection_close(c);
         dbus_connection_unref(c);
 }
 
 static void bus_done_api(Manager *m) {
-        assert(m);
+        if (!m->api_bus)
+                return;
 
-        if (m->api_bus) {
-                if (m->system_bus == m->api_bus)
-                        m->system_bus = NULL;
-
+        if (m->running_as == MANAGER_USER)
                 shutdown_connection(m, m->api_bus);
-                m->api_bus = NULL;
+
+        m->api_bus = NULL;
+
+        if (m->queued_message) {
+                dbus_message_unref(m->queued_message);
+                m->queued_message = NULL;
         }
-
-
-       if (m->queued_message) {
-               dbus_message_unref(m->queued_message);
-               m->queued_message = NULL;
-       }
 }
 
 static void bus_done_system(Manager *m) {
-        assert(m);
+        if (!m->system_bus)
+                return;
 
-        if (m->system_bus == m->api_bus)
+        if (m->running_as == MANAGER_SYSTEM)
                 bus_done_api(m);
 
-        if (m->system_bus) {
-                shutdown_connection(m, m->system_bus);
-                m->system_bus = NULL;
-        }
+        shutdown_connection(m, m->system_bus);
+        m->system_bus = NULL;
 }
 
 static void bus_done_private(Manager *m) {
+        if (!m->private_bus)
+                return;
 
-        if (m->private_bus) {
-                dbus_server_disconnect(m->private_bus);
-                dbus_server_unref(m->private_bus);
-                m->private_bus = NULL;
-        }
+        dbus_server_disconnect(m->private_bus);
+        dbus_server_unref(m->private_bus);
+        m->private_bus = NULL;
 }
 
 void bus_done(Manager *m) {
@@ -1114,6 +1257,9 @@ void bus_done(Manager *m) {
         if (m->name_data_slot >= 0)
                dbus_pending_call_free_data_slot(&m->name_data_slot);
 
+        if (m->conn_data_slot >= 0)
+               dbus_pending_call_free_data_slot(&m->conn_data_slot);
+
         if (m->subscribed_data_slot >= 0)
                 dbus_connection_free_data_slot(&m->subscribed_data_slot);
 }
@@ -1134,7 +1280,7 @@ static void query_pid_pending_cb(DBusPendingCall *pending, void *userdata) {
         case DBUS_MESSAGE_TYPE_ERROR:
 
                 assert_se(dbus_set_error_from_message(&error, reply));
-                log_warning("GetConnectionUnixProcessID() failed: %s", error.message);
+                log_warning("GetConnectionUnixProcessID() failed: %s", bus_error_message(&error));
                 break;
 
         case DBUS_MESSAGE_TYPE_METHOD_RETURN: {
@@ -1144,7 +1290,7 @@ static void query_pid_pending_cb(DBusPendingCall *pending, void *userdata) {
                                            &error,
                                            DBUS_TYPE_UINT32, &r,
                                            DBUS_TYPE_INVALID)) {
-                        log_error("Failed to parse GetConnectionUnixProcessID() reply: %s", error.message);
+                        log_error("Failed to parse GetConnectionUnixProcessID() reply: %s", bus_error_message(&error));
                         break;
                 }
 
@@ -1233,55 +1379,6 @@ int bus_broadcast(Manager *m, DBusMessage *message) {
         return oom ? -ENOMEM : 0;
 }
 
-int bus_parse_strv(DBusMessage *m, char ***_l) {
-        DBusMessageIter iter, sub;
-        unsigned n = 0, i = 0;
-        char **l;
-
-        assert(m);
-        assert(_l);
-
-        if (!dbus_message_iter_init(m, &iter) ||
-            dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_ARRAY ||
-            dbus_message_iter_get_element_type(&iter) != DBUS_TYPE_STRING)
-            return -EINVAL;
-
-        dbus_message_iter_recurse(&iter, &sub);
-
-        while (dbus_message_iter_get_arg_type(&sub) != DBUS_TYPE_INVALID) {
-                n++;
-                dbus_message_iter_next(&sub);
-        }
-
-        if (!(l = new(char*, n+1)))
-                return -ENOMEM;
-
-        assert_se(dbus_message_iter_init(m, &iter));
-        dbus_message_iter_recurse(&iter, &sub);
-
-        while (dbus_message_iter_get_arg_type(&sub) != DBUS_TYPE_INVALID) {
-                const char *s;
-
-                assert_se(dbus_message_iter_get_arg_type(&sub) == DBUS_TYPE_STRING);
-                dbus_message_iter_get_basic(&sub, &s);
-
-                if (!(l[i++] = strdup(s))) {
-                        strv_free(l);
-                        return -ENOMEM;
-                }
-
-                dbus_message_iter_next(&sub);
-        }
-
-        assert(i == n);
-        l[i] = NULL;
-
-        if (_l)
-                *_l = l;
-
-        return 0;
-}
-
 bool bus_has_subscriber(Manager *m) {
         Iterator i;
         DBusConnection *c;
@@ -1304,4 +1401,82 @@ bool bus_connection_has_subscriber(Manager *m, DBusConnection *c) {
         assert(c);
 
         return !set_isempty(BUS_CONNECTION_SUBSCRIBED(m, c));
+}
+
+int bus_fdset_add_all(Manager *m, FDSet *fds) {
+        Iterator i;
+        DBusConnection *c;
+
+        assert(m);
+        assert(fds);
+
+        /* When we are about to reexecute we add all D-Bus fds to the
+         * set to pass over to the newly executed systemd. They won't
+         * be used there however, except that they are closed at the
+         * very end of deserialization, those making it possible for
+         * clients to synchronously wait for systemd to reexec by
+         * simply waiting for disconnection */
+
+        SET_FOREACH(c, m->bus_connections_for_dispatch, i) {
+                int fd;
+
+                if (dbus_connection_get_unix_fd(c, &fd)) {
+                        fd = fdset_put_dup(fds, fd);
+
+                        if (fd < 0)
+                                return fd;
+                }
+        }
+
+        SET_FOREACH(c, m->bus_connections, i) {
+                int fd;
+
+                if (dbus_connection_get_unix_fd(c, &fd)) {
+                        fd = fdset_put_dup(fds, fd);
+
+                        if (fd < 0)
+                                return fd;
+                }
+        }
+
+        return 0;
+}
+
+void bus_broadcast_finished(
+                Manager *m,
+                usec_t kernel_usec,
+                usec_t initrd_usec,
+                usec_t userspace_usec,
+                usec_t total_usec) {
+
+        DBusMessage *message;
+
+        assert(m);
+
+        message = dbus_message_new_signal("/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", "StartupFinished");
+        if (!message) {
+                log_error("Out of memory.");
+                return;
+        }
+
+        assert_cc(sizeof(usec_t) == sizeof(uint64_t));
+        if (!dbus_message_append_args(message,
+                                      DBUS_TYPE_UINT64, &kernel_usec,
+                                      DBUS_TYPE_UINT64, &initrd_usec,
+                                      DBUS_TYPE_UINT64, &userspace_usec,
+                                      DBUS_TYPE_UINT64, &total_usec,
+                                      DBUS_TYPE_INVALID)) {
+                log_error("Out of memory.");
+                goto finish;
+        }
+
+
+        if (bus_broadcast(m, message) < 0) {
+                log_error("Out of memory.");
+                goto finish;
+        }
+
+finish:
+        if (message)
+                dbus_message_unref(message);
 }
