@@ -1,6 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>systemd.service</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="systemd.service"><a id="systemd.service"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>systemd.service — systemd service configuration files</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><p><code class="filename">systemd.service</code></p></div><div class="refsect1" title="Description"><a id="id312255"/><h2>Description</h2><p>A unit configuration file whose name ends in
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>systemd.service</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="systemd.service"><a name="systemd.service"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>systemd.service — systemd service configuration files</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><p><code class="filename">systemd.service</code></p></div><div class="refsect1" title="Description"><a name="id525303"></a><h2>Description</h2><p>A unit configuration file whose name ends in
                 <code class="filename">.service</code> encodes information
                 about a process controlled and supervised by
                 systemd.</p><p>This man page lists the configuration options
@@ -33,7 +31,7 @@
                 <code class="filename">.service</code> suffix removed) and
                 dynamically creates a service unit from that
                 script. This is useful for compatibility with
-                SysV.</p></div><div class="refsect1" title="Options"><a id="id312367"/><h2>Options</h2><p>Service files must include a
+                SysV.</p></div><div class="refsect1" title="Options"><a name="id525414"></a><h2>Options</h2><p>Service files must include a
                 <code class="literal">[Service]</code> section, which carries
                 information about the service and the process it
                 supervises. A number of options that may be used in
@@ -114,8 +112,8 @@
                                 below) should be set to open access to
                                 the notification socket provided by
                                 systemd. If
-                                <code class="varname">NotifyAccess=</code> is not
-                                set, it will implicitly be set to
+                                <code class="varname">NotifyAccess=</code> is
+                                not set, it will be implicitly set to
                                 <code class="option">main</code>.</p></dd><dt><span class="term"><code class="varname">RemainAfterExit=</code></span></dt><dd><p>Takes a boolean value
                                 that specifies whether the service
                                 shall be considered active even when
@@ -303,7 +301,34 @@
                                 time span value such as "5min
                                 20s". Pass 0 to disable the timeout
                                 logic. Defaults to
-                                90s.</p></dd><dt><span class="term"><code class="varname">Restart=</code></span></dt><dd><p>Configures whether the
+                                90s.</p></dd><dt><span class="term"><code class="varname">WatchdogSec=</code></span></dt><dd><p>Configures the
+                                watchdog timeout for a service. This
+                                is activated when the start-up is
+                                completed. The service must call
+                                <span class="citerefentry"><span class="refentrytitle">sd_notify</span>(3)</span>
+                                regularly with "WATCHDOG=1". If the
+                                time between two such calls is larger
+                                than the configured time then the
+                                service is placed in a failure
+                                state. By setting
+                                <code class="varname">Restart=</code>
+                                to <code class="option">on-failure</code> or
+                                <code class="option">always</code> the service
+                                will be automatically restarted. The
+                                time configured here will be passed to
+                                the executed service process in the
+                                <code class="varname">WATCHDOG_USEC=</code>
+                                environment variable. If
+                                this option is used
+                                <code class="varname">NotifyAccess=</code> (see
+                                below) should be set to open access to
+                                the notification socket provided by
+                                systemd. If
+                                <code class="varname">NotifyAccess=</code> is not
+                                set, it will be implicitly set to
+                                <code class="option">main</code>. Defaults to 0,
+                                which disables this
+                                feature.</p></dd><dt><span class="term"><code class="varname">Restart=</code></span></dt><dd><p>Configures whether the
                                 main service process shall be
                                 restarted when it exits. Takes one of
                                 <code class="option">no</code>,
@@ -320,16 +345,19 @@
                                 0. If set to
                                 <code class="option">on-failure</code> it will be
                                 restarted only when it exited with an
-                                exit code not equalling 0, or when
-                                terminated by a signal. If set to
+                                exit code not equalling 0, when
+                                terminated by a signal, when an
+                                operation times out or when the
+                                configured watchdog timeout is
+                                triggered. If set to
                                 <code class="option">on-abort</code> it will be
                                 restarted only if it exits due to
                                 reception of an uncaught signal. If
                                 set to <code class="option">always</code> the
                                 service will be restarted regardless
-                                whether it exited cleanly or not, or
+                                whether it exited cleanly or not,
                                 got terminated abnormally by a
-                                signal.</p></dd><dt><span class="term"><code class="varname">PermissionsStartOnly=</code></span></dt><dd><p>Takes a boolean
+                                signal or hit a timeout.</p></dd><dt><span class="term"><code class="varname">PermissionsStartOnly=</code></span></dt><dd><p>Takes a boolean
                                 argument. If true, the permission
                                 related execution options as
                                 configured with
@@ -458,17 +486,23 @@
                                 accepted. If <code class="option">all</code> all
                                 services updates from all members of
                                 the service's control group are
-                                accepted. This option must be set to
+                                accepted. This option should be set to
                                 open access to the notification socket
                                 when using
-                                <code class="varname">Type=notify</code> (see above).</p></dd><dt><span class="term"><code class="varname">Sockets=</code></span></dt><dd><p>Specifies the name of
+                                <code class="varname">Type=notify</code> or
+                                <code class="varname">WatchdogUsec=</code> (see
+                                above). If those options are used but
+                                <code class="varname">NotifyAccess=</code> not
+                                configured it will be implicitly set
+                                to
+                                <code class="option">main</code>.</p></dd><dt><span class="term"><code class="varname">Sockets=</code></span></dt><dd><p>Specifies the name of
                                 the socket units this service shall
                                 inherit the sockets from when the
-                                service (ignoring the different suffix
-                                of course) is started. Normally it
+                                service is started. Normally it
                                 should not be necessary to use this
                                 setting as all sockets whose unit
                                 shares the same name as the service
+                                (ignoring the different suffix of course)
                                 are passed to the spawned
                                 process.</p><p>Note that the same socket may be
                                 passed to multiple processes at the
@@ -503,7 +537,54 @@
                                 <code class="filename">/etc/fstab</code>'s
                                 fs_passno column. See
                                 <span class="citerefentry"><span class="refentrytitle">fstab</span>(5)</span>
-                                for details.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a id="id354175"/><h2>See Also</h2><p>
+                                for details.</p></dd><dt><span class="term"><code class="varname">StartLimitInterval=</code>, </span><span class="term"><code class="varname">StartLimitBurst=</code></span></dt><dd><p>Configure service
+                                start rate limiting. By default
+                                services which are started more often
+                                than 5 times within 10s are not
+                                permitted to start any more times
+                                until the 10s interval ends. With
+                                these two options this rate limiting
+                                may be modified. Use
+                                <code class="varname">StartLimitInterval=</code>
+                                to configure the checking interval
+                                (defaults to 10s, set to 0 to disable
+                                any kind of rate limiting). Use
+                                <code class="varname">StartLimitBurst=</code> to
+                                configure how many starts per interval
+                                are allowed (defaults to 5). These
+                                configuration options are particularly
+                                useful in conjunction with
+                                <code class="varname">Restart=</code>.</p></dd><dt><span class="term"><code class="varname">StartLimitAction=</code></span></dt><dd><p>Configure the action
+                                to take if the rate limit configured
+                                with
+                                <code class="varname">StartLimitInterval=</code>
+                                and
+                                <code class="varname">StartLimitBurst=</code> is
+                                hit. Takes one of
+                                <code class="option">none</code>,
+                                <code class="option">reboot</code>,
+                                <code class="option">reboot-force</code> or
+                                <code class="option">reboot-immediate</code>. If
+                                <code class="option">none</code> is set,
+                                hitting the rate limit will trigger no
+                                action besides that the start will not
+                                be
+                                permitted. <code class="option">reboot</code>
+                                causes a reboot following the normal
+                                shutdown procedure (i.e. equivalent to
+                                <span class="command"><strong>systemctl reboot</strong></span>),
+                                <code class="option">reboot-force</code> causes
+                                an forced reboot which will terminate
+                                all processes forcibly but should
+                                cause no dirty file systems on reboot
+                                (i.e. equivalent to <span class="command"><strong>systemctl
+                                reboot -f</strong></span>) and
+                                <code class="option">reboot-immediate</code>
+                                causes immediate execution of the
+                                <span class="citerefentry"><span class="refentrytitle">reboot</span>(2)</span>
+                                system call, which might result in
+                                data loss.  Defaults to
+                                <code class="option">none</code>.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a name="id535170"></a><h2>See Also</h2><p>
                           <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                           <span class="citerefentry"><span class="refentrytitle">systemctl</span>(8)</span>,
                           <span class="citerefentry"><span class="refentrytitle">systemd.unit</span>(5)</span>,

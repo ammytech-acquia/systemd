@@ -1,6 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>systemd</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="systemd"><a id="systemd"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>systemd, init — systemd System and Service Manager</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="cmdsynopsis"><p><code class="command">systemd [OPTIONS...]</code> </p></div><div class="cmdsynopsis"><p><code class="command">init [OPTIONS...]  {COMMAND}</code> </p></div></div><div class="refsect1" title="Description"><a id="id460954"/><h2>Description</h2><p>systemd is a system and service manager for
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>systemd</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="systemd"><a name="systemd"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>systemd, init — systemd System and Service Manager</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="cmdsynopsis"><p><code class="command">systemd [OPTIONS...]</code> </p></div><div class="cmdsynopsis"><p><code class="command">init [OPTIONS...]  {COMMAND}</code> </p></div></div><div class="refsect1" title="Description"><a name="id285074"></a><h2>Description</h2><p>systemd is a system and service manager for
                 Linux operating systems. When run as first process on
                 boot (as PID 1), it acts as init system that brings
                 up and maintains userspace services.</p><p>For compatibility with SysV, if systemd is called
@@ -15,7 +13,7 @@
                 <code class="filename">system.conf</code>, otherwise
                 <code class="filename">user.conf</code>. See
                 <span class="citerefentry"><span class="refentrytitle">systemd.conf</span>(5)</span>
-                for more information.</p></div><div class="refsect1" title="Options"><a id="id461025"/><h2>Options</h2><p>The following options are understood:</p><div class="variablelist"><dl><dt><span class="term"><code class="option">-h</code>, </span><span class="term"><code class="option">--help</code></span></dt><dd><p>Prints a short help
+                for more information.</p></div><div class="refsect1" title="Options"><a name="id285145"></a><h2>Options</h2><p>The following options are understood:</p><div class="variablelist"><dl><dt><span class="term"><code class="option">-h</code>, </span><span class="term"><code class="option">--help</code></span></dt><dd><p>Prints a short help
                                 text and exits.</p></dd><dt><span class="term"><code class="option">--test</code></span></dt><dd><p>Determine startup
                                 sequence, dump it and exit. This is an
                                 option useful for debugging
@@ -76,8 +74,10 @@
                                 <code class="option">true</code>.</p></dd><dt><span class="term"><code class="option">--log-target=</code></span></dt><dd><p>Set log
                                 target. Argument must be one of
                                 <code class="option">console</code>,
+                                <code class="option">journal</code>,
                                 <code class="option">syslog</code>,
                                 <code class="option">kmsg</code>,
+                                <code class="option">journal-or-kmsg</code>,
                                 <code class="option">syslog-or-kmsg</code>,
                                 <code class="option">null</code>.</p></dd><dt><span class="term"><code class="option">--log-level=</code></span></dt><dd><p>Set log level. As
                                 argument this accepts a numerical log
@@ -112,17 +112,19 @@
                                 <code class="option">inherit</code>,
                                 <code class="option">null</code>,
                                 <code class="option">tty</code>,
+                                <code class="option">journal</code>,
+                                <code class="option">journal+console</code>,
                                 <code class="option">syslog</code>,
                                 <code class="option">syslog+console</code>,
                                 <code class="option">kmsg</code>,
                                 <code class="option">kmsg+console</code>.  If the
                                 argument is omitted
                                 <code class="option">--default-standard-output=</code>
-                                defaults to <code class="option">syslog</code>
+                                defaults to <code class="option">journal</code>
                                 and
                                 <code class="option">--default-standard-error=</code>
                                 to
-                                <code class="option">inherit</code>.</p></dd></dl></div></div><div class="refsect1" title="Concepts"><a id="id469909"/><h2>Concepts</h2><p>systemd provides a dependency system between
+                                <code class="option">inherit</code>.</p></dd></dl></div></div><div class="refsect1" title="Concepts"><a name="id326306"></a><h2>Concepts</h2><p>systemd provides a dependency system between
                 various entities called "units". Units encapsulate
                 various objects that are relevant for system boot-up
                 and maintenance. The majority of units are configured
@@ -145,7 +147,7 @@
                 reference. Note that the various unit types may have a
                 number of additional substates, which are mapped to
                 the five generalized unit states described
-                here.</p><p>The following unit types are available:</p><div class="orderedlist"><ol class="orderedlist"><li class="listitem"><p>Service units, which control
+                here.</p><p>The following unit types are available:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p>Service units, which control
                         daemons and the processes they consist of. For
                         details see
                         <span class="citerefentry"><span class="refentrytitle">systemd.service</span>(5)</span>.</p></li><li class="listitem"><p>Socket units, which
@@ -227,7 +229,7 @@
                 for details about these target units.</p><p>Processes systemd spawns are placed in
                 individual Linux control groups named after the unit
                 which they belong to in the private systemd
-                hierarchy. (see <a class="ulink" href="http://www.kernel.org/doc/Documentation/cgroups/cgroups.txt">cgroups.txt</a>
+                hierarchy. (see <a class="ulink" href="http://www.kernel.org/doc/Documentation/cgroups/cgroups.txt" target="_top">cgroups.txt</a>
                 for more information about control groups, or short
                 "cgroups"). systemd uses this to effectively keep
                 track of processes. Control group information is
@@ -274,10 +276,10 @@
                 up and mounts various API file systems, such as
                 <code class="filename">/sys</code> or
                 <code class="filename">/proc</code>.</p><p>For more information about the concepts and
-                ideas behind systemd please refer to the <a class="ulink" href="http://0pointer.de/blog/projects/systemd.html">Original
+                ideas behind systemd please refer to the <a class="ulink" href="http://0pointer.de/blog/projects/systemd.html" target="_top">Original
                 Design Document</a>.</p><p>Note that some but not all interfaces provided
-                by systemd are covered by the <a class="ulink" href="http://www.freedesktop.org/wiki/Software/systemd/InterfaceStabilityPromise">Interface
-                Stability Promise</a>.</p></div><div class="refsect1" title="Directories"><a id="id470347"/><h2>Directories</h2><div class="variablelist"><dl><dt><span class="term">System unit directories</span></dt><dd><p>The systemd system
+                by systemd are covered by the <a class="ulink" href="http://www.freedesktop.org/wiki/Software/systemd/InterfaceStabilityPromise" target="_top">Interface
+                Stability Promise</a>.</p></div><div class="refsect1" title="Directories"><a name="id326681"></a><h2>Directories</h2><div class="variablelist"><dl><dt><span class="term">System unit directories</span></dt><dd><p>The systemd system
                                 manager reads unit configuration from
                                 various directories. Packages that
                                 want to install unit files shall place
@@ -302,7 +304,7 @@
                                 <span class="citerefentry"><span class="refentrytitle">systemctl</span>(1)</span>
                                 tool.</p></dd></dl></div><div class="variablelist"><dl><dt><span class="term">User unit directories</span></dt><dd><p>Similar rules apply
                                 for the user unit
-                                directories. However, here the <a class="ulink" href="http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG
+                                directories. However, here the <a class="ulink" href="http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html" target="_top">XDG
                                 Base Directory specification</a>
                                 is followed to find
                                 units. Applications should place their
@@ -337,7 +339,7 @@
                                 unit with a native unit configuration
                                 file cannot be started by activating it
                                 in the SysV runlevel link
-                                farm.</p></dd></dl></div></div><div class="refsect1" title="Signals"><a id="id470517"/><h2>Signals</h2><div class="variablelist"><dl><dt><span class="term">SIGTERM</span></dt><dd><p>Upon receiving this
+                                farm.</p></dd></dl></div></div><div class="refsect1" title="Signals"><a name="id326919"></a><h2>Signals</h2><div class="variablelist"><dl><dt><span class="term">SIGTERM</span></dt><dd><p>Upon receiving this
                                 signal the systemd system manager
                                 serializes its state, reexecutes
                                 itself and deserializes the saved
@@ -429,27 +431,31 @@
                                 line.</p></dd><dt><span class="term">SIGRTMIN+22, </span><span class="term">SIGRTMIN+23</span></dt><dd><p>Sets the log level to
                                 <code class="literal">debug</code>
                                 (resp. <code class="literal">info</code> on
-                                <code class="literal">SIGRTMIN+32</code>), as
+                                <code class="literal">SIGRTMIN+23</code>), as
                                 controlled via
                                 <code class="varname">systemd.log_level=debug</code>
                                 (resp. <code class="varname">systemd.log_level=info</code>
                                 on <code class="literal">SIGRTMIN+23</code>) on
                                 the kernel command
-                                line.</p></dd><dt><span class="term">SIGRTMIN+27, </span><span class="term">SIGRTMIN+28, </span><span class="term">SIGRTMIN+29</span></dt><dd><p>Sets the log level to
-                                <code class="literal">console</code>
-                                (resp. <code class="literal">kmsg</code> on
+                                line.</p></dd><dt><span class="term">SIGRTMIN+26, </span><span class="term">SIGRTMIN+27, </span><span class="term">SIGRTMIN+28, </span><span class="term">SIGRTMIN+29</span></dt><dd><p>Sets the log level to
+                                <code class="literal">journal-or-kmsg</code>
+                                (resp. <code class="literal">console</code> on
+                                <code class="literal">SIGRTMIN+27</code>;
+                                resp. <code class="literal">kmsg</code> on
                                 <code class="literal">SIGRTMIN+28</code>;
                                 resp. <code class="literal">syslog-or-kmsg</code>
                                 on <code class="literal">SIGRTMIN+29</code>), as
                                 controlled via
-                                <code class="varname">systemd.log_target=console</code>
-                                (resp. <code class="varname">systemd.log_target=kmsg</code>
+                                <code class="varname">systemd.log_target=journal-or-kmsg</code>
+                                (resp. <code class="varname">systemd.log_target=console</code>
+                                on <code class="literal">SIGRTMIN+27</code>;
+                                resp. <code class="varname">systemd.log_target=kmsg</code>
                                 on <code class="literal">SIGRTMIN+28</code>;
                                 resp
                                 <code class="varname">systemd.log_target=syslog-or-kmsg</code>
                                 on <code class="literal">SIGRTMIN+29</code>) on
                                 the kernel command
-                                line.</p></dd></dl></div></div><div class="refsect1" title="Environment"><a id="id471040"/><h2>Environment</h2><div class="variablelist"><dl><dt><span class="term"><code class="varname">$SYSTEMD_LOG_LEVEL</code></span></dt><dd><p>systemd reads the
+                                line.</p></dd></dl></div></div><div class="refsect1" title="Environment"><a name="id327464"></a><h2>Environment</h2><div class="variablelist"><dl><dt><span class="term"><code class="varname">$SYSTEMD_LOG_LEVEL</code></span></dt><dd><p>systemd reads the
                                 log level from this environment
                                 variable. This can be overridden with
                                 <code class="option">--log-level=</code>.</p></dd><dt><span class="term"><code class="varname">$SYSTEMD_LOG_TARGET</code></span></dt><dd><p>systemd reads the
@@ -464,7 +470,7 @@
                                 overridden with
                                 <code class="option">--log-location=</code>.</p></dd><dt><span class="term"><code class="varname">$XDG_CONFIG_HOME</code>, </span><span class="term"><code class="varname">$XDG_CONFIG_DIRS</code>, </span><span class="term"><code class="varname">$XDG_DATA_HOME</code>, </span><span class="term"><code class="varname">$XDG_DATA_DIRS</code></span></dt><dd><p>The systemd user
                                 manager uses these variables in
-                                accordance to the <a class="ulink" href="http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG
+                                accordance to the <a class="ulink" href="http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html" target="_top">XDG
                                 Base Directory specification</a>
                                 to find its configuration.</p></dd><dt><span class="term"><code class="varname">$SYSTEMD_UNIT_PATH</code></span></dt><dd><p>Controls where systemd
                                 looks for unit
@@ -481,7 +487,9 @@
                                 start-up completion notification. See
                                 <span class="citerefentry"><span class="refentrytitle">sd_notify</span>(3)</span>
                                 for more information.
-                                </p></dd></dl></div></div><div class="refsect1" title="Kernel Command Line"><a id="id471233"/><h2>Kernel Command Line</h2><p>When run as system instance systemd parses a few kernel command line arguments:</p><div class="variablelist"><dl><dt><span class="term"><code class="varname">systemd.unit=</code></span></dt><dd><p>Overrides the unit to
+                                </p></dd></dl></div></div><div class="refsect1" title="Kernel Command Line"><a name="id327657"></a><h2>Kernel Command Line</h2><p>When run as system instance systemd parses a
+                number of kernel command line
+                arguments<sup>[<a name="id327665" href="#ftn.id327665" class="footnote">1</a>]</sup>:</p><div class="variablelist"><dl><dt><span class="term"><code class="varname">systemd.unit=</code></span></dt><dd><p>Overrides the unit to
                                 activate on boot. Defaults to
                                 <code class="filename">default.target</code>. This
                                 may be used to temporarily boot into a
@@ -532,19 +540,22 @@
                                 <code class="option">--default-standard-output=</code>
                                 resp. <code class="option">--default-standard-error=</code>
                                 command line arguments described
-                                above.</p></dd></dl></div></div><div class="refsect1" title="Sockets and FIFOs"><a id="id471479"/><h2>Sockets and FIFOs</h2><div class="variablelist"><dl><dt><span class="term"><code class="filename">/run/systemd/notify</code></span></dt><dd><p>Daemon status
+                                above.</p></dd><dt><span class="term"><code class="varname">systemd.setenv=</code></span></dt><dd><p>Takes a string
+                                argument in the form
+                                VARIABLE=VALUE. May be used to set
+                                environment variables for the init
+                                process and all its children at boot
+                                time. May be used more than once to
+                                set multiple variables. If the equal
+                                sign and variable are missing unsets
+                                an environment variable which might be
+                                passed in from the initial ram
+                                disk.</p></dd></dl></div></div><div class="refsect1" title="Sockets and FIFOs"><a name="id327933"></a><h2>Sockets and FIFOs</h2><div class="variablelist"><dl><dt><span class="term"><code class="filename">/run/systemd/notify</code></span></dt><dd><p>Daemon status
                                 notification socket. This is an
                                 AF_UNIX datagram socket and is used to
                                 implement the daemon notification
                                 logic as implemented by
-                                <span class="citerefentry"><span class="refentrytitle">sd_notify</span>(3)</span>.</p></dd><dt><span class="term"><code class="filename">/run/systemd/stdout-syslog-bridge</code></span></dt><dd><p>Used internally by the
-                                <code class="filename">systemd-stdout-syslog-bridge.service</code>
-                                unit to connect STDOUT and/or STDERR
-                                of spawned processes to
-                                <span class="citerefentry"><span class="refentrytitle">syslog</span>(3)</span>
-                                or the kernel log buffer. This is an
-                                AF_UNIX stream
-                                socket.</p></dd><dt><span class="term"><code class="filename">/run/systemd/shutdownd</code></span></dt><dd><p>Used internally by the
+                                <span class="citerefentry"><span class="refentrytitle">sd_notify</span>(3)</span>.</p></dd><dt><span class="term"><code class="filename">/run/systemd/shutdownd</code></span></dt><dd><p>Used internally by the
                                 <span class="citerefentry"><span class="refentrytitle">shutdown</span>(8)</span>
                                 tool to implement delayed
                                 shutdowns. This is an AF_UNIX datagram
@@ -562,7 +573,7 @@
                                 unit. This is a named pipe in the file
                                 system. This interface is obsolete and
                                 should not be used in new
-                                applications.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a id="id471608"/><h2>See Also</h2><p>
+                                applications.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a name="id328034"></a><h2>See Also</h2><p>
                         <span class="citerefentry"><span class="refentrytitle">systemctl</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemadm</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemd-notify</span>(1)</span>,
@@ -571,4 +582,11 @@
                         <span class="citerefentry"><span class="refentrytitle">systemd.unit</span>(5)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemd.special</span>(5)</span>,
                         <span class="citerefentry"><span class="refentrytitle">pkg-config</span>(1)</span>
-                </p></div></div></body></html>
+                </p></div><div class="footnotes"><br><hr width="100" align="left"><div class="footnote"><p><sup>[<a id="ftn.id327665" href="#id327665" class="para">1</a>] </sup>If run inside a Linux
+                container these arguments may be passed as command
+                line arguments to systemd itself, next to any of the
+                command line options listed in the Options section
+                above. If run outside of Linux containers, these
+                arguments are parsed from
+                <code class="filename">/proc/cmdline</code>
+                instead.</p></div></div></div></body></html>

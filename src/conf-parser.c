@@ -30,6 +30,7 @@
 #include "macro.h"
 #include "strv.h"
 #include "log.h"
+#include "utf8.h"
 
 int config_item_table_lookup(
                 void *table,
@@ -218,8 +219,13 @@ static int parse_line(
                 return 0;
         }
 
-        if (sections && !*section)
+        if (sections && !*section) {
+
+                if (!relaxed)
+                        log_info("[%s:%u] Assignment outside of section. Ignoring.", filename, line);
+
                 return 0;
+        }
 
         e = strchr(l, '=');
         if (!e) {
@@ -454,7 +460,7 @@ int config_parse_unsigned(
         return 0;
 }
 
-int config_parse_size(
+int config_parse_bytes_size(
                 const char *filename,
                 unsigned line,
                 const char *section,
@@ -465,20 +471,47 @@ int config_parse_size(
                 void *userdata) {
 
         size_t *sz = data;
-        unsigned u;
-        int r;
+        off_t o;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
         assert(data);
 
-        if ((r = safe_atou(rvalue, &u)) < 0) {
-                log_error("[%s:%u] Failed to parse numeric value, ignoring: %s", filename, line, rvalue);
+        if (parse_bytes(rvalue, &o) < 0 || (off_t) (size_t) o != o) {
+                log_error("[%s:%u] Failed to parse byte value, ignoring: %s", filename, line, rvalue);
                 return 0;
         }
 
-        *sz = (size_t) u;
+        *sz = (size_t) o;
+        return 0;
+}
+
+
+int config_parse_bytes_off(
+                const char *filename,
+                unsigned line,
+                const char *section,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        off_t *bytes = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        assert_cc(sizeof(off_t) == sizeof(uint64_t));
+
+        if (parse_bytes(rvalue, bytes) < 0) {
+                log_error("[%s:%u] Failed to parse bytes value, ignoring: %s", filename, line, rvalue);
+                return 0;
+        }
+
         return 0;
 }
 
@@ -509,6 +542,36 @@ int config_parse_bool(
         return 0;
 }
 
+int config_parse_tristate(
+                const char *filename,
+                unsigned line,
+                const char *section,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        int k;
+        int *b = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        /* Tristates are like booleans, but can also take the 'default' value, i.e. "-1" */
+
+        k = parse_boolean(rvalue);
+        if (k < 0) {
+                log_error("[%s:%u] Failed to parse boolean value, ignoring: %s", filename, line, rvalue);
+                return 0;
+        }
+
+        *b = !!k;
+        return 0;
+}
+
 int config_parse_string(
                 const char *filename,
                 unsigned line,
@@ -527,14 +590,23 @@ int config_parse_string(
         assert(rvalue);
         assert(data);
 
-        if (*rvalue) {
-                if (!(n = strdup(rvalue)))
-                        return -ENOMEM;
-        } else
-                n = NULL;
+        n = cunescape(rvalue);
+        if (!n)
+                return -ENOMEM;
+
+        if (!utf8_is_valid(n)) {
+                log_error("[%s:%u] String is not UTF-8 clean, ignoring assignment: %s", filename, line, rvalue);
+                free(n);
+                return 0;
+        }
 
         free(*s);
-        *s = n;
+        if (*n)
+                *s = n;
+        else {
+                free(n);
+                *s = NULL;
+        }
 
         return 0;
 }
@@ -557,12 +629,18 @@ int config_parse_path(
         assert(rvalue);
         assert(data);
 
+        if (!utf8_is_valid(rvalue)) {
+                log_error("[%s:%u] Path is not UTF-8 clean, ignoring assignment: %s", filename, line, rvalue);
+                return 0;
+        }
+
         if (!path_is_absolute(rvalue)) {
                 log_error("[%s:%u] Not an absolute path, ignoring: %s", filename, line, rvalue);
                 return 0;
         }
 
-        if (!(n = strdup(rvalue)))
+        n = strdup(rvalue);
+        if (!n)
                 return -ENOMEM;
 
         path_kill_slashes(n);
@@ -589,6 +667,7 @@ int config_parse_strv(
         unsigned k;
         size_t l;
         char *state;
+        int r;
 
         assert(filename);
         assert(lvalue);
@@ -599,7 +678,8 @@ int config_parse_strv(
         FOREACH_WORD_QUOTED(w, l, rvalue, state)
                 k++;
 
-        if (!(n = new(char*, k+1)))
+        n = new(char*, k+1);
+        if (!n)
                 return -ENOMEM;
 
         if (*sv)
@@ -608,9 +688,21 @@ int config_parse_strv(
         else
                 k = 0;
 
-        FOREACH_WORD_QUOTED(w, l, rvalue, state)
-                if (!(n[k++] = cunescape_length(w, l)))
+        FOREACH_WORD_QUOTED(w, l, rvalue, state) {
+                n[k] = cunescape_length(w, l);
+                if (!n[k]) {
+                        r = -ENOMEM;
                         goto fail;
+                }
+
+                if (!utf8_is_valid(n[k])) {
+                        log_error("[%s:%u] String is not UTF-8 clean, ignoring assignment: %s", filename, line, rvalue);
+                        free(n[k]);
+                        continue;
+                }
+
+                k++;
+        }
 
         n[k] = NULL;
         free(*sv);
@@ -623,7 +715,7 @@ fail:
                 free(n[k-1]);
         free(n);
 
-        return -ENOMEM;
+        return r;
 }
 
 int config_parse_path_strv(
@@ -653,7 +745,8 @@ int config_parse_path_strv(
         FOREACH_WORD_QUOTED(w, l, rvalue, state)
                 k++;
 
-        if (!(n = new(char*, k+1)))
+        n = new(char*, k+1);
+        if (!n)
                 return -ENOMEM;
 
         k = 0;
@@ -662,9 +755,16 @@ int config_parse_path_strv(
                         n[k] = (*sv)[k];
 
         FOREACH_WORD_QUOTED(w, l, rvalue, state) {
-                if (!(n[k] = cunescape_length(w, l))) {
+                n[k] = strndup(w, l);
+                if (!n[k]) {
                         r = -ENOMEM;
                         goto fail;
+                }
+
+                if (!utf8_is_valid(n[k])) {
+                        log_error("[%s:%u] Path is not UTF-8 clean, ignoring assignment: %s", filename, line, rvalue);
+                        free(n[k]);
+                        continue;
                 }
 
                 if (!path_is_absolute(n[k])) {
@@ -674,7 +774,6 @@ int config_parse_path_strv(
                 }
 
                 path_kill_slashes(n[k]);
-
                 k++;
         }
 
@@ -685,7 +784,6 @@ int config_parse_path_strv(
         return 0;
 
 fail:
-        free(n[k]);
         for (; k > 0; k--)
                 free(n[k-1]);
         free(n);

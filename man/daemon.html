@@ -1,6 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>daemon</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="daemon"><a id="daemon"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>daemon — Writing and Packaging System Daemons</p></div><div class="refsect1" title="Description"><a id="id415986"/><h2>Description</h2><p>A daemon is a service process that runs in the
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>daemon</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="daemon"><a name="daemon"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>daemon — Writing and Packaging System Daemons</p></div><div class="refsect1" title="Description"><a name="id529079"></a><h2>Description</h2><p>A daemon is a service process that runs in the
                 background and supervises the system or provides
                 functionality to other processes. Traditionally,
                 daemons are implemented following a scheme originating
@@ -10,12 +8,12 @@
                 <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>. This
                 manual page covers both schemes, and in
                 particular includes recommendations for daemons that
-                shall be included in the systemd init system.</p><div class="refsect2" title="SysV Daemons"><a id="id447409"/><h3>SysV Daemons</h3><p>When a traditional SysV daemon
+                shall be included in the systemd init system.</p><div class="refsect2" title="SysV Daemons"><a name="id529100"></a><h3>SysV Daemons</h3><p>When a traditional SysV daemon
                         starts, it should execute the following steps
                         as part of the initialization. Note that these
                         steps are unnecessary for new-style daemons (see below),
                         and should only be implemented if compatibility
-                        with SysV is essential.</p><div class="orderedlist"><ol class="orderedlist"><li class="listitem"><p>Close all open file
+                        with SysV is essential.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p>Close all open file
                                 descriptors except STDIN, STDOUT,
                                 STDERR (i.e. the first three file
                                 descriptors 0, 1, 2). This ensures
@@ -108,7 +106,7 @@
                         behaviour optional and configurable via a
                         command line argument, to ease debugging as
                         well as to simplify integration into systems
-                        using systemd.</p></div><div class="refsect2" title="New-Style Daemons"><a id="id415003"/><h3>New-Style Daemons</h3><p>Modern services for Linux should be
+                        using systemd.</p></div><div class="refsect2" title="New-Style Daemons"><a name="id561466"></a><h3>New-Style Daemons</h3><p>Modern services for Linux should be
                         implemented as new-style daemons. This makes it
                         easier to supervise and control them at
                         runtime and simplifies their
@@ -131,7 +129,7 @@
                         STDIN/STDOUT/STDERR connected to
                         <code class="filename">/dev/null</code> unless
                         otherwise configured. The umask is reset.</p><p>It is recommended for new-style daemons
-                        to implement the following:</p><div class="orderedlist"><ol class="orderedlist"><li class="listitem"><p>If SIGTERM is
+                        to implement the following:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p>If SIGTERM is
                                 received, shut down the daemon and
                                 exit cleanly.</p></li><li class="listitem"><p>If SIGHUP is received,
                                 reload the configuration files, if
@@ -140,7 +138,7 @@
                                 this is used by the init system to
                                 detect service errors and problems. It
                                 is recommended to follow the exit code
-                                scheme as defined in the <a class="ulink" href="http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html">LSB
+                                scheme as defined in the <a class="ulink" href="http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html" target="_top">LSB
                                 recommendations for SysV init
                                 scripts</a>.</p></li><li class="listitem"><p>If possible and
                                 applicable expose the daemon's control
@@ -223,8 +221,8 @@
                                 <span class="citerefentry"><span class="refentrytitle">sd-daemon</span>(7)</span>
                                 and
                                 <span class="citerefentry"><span class="refentrytitle">systemd.exec</span>(5)</span>.</p></li></ol></div><p>These recommendations are similar but
-                        not identical to the <a class="ulink" href="http://developer.apple.com/mac/library/documentation/MacOSX/Conceptual/BPSystemStartup/Articles/LaunchOnDemandDaemons.html#//apple_ref/doc/uid/TP40001762-104738">Apple
-                        MacOS X Daemon Requirements</a>.</p></div></div><div class="refsect1" title="Activation"><a id="id456366"/><h2>Activation</h2><p>New-style init systems provide multiple
+                        not identical to the <a class="ulink" href="http://developer.apple.com/mac/library/documentation/MacOSX/Conceptual/BPSystemStartup/Articles/LaunchOnDemandDaemons.html#//apple_ref/doc/uid/TP40001762-104738" target="_top">Apple
+                        MacOS X Daemon Requirements</a>.</p></div></div><div class="refsect1" title="Activation"><a name="id570317"></a><h2>Activation</h2><p>New-style init systems provide multiple
                 additional mechanisms to activate services, as
                 detailed below. It is common that services are
                 configured to be activated via more than one mechanism
@@ -248,10 +246,10 @@
                 request is lost because client requests will be queued
                 by the bus system (in case of D-Bus) or the kernel (in
                 case of sockets), until the activation is
-                completed.</p><div class="refsect2" title="Activation on Boot"><a id="id456393"/><h3>Activation on Boot</h3><p>Old-style daemons are usually activated
+                completed.</p><div class="refsect2" title="Activation on Boot"><a name="id570344"></a><h3>Activation on Boot</h3><p>Old-style daemons are usually activated
                         exclusively on boot (and manually by the
                         administrator) via SysV init scripts, as
-                        detailed in the <a class="ulink" href="http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html">LSB
+                        detailed in the <a class="ulink" href="http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html" target="_top">LSB
                         Linux Standard Base Core
                         Specification</a>. This method of
                         activation is supported ubiquitously on Linux
@@ -276,7 +274,7 @@
                         for details about the
                         <code class="filename">.wants/</code> directories, and
                         <span class="citerefentry"><span class="refentrytitle">systemd.special</span>(7)</span>
-                        for details about the two boot targets.</p></div><div class="refsect2" title="Socket-Based Activation"><a id="id456458"/><h3>Socket-Based Activation</h3><p>In order to maximize the possible
+                        for details about the two boot targets.</p></div><div class="refsect2" title="Socket-Based Activation"><a name="id570408"></a><h3>Socket-Based Activation</h3><p>In order to maximize the possible
                         parallelization and robustness and simplify
                         configuration and development, it is
                         recommended for all new-style daemons that
@@ -347,7 +345,7 @@
                         example from
                         <code class="filename">multi-user.target</code> or
                         suchlike) when one is installed in
-                        <code class="filename">sockets.target</code>.</p></div><div class="refsect2" title="Bus-Based Activation"><a id="id456571"/><h3>Bus-Based Activation</h3><p>When the D-Bus IPC system is used for
+                        <code class="filename">sockets.target</code>.</p></div><div class="refsect2" title="Bus-Based Activation"><a name="id570521"></a><h3>Bus-Based Activation</h3><p>When the D-Bus IPC system is used for
                         communication with clients, new-style daemons
                         should employ bus activation so that they are
                         automatically activated when a client
@@ -370,7 +368,7 @@
                         <code class="filename">rtkit-daemon.service</code>. This
                         is needed to make sure that the daemon is
                         started in a race-free fashion when activated
-                        via multiple mechanisms simultaneously.</p></div><div class="refsect2" title="Device-Based Activation"><a id="id456608"/><h3>Device-Based Activation</h3><p>Often, daemons that manage a particular
+                        via multiple mechanisms simultaneously.</p></div><div class="refsect2" title="Device-Based Activation"><a name="id570558"></a><h3>Device-Based Activation</h3><p>Often, daemons that manage a particular
                         type of hardware should be activated only when
                         the hardware of the respective kind is plugged
                         in or otherwise becomes available. In a
@@ -406,7 +404,7 @@
                         <span class="command"><strong>enable</strong></span> of
                         <span class="citerefentry"><span class="refentrytitle">systemctl</span>(1)</span>
                         instead of manipulating the udev
-                        ruleset.</p></div><div class="refsect2" title="Path-Based Activation"><a id="id414401"/><h3>Path-Based Activation</h3><p>Often, runtime of daemons processing
+                        ruleset.</p></div><div class="refsect2" title="Path-Based Activation"><a name="id528395"></a><h3>Path-Based Activation</h3><p>Often, runtime of daemons processing
                         spool files or directories (such as a printing
                         system) can be delayed until these file system
                         objects change state, or become
@@ -416,13 +414,13 @@
                         path-based activation configured in
                         <code class="filename">.path</code> units, as outlined
                         in
-                        <span class="citerefentry"><span class="refentrytitle">systemd.path</span>(5)</span>.</p></div><div class="refsect2" title="Timer-Based Activation"><a id="id456779"/><h3>Timer-Based Activation</h3><p>Some daemons that implement clean-up
+                        <span class="citerefentry"><span class="refentrytitle">systemd.path</span>(5)</span>.</p></div><div class="refsect2" title="Timer-Based Activation"><a name="id570731"></a><h3>Timer-Based Activation</h3><p>Some daemons that implement clean-up
                         jobs that are intended to be executed in
                         regular intervals benefit from timer-based
                         activation. In systemd, this is implemented
                         via <code class="filename">.timer</code> units, as
                         described in
-                        <span class="citerefentry"><span class="refentrytitle">systemd.timer</span>(5)</span>.</p></div><div class="refsect2" title="Other Forms of Activation"><a id="id456804"/><h3>Other Forms of Activation</h3><p>Other forms of activation have been
+                        <span class="citerefentry"><span class="refentrytitle">systemd.timer</span>(5)</span>.</p></div><div class="refsect2" title="Other Forms of Activation"><a name="id570756"></a><h3>Other Forms of Activation</h3><p>Other forms of activation have been
                         suggested and implemented in some
                         systems. However, often there are simpler or
                         better alternatives, or they can be put
@@ -467,9 +465,9 @@
                         activation to schedule background jobs during
                         runtime and with minimal impact on the system,
                         and remove it from the boot phase
-                        itself.</p></div></div><div class="refsect1" title="Integration with Systemd"><a id="id456859"/><h2>Integration with Systemd</h2><div class="refsect2" title="Writing Systemd Unit Files"><a id="id456864"/><h3>Writing Systemd Unit Files</h3><p>When writing systemd unit files, it is
+                        itself.</p></div></div><div class="refsect1" title="Integration with Systemd"><a name="id570811"></a><h2>Integration with Systemd</h2><div class="refsect2" title="Writing Systemd Unit Files"><a name="id570816"></a><h3>Writing Systemd Unit Files</h3><p>When writing systemd unit files, it is
                         recommended to consider the following
-                        suggestions:</p><div class="orderedlist"><ol class="orderedlist"><li class="listitem"><p>If possible do not use
+                        suggestions:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p>If possible do not use
                                 the <code class="varname">Type=forking</code>
                                 setting in service files. But if you
                                 do, make sure to set the PID file path
@@ -516,7 +514,7 @@
                                 your service file
                                 <code class="filename">foo.service</code>, for
                                 a hypothetical program
-                                <code class="filename">foo</code>.</p></li></ol></div></div><div class="refsect2" title="Installing Systemd Service Files"><a id="id456994"/><h3>Installing Systemd Service Files</h3><p>At the build installation time
+                                <code class="filename">foo</code>.</p></li></ol></div></div><div class="refsect2" title="Installing Systemd Service Files"><a name="id570946"></a><h3>Installing Systemd Service Files</h3><p>At the build installation time
                         (e.g. <span class="command"><strong>make install</strong></span> during
                         package build) packages are recommended to
                         install their systemd unit files in the
@@ -623,13 +621,13 @@ fi</pre><p>Where 0.47.11-1 is the first package
                         specific to Fedora which can be used to check
                         whether a SysV init script is enabled. Other
                         operating systems will have to use different
-                        commands here.</p></div></div><div class="refsect1" title="Porting Existing Daemons"><a id="id457189"/><h2>Porting Existing Daemons</h2><p>Since new-style init systems such as systemd are
+                        commands here.</p></div></div><div class="refsect1" title="Porting Existing Daemons"><a name="id571140"></a><h2>Porting Existing Daemons</h2><p>Since new-style init systems such as systemd are
                 compatible with traditional SysV init systems it is
                 not strictly necessary to port existing daemons to the
                 new style. However doing so offers additional
                 functionality to the daemons as well as simplifying
                 integration into new-style init systems.</p><p>To port an existing SysV compatible daemon the
-                following steps are recommended:</p><div class="orderedlist"><ol class="orderedlist"><li class="listitem"><p>If not already implemented,
+                following steps are recommended:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p>If not already implemented,
                         add an optional command line switch to the
                         daemon to disable daemonization. This is
                         useful not only for using the daemon in
@@ -668,7 +666,7 @@ fi</pre><p>Where 0.47.11-1 is the first package
                         details.</p></li><li class="listitem"><p>If the daemon exposes
                         interfaces via D-Bus, write and install a
                         D-Bus activation file for the service, see
-                        above for details.</p></li></ol></div></div><div class="refsect1" title="See Also"><a id="id457271"/><h2>See Also</h2><p>
+                        above for details.</p></li></ol></div></div><div class="refsect1" title="See Also"><a name="id571223"></a><h2>See Also</h2><p>
                         <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">sd-daemon</span>(7)</span>,
                         <span class="citerefentry"><span class="refentrytitle">sd_listen_fds</span>(3)</span>,

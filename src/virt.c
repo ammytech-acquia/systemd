@@ -209,6 +209,13 @@ int detect_container(const char **id) {
                                         *id = "lxc";
                                 return 1;
 
+                        } else if (streq(line, "container=lxc-libvirt")) {
+                                fclose(f);
+
+                                if (id)
+                                        *id = "lxc-libvirt";
+                                return 1;
+
                         } else if (streq(line, "container=systemd-nspawn")) {
                                 fclose(f);
 
@@ -225,35 +232,6 @@ int detect_container(const char **id) {
                         }
 
                 } while (!done);
-
-                fclose(f);
-        }
-
-        f = fopen("/proc/self/cgroup", "re");
-        if (f) {
-
-                for (;;) {
-                        char line[LINE_MAX], *p;
-
-                        if (!fgets(line, sizeof(line), f))
-                                break;
-
-                        p = strchr(strstrip(line), ':');
-                        if (!p)
-                                continue;
-
-                        if (strncmp(p, ":ns:", 4))
-                                continue;
-
-                        if (!streq(p, ":ns:/")) {
-                                fclose(f);
-
-                                if (id)
-                                        *id = "pidns";
-
-                                return 1;
-                        }
-                }
 
                 fclose(f);
         }

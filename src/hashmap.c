@@ -55,10 +55,10 @@ struct pool {
         unsigned n_used;
 };
 
-struct pool *first_hashmap_pool = NULL;
+static struct pool *first_hashmap_pool = NULL;
 static void *first_hashmap_tile = NULL;
 
-struct pool *first_entry_pool = NULL;
+static struct pool *first_entry_pool = NULL;
 static void *first_entry_tile = NULL;
 
 static void* allocate_tile(struct pool **first_pool, void **first_tile, size_t tile_size) {
@@ -556,6 +556,17 @@ void* hashmap_first(Hashmap *h) {
                 return NULL;
 
         return h->iterate_list_head->value;
+}
+
+void* hashmap_first_key(Hashmap *h) {
+
+        if (!h)
+                return NULL;
+
+        if (!h->iterate_list_head)
+                return NULL;
+
+        return (void*) h->iterate_list_head->key;
 }
 
 void* hashmap_last(Hashmap *h) {

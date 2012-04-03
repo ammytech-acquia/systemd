@@ -1,9 +1,7 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>systemctl</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="systemctl"><a id="systemctl"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>systemctl — Control the systemd system and service manager</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="cmdsynopsis"><p><code class="command">systemctl [OPTIONS...]  {COMMAND}  [NAME...]</code> </p></div></div><div class="refsect1" title="Description"><a id="id447628"/><h2>Description</h2><p><span class="command"><strong>systemctl</strong></span> may be used to
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>systemctl</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="systemctl"><a name="systemctl"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>systemctl — Control the systemd system and service manager</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="cmdsynopsis"><p><code class="command">systemctl [OPTIONS...]  {COMMAND}  [NAME...]</code> </p></div></div><div class="refsect1" title="Description"><a name="id497096"></a><h2>Description</h2><p><span class="command"><strong>systemctl</strong></span> may be used to
                 introspect and control the state of the
                 <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>
-                system and service manager.</p></div><div class="refsect1" title="Options"><a id="id447650"/><h2>Options</h2><p>The following options are understood:</p><div class="variablelist"><dl><dt><span class="term"><code class="option">--help</code>, </span><span class="term"><code class="option">-h</code></span></dt><dd><p>Prints a short help
+                system and service manager.</p></div><div class="refsect1" title="Options"><a name="id497118"></a><h2>Options</h2><p>The following options are understood:</p><div class="variablelist"><dl><dt><span class="term"><code class="option">--help</code>, </span><span class="term"><code class="option">-h</code></span></dt><dd><p>Prints a short help
                                 text and exits.</p></dd><dt><span class="term"><code class="option">--version</code></span></dt><dd><p>Prints a short version
                                 string and exits.</p></dd><dt><span class="term"><code class="option">--type=</code>, </span><span class="term"><code class="option">-t</code></span></dt><dd><p>When listing units,
                                 limit display to certain unit
@@ -139,14 +137,22 @@
                                 <span class="command"><strong>halt</strong></span>,
                                 <span class="command"><strong>poweroff</strong></span>,
                                 <span class="command"><strong>reboot</strong></span> or
-                                <span class="command"><strong>kexec</strong></span> execute
+                                <span class="command"><strong>kexec</strong></span> execute the
                                 selected operation without shutting
                                 down all units. However, all processes
                                 will be killed forcibly and all file
                                 systems are unmounted or remounted
                                 read-only. This is hence a drastic but
                                 relatively safe option to request an
-                                immediate reboot.</p></dd><dt><span class="term"><code class="option">--root=</code></span></dt><dd><p>When used with
+                                immediate reboot. If
+                                <code class="option">--force</code> is specified
+                                twice for these operations, they will
+                                be executed immediately without
+                                terminating any processes or umounting
+                                any file systems. Warning: specifying
+                                <code class="option">--force</code> twice with
+                                any of these operations might result
+                                in data loss.</p></dd><dt><span class="term"><code class="option">--root=</code></span></dt><dd><p>When used with
                                 <span class="command"><strong>enable</strong></span>/<span class="command"><strong>disable</strong></span>/<span class="command"><strong>is-enabled</strong></span> (and
                                 related commands), use alternative
                                 root path when looking for unit
@@ -168,7 +174,24 @@
                                 talk to the remote systemd
                                 instance.</p></dd><dt><span class="term"><code class="option">-P</code>, </span><span class="term"><code class="option">--privileged</code></span></dt><dd><p>Acquire privileges via
                                 PolicyKit before executing the
-                                operation.</p></dd></dl></div><p>The following commands are understood:</p><div class="variablelist"><dl><dt><span class="term"><span class="command"><strong>list-units</strong></span></span></dt><dd><p>List known units.</p></dd><dt><span class="term"><span class="command"><strong>start [NAME...]</strong></span></span></dt><dd><p>Start (activate) one
+                                operation.</p></dd><dt><span class="term"><code class="option">--lines=</code>, </span><span class="term"><code class="option">-n</code></span></dt><dd><p>When used with
+                                <span class="command"><strong>status</strong></span> controls the
+                                number of journal lines to show,
+                                counting from the most recent
+                                ones. Takes a positive integer
+                                argument. Defaults to
+                                10.</p></dd><dt><span class="term"><code class="option">--follow</code>, </span><span class="term"><code class="option">-f</code></span></dt><dd><p>When used with
+                                <span class="command"><strong>status</strong></span> continously
+                                prints new journal entries as they are
+                                appended to the
+                                journal.</p></dd><dt><span class="term"><code class="option">--output=</code>, </span><span class="term"><code class="option">-o</code></span></dt><dd><p>When used with
+                                <span class="command"><strong>status</strong></span> controls the
+                                formatting of the journal entries that
+                                are shown. For the available choices
+                                see
+                                <span class="citerefentry"><span class="refentrytitle">systemd-journalctl</span>(1)</span>. Defaults
+                                to
+                                <code class="literal">short</code>.</p></dd></dl></div><p>The following commands are understood:</p><div class="variablelist"><dl><dt><span class="term"><span class="command"><strong>list-units</strong></span></span></dt><dd><p>List known units.</p></dd><dt><span class="term"><span class="command"><strong>start [NAME...]</strong></span></span></dt><dd><p>Start (activate) one
                                 or more units specified on the command
                                 line.</p></dd><dt><span class="term"><span class="command"><strong>stop [NAME...]</strong></span></span></dt><dd><p>Stop (deactivate) one
                                 or more units specified on the command
@@ -242,14 +265,15 @@
                                 this will also print the current unit
                                 state to STDOUT.</p></dd><dt><span class="term"><span class="command"><strong>status [NAME...|PID...]</strong></span></span></dt><dd><p>Show terse runtime
                                 status information about one or more
-                                units. This function is intended to
-                                generate human-readable output. If you
-                                are looking for computer-parsable
-                                output, use <span class="command"><strong>show</strong></span>
-                                instead. If a PID is passed
-                                information about the unit the process
-                                of the PID belongs to is
-                                shown.</p></dd><dt><span class="term"><span class="command"><strong>show [NAME...|JOB...]</strong></span></span></dt><dd><p>Show properties of one
+                                units, followed by its most recent log
+                                data from the journal. This function
+                                is intended to generate human-readable
+                                output. If you are looking for
+                                computer-parsable output, use
+                                <span class="command"><strong>show</strong></span> instead. If a
+                                PID is passed information about the
+                                unit the process of the PID belongs to
+                                is shown.</p></dd><dt><span class="term"><span class="command"><strong>show [NAME...|JOB...]</strong></span></span></dt><dd><p>Show properties of one
                                 or more units, jobs or the manager
                                 itself. If no argument is specified
                                 properties of the manager will be
@@ -529,38 +553,51 @@
                                 system. This is mostly equivalent to
                                 <span class="command"><strong>start halt.target</strong></span>
                                 but also prints a wall message to all
-                                users.  If
-                                combined with <code class="option">--force</code>
-                                shutdown of all running services is
-                                skipped, however all processes are killed
-                                and all file systems are unmounted or
+                                users.  If combined with
+                                <code class="option">--force</code> shutdown of
+                                all running services is skipped,
+                                however all processes are killed and
+                                all file systems are unmounted or
                                 mounted read-only, immediately
-                                followed by the
-                                system halt.</p></dd><dt><span class="term"><span class="command"><strong>poweroff</strong></span></span></dt><dd><p>Shut down and
+                                followed by the system halt.  If
+                                <code class="option">--force</code> is specified
+                                twice the the operation is immediately
+                                executed without terminating any
+                                processes or unmounting any file
+                                systems. This may result in data
+                                loss.</p></dd><dt><span class="term"><span class="command"><strong>poweroff</strong></span></span></dt><dd><p>Shut down and
                                 power-off the system. This is mostly
                                 equivalent to <span class="command"><strong>start
                                 poweroff.target</strong></span> but also
-                                prints a wall message to all
-                                users. If
+                                prints a wall message to all users. If
                                 combined with <code class="option">--force</code>
                                 shutdown of all running services is
-                                skipped, however all processes are killed
-                                and all file systems are unmounted or
-                                mounted read-only, immediately
-                                followed by the
-                                powering off.</p></dd><dt><span class="term"><span class="command"><strong>reboot</strong></span></span></dt><dd><p>Shut down and
-                                reboot the system. This is mostly
-                                equivalent to <span class="command"><strong>start
+                                skipped, however all processes are
+                                killed and all file systems are
+                                unmounted or mounted read-only,
+                                immediately followed by the powering
+                                off. If <code class="option">--force</code> is
+                                specified twice the the operation is
+                                immediately executed without
+                                terminating any processes or
+                                unmounting any file systems. This may
+                                result in data loss.</p></dd><dt><span class="term"><span class="command"><strong>reboot</strong></span></span></dt><dd><p>Shut down and reboot
+                                the system. This is mostly equivalent
+                                to <span class="command"><strong>start
                                 reboot.target</strong></span> but also
-                                prints a wall message to all
-                                users. If
+                                prints a wall message to all users. If
                                 combined with <code class="option">--force</code>
                                 shutdown of all running services is
-                                skipped, however all processes are killed
-                                and all file systems are unmounted or
-                                mounted read-only, immediately
-                                followed by the
-                                reboot.</p></dd><dt><span class="term"><span class="command"><strong>kexec</strong></span></span></dt><dd><p>Shut down and reboot
+                                skipped, however all processes are
+                                killed and all file systems are
+                                unmounted or mounted read-only,
+                                immediately followed by the reboot. If
+                                <code class="option">--force</code> is specified
+                                twice the the operation is immediately
+                                executed without terminating any
+                                processes or unmounting any file
+                                systems. This may result in data
+                                loss.</p></dd><dt><span class="term"><span class="command"><strong>kexec</strong></span></span></dt><dd><p>Shut down and reboot
                                 the system via kexec. This is mostly
                                 equivalent to <span class="command"><strong>start
                                 kexec.target</strong></span> but also prints
@@ -576,15 +613,16 @@
                                 supported for user service managers
                                 (i.e. in conjunction with the
                                 <code class="option">--user</code> option) and
-                                will fail otherwise.</p></dd></dl></div></div><div class="refsect1" title="Exit status"><a id="id458094"/><h2>Exit status</h2><p>On success 0 is returned, a non-zero failure
-                code otherwise.</p></div><div class="refsect1" title="Environment"><a id="id458104"/><h2>Environment</h2><div class="variablelist"><dl><dt><span class="term"><code class="varname">$SYSTEMD_PAGER</code></span></dt><dd><p>Pager to use when
+                                will fail otherwise.</p></dd></dl></div></div><div class="refsect1" title="Exit status"><a name="id539943"></a><h2>Exit status</h2><p>On success 0 is returned, a non-zero failure
+                code otherwise.</p></div><div class="refsect1" title="Environment"><a name="id539953"></a><h2>Environment</h2><div class="variablelist"><dl><dt><span class="term"><code class="varname">$SYSTEMD_PAGER</code></span></dt><dd><p>Pager to use when
                                 <code class="option">--no-pager</code> is not given;
                                 overrides <code class="varname">$PAGER</code>.  Setting
                                 this to an empty string or the value
                                 <code class="literal">cat</code> is equivalent to passing
-                                <code class="option">--no-pager</code>.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a id="id458143"/><h2>See Also</h2><p>
+                                <code class="option">--no-pager</code>.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a name="id539992"></a><h2>See Also</h2><p>
                         <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemadm</span>(1)</span>,
+                        <span class="citerefentry"><span class="refentrytitle">systemd-journalctl</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemd-loginctl</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemd.unit</span>(5)</span>,
                         <span class="citerefentry"><span class="refentrytitle">systemd.special</span>(7)</span>,

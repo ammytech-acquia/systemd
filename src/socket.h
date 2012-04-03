@@ -28,6 +28,7 @@ typedef struct Socket Socket;
 #include "unit.h"
 #include "socket-util.h"
 #include "mount.h"
+#include "service.h"
 
 typedef enum SocketState {
         SOCKET_DEAD,
@@ -64,6 +65,18 @@ typedef enum SocketType {
         _SOCKET_FIFO_INVALID = -1
 } SocketType;
 
+typedef enum SocketResult {
+        SOCKET_SUCCESS,
+        SOCKET_FAILURE_RESOURCES,
+        SOCKET_FAILURE_TIMEOUT,
+        SOCKET_FAILURE_EXIT_CODE,
+        SOCKET_FAILURE_SIGNAL,
+        SOCKET_FAILURE_CORE_DUMP,
+        SOCKET_FAILURE_SERVICE_FAILED_PERMANENT,
+        _SOCKET_RESULT_MAX,
+        _SOCKET_RESULT_INVALID = -1
+} SocketResult;
+
 typedef struct SocketPort {
         SocketType type;
         int fd;
@@ -76,7 +89,7 @@ typedef struct SocketPort {
 } SocketPort;
 
 struct Socket {
-        Meta meta;
+        Unit meta;
 
         LIST_HEAD(SocketPort, ports);
 
@@ -93,7 +106,7 @@ struct Socket {
         /* For Accept=no sockets refers to the one service we'll
         activate. For Accept=yes sockets is either NULL, or filled
         when the next service we spawn. */
-        Service *service;
+        UnitRef service;
 
         SocketState state, deserialized_state;
 
@@ -103,13 +116,10 @@ struct Socket {
         SocketExecCommand control_command_id;
         pid_t control_pid;
 
-        /* Only for INET6 sockets: issue IPV6_V6ONLY sockopt */
-        SocketAddressBindIPv6Only bind_ipv6_only;
-
         mode_t directory_mode;
         mode_t socket_mode;
 
-        bool failure;
+        SocketResult result;
 
         bool accept;
 
@@ -118,6 +128,8 @@ struct Socket {
         bool free_bind;
         bool transparent;
         bool broadcast;
+        bool pass_cred;
+        bool pass_sec;
         int priority;
         int mark;
         size_t receive_buffer;
@@ -129,13 +141,16 @@ struct Socket {
         char *tcp_congestion;
         long mq_maxmsg;
         long mq_msgsize;
+
+        /* Only for INET6 sockets: issue IPV6_V6ONLY sockopt */
+        SocketAddressBindIPv6Only bind_ipv6_only;
 };
 
 /* Called from the service code when collecting fds */
 int socket_collect_fds(Socket *s, int **fds, unsigned *n_fds);
 
 /* Called from the service when it shut down */
-void socket_notify_service_dead(Socket *s);
+void socket_notify_service_dead(Socket *s, bool failed_permanent);
 
 /* Called from the mount code figure out if a mount is a dependency of
  * any of the sockets of this socket */
@@ -151,5 +166,8 @@ SocketState socket_state_from_string(const char *s);
 
 const char* socket_exec_command_to_string(SocketExecCommand i);
 SocketExecCommand socket_exec_command_from_string(const char *s);
+
+const char* socket_result_to_string(SocketResult i);
+SocketResult socket_result_from_string(const char *s);
 
 #endif

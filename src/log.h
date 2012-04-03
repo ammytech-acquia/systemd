@@ -24,17 +24,18 @@
 
 #include <syslog.h>
 #include <stdbool.h>
+#include <stdarg.h>
 
 #include "macro.h"
 
-/* If set to SYSLOG and /dev/log can not be opened we fall back to
- * KSMG. If KMSG fails, we fall back to CONSOLE */
 typedef enum LogTarget{
         LOG_TARGET_CONSOLE,
         LOG_TARGET_KMSG,
+        LOG_TARGET_JOURNAL,
+        LOG_TARGET_JOURNAL_OR_KMSG,
         LOG_TARGET_SYSLOG,
         LOG_TARGET_SYSLOG_OR_KMSG,
-        LOG_TARGET_AUTO, /* console if stderr is tty, SYSLOG_OR_KMSG otherwise */
+        LOG_TARGET_AUTO, /* console if stderr is tty, JOURNAL_OR_KMSG otherwise */
         LOG_TARGET_NULL,
         _LOG_TARGET_MAX,
         _LOG_TARGET_INVALID = -1
@@ -57,8 +58,10 @@ int log_get_max_level(void);
 
 int log_open(void);
 void log_close(void);
+void log_forget_fds(void);
 
 void log_close_syslog(void);
+void log_close_journal(void);
 void log_close_kmsg(void);
 void log_close_console(void);
 
@@ -71,11 +74,16 @@ int log_meta(
         const char *func,
         const char *format, ...) _printf_attr_(5,6);
 
-_noreturn_ void log_assert(
+int log_metav(
+        int level,
         const char*file,
         int line,
         const char *func,
-        const char *format, ...) _printf_attr_(4,5);
+        const char *format,
+        va_list ap);
+
+_noreturn_ void log_assert_failed(const char *text, const char *file, int line, const char *func);
+_noreturn_ void log_assert_failed_unreachable(const char *text, const char *file, int line, const char *func);
 
 /* This modifies the buffer passed! */
 int log_dump_internal(

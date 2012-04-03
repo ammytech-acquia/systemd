@@ -28,7 +28,7 @@
 #include "unit-name.h"
 #include "virt.h"
 
-const char *arg_dest = "/tmp";
+static const char *arg_dest = "/tmp";
 
 static int add_symlink(const char *fservice, const char *tservice) {
         char *from = NULL, *to = NULL;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        log_set_target(LOG_TARGET_SYSLOG_OR_KMSG);
+        log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
 

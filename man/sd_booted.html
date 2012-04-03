@@ -1,10 +1,8 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>sd_booted</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="sd_booted"><a id="sd_booted"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>sd_booted — Test whether the system is running the systemd init system.</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="funcsynopsis"><pre class="funcsynopsisinfo">#include "sd-daemon.h"</pre><table border="0" summary="Function synopsis" cellspacing="0" cellpadding="0" class="funcprototype-table"><tr><td><code class="funcdef">int <strong>fsfuncsd_booted</strong>(</code></td><td>void<code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div></div><div class="refsect1" title="Description"><a id="id375119"/><h2>Description</h2><p><code class="function">sd_booted()</code> checks whether
-                the system was booted up using the systemd init system.</p></div><div class="refsect1" title="Return Value"><a id="id375134"/><h2>Return Value</h2><p>On failure, this call returns a negative
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>sd_booted</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="sd_booted"><a name="sd_booted"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>sd_booted — Test whether the system is running the systemd init system.</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="funcsynopsis"><pre class="funcsynopsisinfo">#include &lt;systemd/sd-daemon.h&gt;</pre><table border="0" summary="Function synopsis" cellspacing="0" cellpadding="0" class="funcprototype-table"><tr><td><code class="funcdef">int <b class="fsfunc">sd_booted</b>(</code></td><td>void<code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div></div><div class="refsect1" title="Description"><a name="id278736"></a><h2>Description</h2><p><code class="function">sd_booted()</code> checks whether
+                the system was booted up using the systemd init system.</p></div><div class="refsect1" title="Return Value"><a name="id278750"></a><h2>Return Value</h2><p>On failure, this call returns a negative
                 errno-style error code. If the system was booted up
                 with systemd as init system, this call returns a
-                positive return value, zero otherwise.</p></div><div class="refsect1" title="Notes"><a id="id375146"/><h2>Notes</h2><p>This function is provided by the reference
+                positive return value, zero otherwise.</p></div><div class="refsect1" title="Notes"><a name="id278762"></a><h2>Notes</h2><p>This function is provided by the reference
                 implementation of APIs for new-style daemons and
                 distributed with the systemd package. The algorithm it
                 implements is simple, and can easily be reimplemented
@@ -17,8 +15,8 @@
                 <code class="filename">/sys/fs/cgroup</code> and
                 <code class="filename">/sys/fs/cgroup/systemd</code>.</p><p>For details about the algorithm check the
                 liberally licensed reference implementation sources:
-                <a class="ulink" href="http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.c">http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.c</a>
-                resp. <a class="ulink" href="http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.h">http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.h</a></p><p><code class="function">sd_booted()</code> is implemented
+                <a class="ulink" href="http://cgit.freedesktop.org/systemd/systemd/plain/src/sd-daemon.c" target="_top">http://cgit.freedesktop.org/systemd/systemd/plain/src/sd-daemon.c</a>
+                resp. <a class="ulink" href="http://cgit.freedesktop.org/systemd/systemd/plain/src/systemd/sd-daemon.h" target="_top">http://cgit.freedesktop.org/systemd/systemd/plain/src/systemd/sd-daemon.h</a></p><p><code class="function">sd_booted()</code> is implemented
                 in the reference implementation's
                 <code class="filename">sd-daemon.c</code> and
                 <code class="filename">sd-daemon.h</code> files. These
@@ -33,7 +31,7 @@
                 <span class="citerefentry"><span class="refentrytitle">sd_daemon</span>(7)</span>.</p><p>If the reference implementation is used as
                 drop-in files and -DDISABLE_SYSTEMD is set during
                 compilation this function will always return 0 and
-                otherwise become a NOP.</p></div><div class="refsect1" title="See Also"><a id="id342602"/><h2>See Also</h2><p>
+                otherwise become a NOP.</p></div><div class="refsect1" title="See Also"><a name="id310991"></a><h2>See Also</h2><p>
                         <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">sd_daemon</span>(7)</span>
                 </p></div></div></body></html>

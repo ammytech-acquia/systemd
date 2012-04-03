@@ -1,7 +1,5 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>sd-daemon</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="sd-daemon"><a id="sd-daemon"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>sd-daemon — Reference implementation of APIs for
-                new-style daemons</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="funcsynopsis"><pre class="funcsynopsisinfo">#include "sd-daemon.h"</pre></div><div class="cmdsynopsis"><p><code class="command">pkg-config --cflags --libs libsystemd-daemon</code> </p></div></div><div class="refsect1" title="Description"><a id="id470689"/><h2>Description</h2><p><code class="filename">sd-daemon.c</code> and
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>sd-daemon</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="sd-daemon"><a name="sd-daemon"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>sd-daemon — Reference implementation of APIs for
+                new-style daemons</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><div class="funcsynopsis"><pre class="funcsynopsisinfo">#include &lt;systemd/sd-daemon.h&gt;</pre></div><div class="cmdsynopsis"><p><code class="command">pkg-config --cflags --libs libsystemd-daemon</code> </p></div></div><div class="refsect1" title="Description"><a name="id535653"></a><h2>Description</h2><p><code class="filename">sd-daemon.c</code> and
                 <code class="filename">sd-daemon.h</code> provide a reference
                 implementation of various APIs for new-style daemons,
                 as implemented by the
@@ -34,8 +32,8 @@
                 log level system. To use these prefixes simply prefix
                 every line with one of these strings. A line that is
                 not prefixed will be logged at the default log level
-                SD_INFO.</p><div class="example"><a id="id470798"/><p class="title"><strong>Example 1. Hello World</strong></p><div class="example-contents"><p>A daemon may log with the log level
-                        NOTICE by issuing this call:</p><pre class="programlisting">fprintf(stderr, SD_NOTICE "Hello World!\n");</pre></div></div><br class="example-break"/></div><div class="refsect1" title="Notes"><a id="id438171"/><h2>Notes</h2><p>These interfaces are provided by the reference
+                SD_INFO.</p><div class="example"><a name="id535762"></a><p class="title"><b>Example 1. Hello World</b></p><div class="example-contents"><p>A daemon may log with the log level
+                        NOTICE by issuing this call:</p><pre class="programlisting">fprintf(stderr, SD_NOTICE "Hello World!\n");</pre></div></div><br class="example-break"></div><div class="refsect1" title="Notes"><a name="id567907"></a><h2>Notes</h2><p>These interfaces are provided by the reference
                 implementation of APIs for new-style daemons and
                 distributed with the systemd package. The algorithms
                 they implement are simple, and can easily be
@@ -45,8 +43,8 @@
                 for details.</p><p>In addition, for details about the algorithms
                 check the liberally licensed reference implementation
                 sources:
-                <a class="ulink" href="http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.c">http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.c</a>
-                resp. <a class="ulink" href="http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.h">http://cgit.freedesktop.org/systemd/tree/src/sd-daemon.h</a></p><p>These APIs are implemented in the reference
+                <a class="ulink" href="http://cgit.freedesktop.org/systemd/systemd/plain/src/sd-daemon.c" target="_top">http://cgit.freedesktop.org/systemd/systemd/plain/src/sd-daemon.c</a>
+                resp. <a class="ulink" href="http://cgit.freedesktop.org/systemd/systemd/plain/src/systemd/sd-daemon.h" target="_top">http://cgit.freedesktop.org/systemd/systemd/plain/src/systemd/sd-daemon.h</a></p><p>These APIs are implemented in the reference
                 implementation's <code class="filename">sd-daemon.c</code> and
                 <code class="filename">sd-daemon.h</code> files. These
                 interfaces are available as shared library, which can
@@ -60,7 +58,7 @@
                 during compilation and the reference implementation is
                 used as drop-in files. In addition, if
                 <code class="filename">sd-daemon.c</code> is compiled on
-                non-Linux systems they become NOPs.</p></div><div class="refsect1" title="See Also"><a id="id438239"/><h2>See Also</h2><p>
+                non-Linux systems they become NOPs.</p></div><div class="refsect1" title="See Also"><a name="id567974"></a><h2>See Also</h2><p>
                         <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                         <span class="citerefentry"><span class="refentrytitle">sd_listen_fds</span>(3)</span>,
                         <span class="citerefentry"><span class="refentrytitle">sd_notify</span>(3)</span>,

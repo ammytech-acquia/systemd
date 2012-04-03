@@ -1,6 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>systemd.socket</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"/></head><body><div class="refentry" title="systemd.socket"><a id="systemd.socket"/><div class="titlepage"/><div class="refnamediv"><h2>Name</h2><p>systemd.socket — systemd socket configuration files</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><p><code class="filename">systemd.socket</code></p></div><div class="refsect1" title="Description"><a id="id555090"/><h2>Description</h2><p>A unit configuration file whose name ends in
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>systemd.socket</title><meta name="generator" content="DocBook XSL Stylesheets V1.76.1"></head><body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF"><div class="refentry" title="systemd.socket"><a name="systemd.socket"></a><div class="titlepage"></div><div class="refnamediv"><h2>Name</h2><p>systemd.socket — systemd socket configuration files</p></div><div class="refsynopsisdiv" title="Synopsis"><h2>Synopsis</h2><p><code class="filename">systemd.socket</code></p></div><div class="refsect1" title="Description"><a name="id292645"></a><h2>Description</h2><p>A unit configuration file whose name ends in
                 <code class="filename">.socket</code> encodes information about
                 an IPC or network socket or a file system FIFO
                 controlled and supervised by systemd, for socket-based
@@ -57,7 +55,7 @@
                 <span class="citerefentry"><span class="refentrytitle">inetd</span>(8)</span>-style
                 socket passing (i.e. sockets passed in via STDIN and
                 STDOUT, using <code class="varname">StandardInput=socket</code>
-                in the service file).</p></div><div class="refsect1" title="Options"><a id="id522611"/><h2>Options</h2><p>Socket files must include a [Socket] section,
+                in the service file).</p></div><div class="refsect1" title="Options"><a name="id324942"></a><h2>Options</h2><p>Socket files must include a [Socket] section,
                 which carries information about the socket or FIFO it
                 supervises. A number of options that may be used in
                 this section are shared with other unit types. These
@@ -73,7 +71,7 @@
                                 slash (/), it is read as file system
                                 socket in the AF_UNIX socket
                                 family.</p><p>If the address starts with an
-                                ampersand (@) it is read as abstract
+                                at symbol (@) it is read as abstract
                                 namespace socket in the AF_UNIX
                                 family. The @ is replaced with a NUL
                                 character before binding. For details
@@ -237,7 +235,7 @@
                                 socket. This controls the SO_KEEPALIVE
                                 socket option (see
                                 <span class="citerefentry"><span class="refentrytitle">socket</span>(7)</span>
-                                and the <a class="ulink" href="http://www.tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/">TCP
+                                and the <a class="ulink" href="http://www.tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/" target="_top">TCP
                                 Keepalive HOWTO</a> for details.)
                                 Defaults to
                                 <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">Priority=</code></span></dt><dd><p>Takes an integer
@@ -307,12 +305,24 @@
                                 socket to a specific IP
                                 address. Defaults to <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">Transparent=</code></span></dt><dd><p>Takes a boolean
                                 value. Controls the IP_TRANSPARENT
-                                option. Defaults to
+                                socket option. Defaults to
                                 <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">Broadcast=</code></span></dt><dd><p>Takes a boolean
                                 value. This controls the SO_BROADCAST
-                                option, which allows broadcast
+                                socket option, which allows broadcast
                                 datagrams to be sent from this
                                 socket. Defaults to
+                                <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">PassCredentials=</code></span></dt><dd><p>Takes a boolean
+                                value. This controls the SO_PASSCRED
+                                socket option, which allows AF_UNIX sockets to
+                                receive the credentials of the sending
+                                process in an ancillary message.
+                                Defaults to
+                                <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">PassSecurity=</code></span></dt><dd><p>Takes a boolean
+                                value. This controls the SO_PASSSEC
+                                socket option, which allows AF_UNIX
+                                sockets to receive the security
+                                context of the sending process in an
+                                ancillary message.  Defaults to
                                 <code class="option">false</code>.</p></dd><dt><span class="term"><code class="varname">TCPCongestion=</code></span></dt><dd><p>Takes a string
                                 value. Controls the TCP congestion
                                 algorithm used by this socket. Should
@@ -380,7 +390,7 @@
                                 that bears the same name as the socket
                                 (ignoring the different suffixes). In
                                 most cases it should not be necessary
-                                to use this option.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a id="id564670"/><h2>See Also</h2><p>
+                                to use this option.</p></dd></dl></div></div><div class="refsect1" title="See Also"><a name="id334526"></a><h2>See Also</h2><p>
                           <span class="citerefentry"><span class="refentrytitle">systemd</span>(1)</span>,
                           <span class="citerefentry"><span class="refentrytitle">systemctl</span>(8)</span>,
                           <span class="citerefentry"><span class="refentrytitle">systemd.unit</span>(5)</span>,
