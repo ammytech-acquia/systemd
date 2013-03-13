@@ -1,8 +1,6 @@
 # -*-Shell-script-*-
 # /lib/lsb/init-functions
 
-. /lib/lsb/init-functions.systemd
-
 if [ -e /sys/fs/cgroup/systemd ]; then
     # Some init scripts use "set -e" and "set -u", we don't want that
     # here
@@ -13,7 +11,6 @@ if [ -e /sys/fs/cgroup/systemd ]; then
     # If we are called by a maintainer script, chances are good that a
     # new or updated sysv init script was installed.  Reload daemon to
     # pick up any changes.
-        echo "Reloading systemd"
         systemctl daemon-reload
     fi
 
@@ -24,6 +21,8 @@ if [ -e /sys/fs/cgroup/systemd ]; then
                 _use_systemctl=1
                 # Some services can't reload through the .service file,
                 # but can through the init script.
+                prog=${0##*/}
+                service="${prog%.sh}.service"
                 if [ "$(systemctl -p CanReload show $service 2>/dev/null)" = "CanReload=no" ] && [ "$1" = "reload" ]; then
                     _use_systemctl=0
                 fi

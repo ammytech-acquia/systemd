@@ -8,6 +8,16 @@ _systemctl() {
     fi
 }
 
+if [ "$1" = triggered ]; then
+    /lib/systemd/debian-enable-units
+    exit 0
+fi
+
+# Run the script after the initial installation or once on upgrades
+if [ -z "$2" ] || dpkg --compare-versions "$2" lt "44-9"; then
+    /lib/systemd/debian-enable-units
+fi
+
 if [ -n "$2" ]; then
     _systemctl daemon-reexec || true
 fi
@@ -40,18 +50,18 @@ EOF
     fi
 fi
 
-if dpkg --compare-versions "$2" lt "37-1.1"; then
-    # Create /run/initctl → /dev/initctl compat symlink on upgrades
-    if [ -e /sys/fs/cgroup/systemd ]; then
-        _systemctl restart systemd-initctl.socket || true
-    fi
+# Create /run/initctl → /dev/initctl compat symlink on upgrades
+if [ -e /sys/fs/cgroup/systemd ]; then
+    _systemctl restart systemd-initctl.socket || true
 fi
 
 if dpkg --compare-versions "$2" lt "40-1"; then
     # /lib/init/rw has been replaced by /run, so try to remove it on upgrades
     # http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=643699
     _systemctl stop lib-init-rw.automount lib-init-rw.mount || true
-    rmdir --ignore-fail-on-non-empty /lib/init/rw || true
+    if [ -d /lib/init/rw ]; then
+        rmdir --ignore-fail-on-non-empty /lib/init/rw || true
+    fi
 
     # Create /run/initctl → /dev/initctl compat symlink on upgrades
     if [ -e /sys/fs/cgroup/systemd ]; then
