@@ -8,18 +8,27 @@ _systemctl() {
     fi
 }
 
-if [ "$1" = triggered ]; then
-    /lib/systemd/debian-enable-units
+_update_catalog() {
+    journalctl --update-catalog || true
+}
+
+# Update Message Catalogs database in response to dpkg trigger
+if [ "$1" = "triggered" ]; then
+    _update_catalog
     exit 0
 fi
 
-# Run the script after the initial installation or once on upgrades
-if [ -z "$2" ] || dpkg --compare-versions "$2" lt "44-9"; then
-    /lib/systemd/debian-enable-units
+# Cleanup state files from the auto-enabler which we used in wheezy
+if dpkg --compare-versions "$2" lt "204-1"; then
+    rm -f /var/lib/systemd/enabled-units
+    rm -f /var/lib/systemd/run-debian-enable-units
+    rm -f /var/lib/systemd/*.symlinks
 fi
 
 if [ -n "$2" ]; then
     _systemctl daemon-reexec || true
+    _systemctl try-restart systemd-journald.service || true
+    _systemctl try-restart systemd-logind.service || true
 fi
 
 # Do a one-time migration of the local time setting
@@ -70,5 +79,8 @@ if dpkg --compare-versions "$2" lt "40-1"; then
 fi
 
 systemd-machine-id-setup
+
+# initial update of the Message Catalogs database
+_update_catalog
 
 #DEBHELPER#
