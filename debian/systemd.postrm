@@ -1,19 +1,12 @@
-#! /bin/sh
+#!/bin/sh
 
 set -e
 
-# Clean up the mess we created
-statedir=/var/lib/systemd
-if [ "$1" = "purge" ] && [ -d $statedir ]; then
-    find $statedir -name "*.symlinks" | while read file ; do
-        while read symlink ; do
-             rm -f "$symlink"
-        done < "$file"
-        rm -f "$file"
-    done
-    rm -f $statedir/enabled-units
-    rm -f $statedir/run-debian-enable-units
-    rmdir --ignore-fail-on-non-empty $statedir
-fi
+case "$1" in
+    purge)
+        rm -f /var/lib/systemd/catalog/database
+        rmdir --ignore-fail-on-non-empty /var/lib/systemd/catalog 2> /dev/null || true
+    ;;
+esac
 
 #DEBHELPER#
