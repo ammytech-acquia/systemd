@@ -1,7 +1,4 @@
-etc/dbus-1/system.d/org.freedesktop.systemd1.conf
-etc/systemd
-etc/xdg
-etc/modules-load.d
+etc/
 bin/systemctl
 bin/journalctl
 bin/systemd-notify
@@ -30,7 +27,6 @@ usr/share/man/man7/
 usr/share/man/man8/
 usr/share/bash-completion/completions/systemctl
 usr/share/bash-completion/completions/journalctl
-usr/share/dbus-1/interfaces/org.freedesktop.systemd1.*
 usr/share/dbus-1/services/
 usr/share/dbus-1/system-services/org.freedesktop.systemd1.service
 usr/share/doc/
@@ -42,15 +38,3 @@ usr/lib/modules-load.d/
 usr/lib/sysctl.d/
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
-
-# installed via debian/rules
-#debian/init-functions.d/40-systemd /lib/lsb/init-functions.d
-#debian/debian-fixup lib/systemd/
-#debian/debian-fixup.service lib/systemd/system
-#debian/tmpfiles.d/debian.conf usr/lib/tmpfiles.d
-#debian/ifup@.service lib/systemd/system
-#debian/units/run-lock.mount lib/systemd/system/
-#debian/units/run-user.mount lib/systemd/system/
-#debian/unit.blacklist usr/share/systemd/
-#debian/debian-enable-units lib/systemd/
-#debian/debian-enable-units.service lib/systemd/system/
