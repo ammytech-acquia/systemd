@@ -27,5 +27,5 @@ mount -n -o move /dev ${rootmnt}/dev
 
 # create a temporary symlink to the final /dev for other initramfs scripts
 rm -rf /dev
-ln -s ${rootmnt}${udev_root} /dev
+ln -s ${rootmnt}/dev /dev
 
