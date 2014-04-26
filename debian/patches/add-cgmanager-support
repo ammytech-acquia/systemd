@@ -1,3 +1,8 @@
+Description: Add cgmanager support to logind. This will use the cgmanager socket instead of cgroupfs when cgmanager is available. Otherwise it'll simply fallback on the cgroupfs code.
+Author: Stéphane Graber <stgraber@ubuntu.com>
+Forwarded: no
+Bug-Ubuntu: https://launchpad.net/bugs/1297363
+
 Index: systemd-204/Makefile.am
 ===================================================================
 --- systemd-204.orig/Makefile.am	2014-04-11 10:13:38.000000000 -0500

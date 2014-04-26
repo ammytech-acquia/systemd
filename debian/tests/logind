@@ -4,7 +4,7 @@ set -e
 echo " * cgroup is mounted"
 mountpoint -q /sys/fs/cgroup/systemd
 echo " * daemon is started"
-# should happen with upstart script, not with D-BUS activation
+# should start at boot, not with D-BUS activation
 pidof systemd-logind > /dev/null
 
 # loginctl should succeed

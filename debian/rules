@@ -5,10 +5,11 @@
 
 VERSION = $(shell dpkg-parsechangelog | sed -n -e '/^Version:/s/.*: //p')
 
-# Ubuntu: systemd{,-sysv} not yet approved for universe
-BINARY_BLACKLIST = -Nsystemd -Nsystemd-sysv
-
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+ifneq (,$(findstring stage1,$(DEB_BUILD_PROFILES)))
+BOOTSTRAP_DH_FLAGS := -Ngir1.2-gudev-1.0 -Nlibgudev-1.0-0 -Nlibgudev-1.0-dev
+endif
 
 CONFFLAGS = \
 	--with-rootprefix= \
@@ -17,7 +18,6 @@ CONFFLAGS = \
 	--with-sysvrcnd-path=/etc \
 	--with-firmware-path=/lib/firmware \
 	--with-debug-shell=/bin/bash \
-	--enable-libcryptsetup \
 	--enable-tcpwrap \
 	--disable-coredump \
 	--disable-efi \
@@ -25,6 +25,9 @@ CONFFLAGS = \
 	--disable-keymap \
 	--disable-vconsole \
 	--disable-silent-rules
+ifeq (,$(findstring stage1,$(DEB_BUILD_PROFILES)))
+CONFFLAGS += --enable-libcryptsetup
+endif
 
 CONFFLAGS_deb = \
 	--enable-selinux \
@@ -87,7 +90,7 @@ override_dh_install:
 	rm -rf debian/install/*/etc/kernel/
 	find debian/install/ -name '*.la' -delete
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
-	dh_install -Nudev-udeb -Nlibudev1-udeb --sourcedir=debian/install/deb --list-missing
+	dh_install $(BOOTSTRAP_DH_FLAGS) -Nudev-udeb -Nlibudev1-udeb --sourcedir=debian/install/deb --list-missing
 	# install some files manually, --sourcedir makes that necessary
 	# udev-udeb
 	install -D --mode=755 debian/extra/udev.startup \
@@ -140,8 +143,6 @@ override_dh_install:
 		debian/systemd/lib/systemd/
 	install --mode=755 debian/systemd-logind-launch \
 		debian/systemd/lib/systemd/
-	# Remove tmp.mount symlink to avoid mounting /tmp as tmpfs by default.
-	rm debian/systemd/lib/systemd/system/local-fs.target.wants/tmp.mount
 	# remove duplicates
 	# files shipped by systemd-sysv / sysvinit
 	rm debian/systemd/usr/share/man/man1/init.1
@@ -160,25 +161,20 @@ override_dh_install:
 	rm debian/systemd/lib/systemd/systemd-udevd
 	rm debian/systemd/usr/share/man/man7/udev.7
 	rm debian/systemd/usr/share/man/man8/*udev*.8
+	# files shipped by udev / bash-completion
+	rm debian/systemd/usr/share/bash-completion/completions/udevadm
 	# files systemd by cryptsetup
+ifeq (,$(findstring stage1,$(DEB_BUILD_PROFILES)))
 	rm debian/systemd/usr/share/man/man5/crypttab.5
-	# files shipped by systemd-services
-	rm debian/systemd/etc/systemd/logind.conf
-	rm debian/systemd/lib/systemd/systemd-logind
-	rm debian/systemd/lib/systemd/systemd-hostnamed
-	rm debian/systemd/lib/systemd/systemd-localed
-	rm debian/systemd/lib/systemd/systemd-timedated
-	rm debian/systemd/usr/share/man/man5/logind*
-	rm debian/systemd/usr/share/man/man8/systemd-logind*
-	rm debian/systemd/usr/share/man/man8/systemd-hostnamed*
-	rm debian/systemd/usr/share/man/man8/systemd-localed*
-	rm debian/systemd/usr/share/man/man8/systemd-timedated*
+endif
+	# files shipped by systemd
 	rm debian/udev/lib/udev/rules.d/70-uaccess.rules
 	rm debian/udev/lib/udev/rules.d/73-seat-late.rules
 	rm debian/udev/lib/udev/rules.d/71-seat.rules
-	# files shipped by systemd
 	rm debian/udev/lib/udev/rules.d/99-systemd.rules
-
+	# files shipped by libsystemd-*-dev
+	find debian/libsystemd-*-dev -name "*.3" -exec sh -c \
+		'rm debian/systemd/usr/share/man/man3/$$(basename {})' \;
 	# we continue to use the old net iface naming schema for the time being
 	rm -f debian/udev/lib/udev/rules.d/80-net-name-slot.rules
 	rm -f debian/udev-udeb/lib/udev/rules.d/80-net-name-slot.rules
@@ -203,6 +199,13 @@ autoreconf:
 override_dh_autoreconf:
 	dh_autoreconf debian/rules -- autoreconf
 
+%:
+ifeq (,$(findstring stage1,$(DEB_BUILD_PROFILES)))
+	dh $@ --with autoreconf,gir,python2
+else
+	dh $@ --with autoreconf,python2 $(BOOTSTRAP_DH_FLAGS)
+endif
+
 override_dh_auto_test:
 ifeq (, $(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 	# some tests hang under fakeroot, so disable fakeroot
@@ -214,16 +217,10 @@ ifeq (, $(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 		exit 1; )
 endif
 
-%:
-	dh $@ --with autoreconf,gir,python2
-
 override_dh_gencontrol:
 	# Ubuntu has an epoch on gudev
 	dh_gencontrol -plibgudev-1.0-0 -plibgudev-1.0-dev -pgir1.2-gudev-1.0 -- "-v1:$(VERSION)"
-	dh_gencontrol $(BINARY_BLACKLIST) --remaining-packages
-
-override_dh_strip:
-	dh_strip $(BINARY_BLACKLIST)
+	dh_gencontrol -Nsystemd-sysv --remaining-packages
 
 override_dh_builddeb:
-	dh_builddeb $(BINARY_BLACKLIST)
+	dh_builddeb -Nsystemd-sysv

@@ -5,13 +5,37 @@ Description: <short summary of the patch>
  information below has been extracted from the changelog. Adjust it or drop
  it.
  .
- systemd (204-5) unstable; urgency=high
+ systemd (204-8) unstable; urgency=low
  .
-   * Cherry-pick 72fd713 from upstream which fixes insecure calling of polkit
-     by avoiding a race condition in scraping /proc (CVE-2013-4327).
-     Closes: #723713
+   [ Michael Stapelberg ]
+   * move manpages from systemd to libsystemd-*-dev as appropriate
+     (Closes: #738723)
+   * fix systemctl enable/disable/… error message “Failed to issue method call:
+     No such file or directory” (the previous upload did actually not contain
+     this fix due to a merge conflict) (Closes: #738843)
+   * add explicit “Depends: sysv-rc” so that initscript’s “Depends: sysv-rc |
+     file-rc” will not be satisfied with file-rc. We need the invoke-rc.d and
+     update-rc.d from sysv-rc, file-rc’s doesn’t have support for systemd.
+     (Closes: #739679)
+   * set capabilities cap_dac_override,cap_sys_ptrace=ep for
+     systemd-detect-virt, so that it works for unprivileged users.
+     (Closes: #739699)
+   * pam: Check $XDG_RUNTIME_DIR owner (Closes: #731300)
+   * Ignore chkconfig headers entirely, they are often broken in Debian
+     (Closes: #634472)
+ .
+   [ Michael Biebl ]
+   * do a one-time migration of RAMTMP= from /etc/default/rcS and
+     /etc/default/tmpfs, i.e. enable tmp.mount (Closes: #738687)
+   * Bump Standards-Version to 3.9.5.
 Author: Michael Biebl <biebl@debian.org>
-Bug-Debian: http://bugs.debian.org/723713
+Bug-Debian: http://bugs.debian.org/634472
+Bug-Debian: http://bugs.debian.org/731300
+Bug-Debian: http://bugs.debian.org/738687
+Bug-Debian: http://bugs.debian.org/738723
+Bug-Debian: http://bugs.debian.org/738843
+Bug-Debian: http://bugs.debian.org/739679
+Bug-Debian: http://bugs.debian.org/739699
 
 ---
 The information above should follow the Patch Tagging Guidelines, please
@@ -269,6 +293,16 @@ Last-Update: <YYYY-MM-DD>
  endif
  
  EXTRA_DIST += \
+@@ -4050,8 +4042,7 @@ SHUTDOWN_TARGET_WANTS += \
+ 	systemd-update-utmp-shutdown.service
+ LOCAL_FS_TARGET_WANTS += \
+ 	systemd-remount-fs.service \
+-	systemd-fsck-root.service \
+-	tmp.mount
++	systemd-fsck-root.service
+ MULTI_USER_TARGET_WANTS += \
+ 	getty.target \
+ 	systemd-ask-password-wall.path
 --- /dev/null
 +++ systemd-204/autogen.sh
 @@ -0,0 +1,67 @@
@@ -751,9 +785,20 @@ Last-Update: <YYYY-MM-DD>
 +if __name__ == '__main__':
 +    rules = create_rules(*sys.argv[1:])
 +    print(make_makefile(rules), end='')
+--- systemd-204.orig/man/systemd-inhibit.xml
++++ systemd-204/man/systemd-inhibit.xml
+@@ -158,7 +158,7 @@
+                                 time elapses the lock is ignored and
+                                 the operation executed. The time limit
+                                 may be specified in
+-                                <citerefentry><refentrytitle>systemd-logind.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>. Note
++                                <citerefentry><refentrytitle>logind.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>. Note
+                                 that <literal>delay</literal> is only
+                                 available for <literal>sleep</literal>
+                                 and
 --- systemd-204.orig/man/systemd.mount.xml
 +++ systemd-204/man/systemd.mount.xml
-@@ -141,7 +141,7 @@
+@@ -141,12 +141,12 @@
                  <filename>local-fs.target</filename> or
                  <filename>remote-fs.target</filename>, depending
                  whether the file system is local or remote. If
@@ -762,6 +807,12 @@ Last-Update: <YYYY-MM-DD>
                  automount unit will be created for the file
                  system. See
                  <citerefentry><refentrytitle>systemd.automount</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+                 for details. If
+-                <option>x-systemd.device-timeout=</option> is
++                <option>comment=systemd.device-timeout=</option> is
+                 specified it may be used to configure how long systemd
+                 should wait for a device to show up before giving up
+                 on an entry from
 --- systemd-204.orig/man/systemd.special.xml
 +++ systemd-204/man/systemd.special.xml
 @@ -97,6 +97,7 @@
@@ -1250,7 +1301,7 @@ Last-Update: <YYYY-MM-DD>
  #  (at your option) any later version.
  
  ACTION=="remove", GOTO="systemd_end"
-+TEST!="/sys/fs/cgroup/systemd", GOTO="systemd_end"
++TEST!="/run/systemd/system", GOTO="systemd_end"
  
  SUBSYSTEM=="tty", KERNEL=="tty[a-zA-Z]*|hvc*|xvc*|hvsi*", TAG+="systemd"
  
@@ -1449,7 +1500,29 @@ Last-Update: <YYYY-MM-DD>
  
                  goto finish;
          }
-@@ -905,6 +913,13 @@ static int service_load_sysv_path(Servic
+@@ -620,6 +628,9 @@ static int service_load_sysv_path(Servic
+ 
+                         /* Try to parse Red Hat style chkconfig headers */
+ 
++/* chkconfig headers are often broken in Debian, see
++ * http://bugs.debian.org/634472, so we ignore them entirely. */
++#if 0
+                         if (startswith_no_case(t, "chkconfig:")) {
+                                 int start_priority;
+                                 char runlevels[16], *k;
+@@ -661,7 +672,10 @@ static int service_load_sysv_path(Servic
+                                         s->sysv_runlevels = d;
+                                 }
+ 
+-                        } else if (startswith_no_case(t, "description:")) {
++                        } else
++#endif
++
++if (startswith_no_case(t, "description:")) {
+ 
+                                 size_t k = strlen(t);
+                                 char *d;
+@@ -905,6 +919,13 @@ static int service_load_sysv_path(Servic
  
          if ((r = sysv_exec_commands(s, supports_reload)) < 0)
                  goto finish;
@@ -1463,7 +1536,7 @@ Last-Update: <YYYY-MM-DD>
  
          if (s->sysv_runlevels && !chars_intersect(RUNLEVELS_UP, s->sysv_runlevels)) {
                  /* If there a runlevels configured for this service
-@@ -3530,7 +3545,7 @@ static int service_enumerate(Manager *m)
+@@ -3530,7 +3551,7 @@ static int service_enumerate(Manager *m)
  
                                  if (de->d_name[0] == 'S')  {
  
@@ -1472,7 +1545,7 @@ Last-Update: <YYYY-MM-DD>
                                                  SERVICE(service)->sysv_start_priority_from_rcnd =
                                                          MAX(a*10 + b, SERVICE(service)->sysv_start_priority_from_rcnd);
  
-@@ -3547,7 +3562,8 @@ static int service_enumerate(Manager *m)
+@@ -3547,7 +3568,8 @@ static int service_enumerate(Manager *m)
                                                  goto finish;
  
                                  } else if (de->d_name[0] == 'K' &&
@@ -1516,7 +1589,18 @@ Last-Update: <YYYY-MM-DD>
                  opt_type = CRYPT_LUKS1;
 --- systemd-204.orig/src/fstab-generator/fstab-generator.c
 +++ systemd-204/src/fstab-generator/fstab-generator.c
-@@ -315,7 +315,8 @@ static int add_mount(
+@@ -194,9 +194,7 @@ static bool mount_is_network(struct mnte
+ static bool mount_in_initrd(struct mntent *me) {
+         assert(me);
+ 
+-        return
+-                hasmntopt(me, "x-initrd.mount") ||
+-                streq(me->mnt_dir, "/usr");
++        return hasmntopt(me, "x-initrd.mount");
+ }
+ 
+ static int add_mount(
+@@ -315,7 +313,8 @@ static int add_mount(
          }
  
          if (!noauto) {
@@ -1919,7 +2003,19 @@ Last-Update: <YYYY-MM-DD>
                          }
 --- systemd-204.orig/src/login/logind.c
 +++ systemd-204/src/login/logind.c
-@@ -1371,9 +1371,17 @@ void manager_gc(Manager *m, bool drop_no
+@@ -978,6 +978,11 @@ int manager_spawn_autovt(Manager *m, int
+             (unsigned) vtnr != m->reserve_vt)
+                 return 0;
+ 
++        /* It only makes sense to send a StartUnit call to systemd if this
++         * machine is actually booted with systemd. */
++        if (!sd_booted())
++                return 0;
++
+         if ((unsigned) vtnr != m->reserve_vt) {
+                 /* If this is the reserved TTY, we'll start the getty
+                  * on it in any case, but otherwise only if it is not
+@@ -1371,9 +1376,17 @@ void manager_gc(Manager *m, bool drop_no
          Seat *seat;
          Session *session;
          User *user;
@@ -1949,7 +2045,15 @@ Last-Update: <YYYY-MM-DD>
  SystemdService=dbus-org.freedesktop.login1.service
 --- systemd-204.orig/src/login/pam-module.c
 +++ systemd-204/src/login/pam-module.c
-@@ -336,10 +336,6 @@ _public_ PAM_EXTERN int pam_sm_open_sess
+@@ -329,6 +329,7 @@ _public_ PAM_EXTERN int pam_sm_open_sess
+         dbus_bool_t remote, existing;
+         int r;
+         uint32_t vtnr = 0;
++        struct stat st;
+ 
+         assert(handle);
+ 
+@@ -336,10 +337,6 @@ _public_ PAM_EXTERN int pam_sm_open_sess
  
          /* pam_syslog(handle, LOG_INFO, "pam-systemd initializing"); */
  
@@ -1960,7 +2064,7 @@ Last-Update: <YYYY-MM-DD>
          if (parse_argv(handle,
                         argc, argv,
                         &controllers, &reset_controllers,
-@@ -400,7 +396,8 @@ _public_ PAM_EXTERN int pam_sm_open_sess
+@@ -400,7 +397,8 @@ _public_ PAM_EXTERN int pam_sm_open_sess
  
          bus = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error);
          if (!bus) {
@@ -1970,6 +2074,35 @@ Last-Update: <YYYY-MM-DD>
                  r = PAM_SESSION_ERR;
                  goto finish;
          }
+@@ -568,11 +566,25 @@ _public_ PAM_EXTERN int pam_sm_open_sess
+                 goto finish;
+         }
+ 
+-        r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", runtime_path, 0);
+-        if (r != PAM_SUCCESS) {
+-                pam_syslog(handle, LOG_ERR, "Failed to set runtime dir.");
++        /* only set $XDG_RUNTIME_DIR if it is owned by the target user, as per
++         * XDG basedir-spec; this avoids su sessions to scribble over a runtime
++         * dir of a different user */
++        r = lstat(runtime_path, &st);
++        if (r != 0) {
++                pam_syslog(handle, LOG_ERR, "Failed to stat runtime dir: %s", strerror(errno));
++                r = PAM_SYSTEM_ERR;
+                 goto finish;
+         }
++        if (st.st_uid == uid) {
++                r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", runtime_path, 0);
++                if (r != PAM_SUCCESS) {
++                        pam_syslog(handle, LOG_ERR, "Failed to set runtime dir.");
++                        goto finish;
++                }
++        } else if (debug) {
++                pam_syslog(handle, LOG_DEBUG, "Runtime dir %s is not owned by the target uid %u, ignoring.",
++                           runtime_path, uid);
++        }
+ 
+         if (!isempty(seat)) {
+                 r = pam_misc_setenv(handle, "XDG_SEAT", seat, 0);
 --- /dev/null
 +++ systemd-204/src/python-systemd/docs/conf.py
 @@ -0,0 +1,279 @@
@@ -2685,7 +2818,7 @@ Last-Update: <YYYY-MM-DD>
                  if (!isempty(arg_root))
                          asprintf(&p, "%s/" SYSTEM_SYSVINIT_PATH "/%s", arg_root, name);
                  else
-@@ -4079,24 +4073,22 @@ static int enable_sysv_units(char **args
+@@ -4079,24 +4073,67 @@ static int enable_sysv_units(char **args
                          goto finish;
                  }
  
@@ -2710,15 +2843,60 @@ Last-Update: <YYYY-MM-DD>
 -                        argv[c++] = q = strappend("--root=", arg_root);
 +                log_info("Synchronizing state for %s with sysvinit using update-rc.d...", name);
  
++                /* Run update-rc.d <file> defaults first to ensure the K- and
++                 * S-symlinks are present. If they are missing, update-rc.d
++                 * <enable|disable> will fail. See
++                 * http://bugs.debian.org/722523 */
                  argv[c++] = path_get_file_name(p);
 -                argv[c++] =
 -                        streq(verb, "enable") ? "on" :
 -                        streq(verb, "disable") ? "off" : "--level=5";
-+                argv[c++] = verb;
++                argv[c++] = "defaults";
++                argv[c] = NULL;
++
++                l = strv_join((char**)argv, " ");
++                if (!l) {
++                        r = log_oom();
++                        goto finish;
++                }
++
++                log_info("Executing %s", l);
++                free(l);
++
++                pid = fork();
++                if (pid < 0) {
++                        log_error("Failed to fork: %m");
++                        r = -errno;
++                        goto finish;
++                } else if (pid == 0) {
++                        /* Child */
++
++                        execv(argv[0], (char**) argv);
++                        _exit(EXIT_FAILURE);
++                }
++
++                j = wait_for_terminate(pid, &status);
++                if (j < 0) {
++                        log_error("Failed to wait for child: %s", strerror(-r));
++                        r = j;
++                        goto finish;
++                }
++
++                if (status.si_code == CLD_EXITED) {
++                        if (status.si_status != 0) {
++                                r = -EINVAL;
++                                goto finish;
++                        }
++                } else {
++                        r = -EPROTO;
++                        goto finish;
++                }
++
++                argv[c-1] = verb;
                  argv[c] = NULL;
  
                  l = strv_join((char**)argv, " ");
-@@ -4162,7 +4154,6 @@ finish:
+@@ -4162,7 +4199,6 @@ finish:
  
          args[t] = NULL;
  
@@ -2726,6 +2904,25 @@ Last-Update: <YYYY-MM-DD>
          return r;
  }
  
+@@ -4208,6 +4244,8 @@ static int enable_unit(DBusConnection *b
+         _cleanup_dbus_error_free_ DBusError error;
+         _cleanup_strv_free_ char **mangled_names = NULL;
+ 
++        dbus_error_init(&error);
++
+         if (!args[1])
+                 return 0;
+ 
+@@ -4219,7 +4257,8 @@ static int enable_unit(DBusConnection *b
+         if (r < 0)
+                 return r;
+ 
+-        dbus_error_init(&error);
++        if (!args[1])
++                return 0;
+ 
+         if (!bus || avoid_bus()) {
+                 if (streq(verb, "enable")) {
 --- systemd-204.orig/src/timedate/org.freedesktop.timedate1.service
 +++ systemd-204/src/timedate/org.freedesktop.timedate1.service
 @@ -7,6 +7,6 @@
@@ -2738,7 +2935,102 @@ Last-Update: <YYYY-MM-DD>
  SystemdService=dbus-org.freedesktop.timedate1.service
 --- systemd-204.orig/src/timedate/timedated.c
 +++ systemd-204/src/timedate/timedated.c
-@@ -183,6 +183,12 @@ static int read_data(void) {
+@@ -153,6 +153,94 @@ static bool valid_timezone(const char *n
+         return true;
+ }
+ 
++static int symlink_or_copy(const char *from, const char *to) {
++        char *pf = NULL, *pt = NULL;
++        struct stat a, b;
++        int r;
++
++        assert(from);
++        assert(to);
++
++        if (path_get_parent(from, &pf) < 0 ||
++            path_get_parent(to, &pt) < 0) {
++                r = -ENOMEM;
++                goto finish;
++        }
++
++        if (stat(pf, &a) < 0 ||
++            stat(pt, &b) < 0) {
++                r = -errno;
++                goto finish;
++        }
++
++        if (a.st_dev != b.st_dev) {
++                free(pf);
++                free(pt);
++
++                return copy_file(from, to);
++        }
++
++        if (symlink(from, to) < 0) {
++                r = -errno;
++                goto finish;
++        }
++
++        r = 0;
++
++finish:
++        free(pf);
++        free(pt);
++
++        return r;
++}
++
++static int symlink_or_copy_atomic(const char *from, const char *to) {
++        char *t, *x;
++        const char *fn;
++        size_t k;
++        unsigned long long ull;
++        unsigned i;
++        int r;
++
++        assert(from);
++        assert(to);
++
++        t = new(char, strlen(to) + 1 + 16 + 1);
++        if (!t)
++                return -ENOMEM;
++
++        fn = path_get_file_name(to);
++        k = fn-to;
++        memcpy(t, to, k);
++        t[k] = '.';
++        x = stpcpy(t+k+1, fn);
++
++        ull = random_ull();
++        for (i = 0; i < 16; i++) {
++                *(x++) = hexchar(ull & 0xF);
++                ull >>= 4;
++        }
++
++        *x = 0;
++
++        r = symlink_or_copy(from, t);
++        if (r < 0) {
++                unlink(t);
++                free(t);
++                return r;
++        }
++
++        if (rename(t, to) < 0) {
++                r = -errno;
++                unlink(t);
++                free(t);
++                return r;
++        }
++
++        free(t);
++        return r;
++}
++
+ static int read_data(void) {
+         int r;
+         _cleanup_free_ char *t = NULL;
+@@ -183,6 +271,12 @@ static int read_data(void) {
                  }
          }
  
@@ -2751,7 +3043,7 @@ Last-Update: <YYYY-MM-DD>
  have_timezone:
          if (isempty(tz.zone)) {
                  free(tz.zone);
-@@ -198,10 +204,15 @@ static int write_data_timezone(void) {
+@@ -198,10 +292,15 @@ static int write_data_timezone(void) {
          int r = 0;
          _cleanup_free_ char *p = NULL;
  
@@ -2767,7 +3059,12 @@ Last-Update: <YYYY-MM-DD>
                  return r;
          }
  
-@@ -213,6 +224,13 @@ static int write_data_timezone(void) {
+@@ -209,10 +308,17 @@ static int write_data_timezone(void) {
+         if (!p)
+                 return log_oom();
+ 
+-        r = symlink_atomic(p, "/etc/localtime");
++        r = symlink_or_copy_atomic(p, "/etc/localtime");
          if (r < 0)
                  return r;
  
@@ -2871,6 +3168,18 @@ Last-Update: <YYYY-MM-DD>
                          rc = EXIT_FAILURE;
                          goto out;
                  }
+--- systemd-204.orig/sysctl.d/50-default.conf
++++ systemd-204/sysctl.d/50-default.conf
+@@ -7,9 +7,6 @@
+ 
+ # See sysctl.d(5) and core(5) for for details.
+ 
+-# System Request functionality of the kernel (SYNC)
+-kernel.sysrq = 16
+-
+ # Append the PID to the core filename
+ kernel.core_uses_pid = 1
+ 
 --- /dev/null
 +++ systemd-204/test/Makefile
 @@ -0,0 +1,20 @@

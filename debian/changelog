@@ -1,3 +1,158 @@
+systemd (204-8ubuntu1) utopic; urgency=medium
+
+  * Merge with Debian unstable. Drop the systemd-services split as we want to
+    move to systemd as pid 1 (UbuntuSpec:core-1403-systemd-transition) so that
+    we can start experimenting with booting Ubuntu with systemd. This does NOT
+    yet change the default, with this upstart will still be used to bring up
+    the system. To boot with systemd, add init=/lib/systemd/systemd to the
+    grub menu (at boot or in /etc/default/grub GRUB_CMDLINE_LINUX_DEFAULT).
+
+    Remaining Ubuntu specific changes:
+    - debian/rules: Don't build the systemd-sysv package for now.
+    - debian/udev.templates: Drop debconfiscation of udev, not necessary for
+      Ubuntu. Drop debconf pre-dependency.
+    - debian/extra/initramfs.top: Drop $ROOTDELAY, we do that in a more
+      sensible way with wait-for-root. (Will get applicable to Debian once
+      Debian gets wait-for-root in initramfs-tools.)
+    - Drop debian/extra/{50-udev-default.rules,60-persistent-storage*.rules,
+      75-cd-aliases-generator.rules,80-drivers.rules,80-networking.rules,
+      91-permissions.rules}: These are the Debian specific rules, in Ubuntu we
+      have always used the upstream ones.
+    - Add debian/extra/rules/78-graphics-card.rules: Mark graphics devices as
+      PRIMARY_DEVICE_FOR_DISPLAY so that we can wait for those in plymouth.
+    - Add debian/extra/rules/73-idrac.rules: On Dell PowerEdge systems, the
+      iDRAC7 and later support a USB Virtual NIC for management. Name this
+      interface "idrac" to avoid confusion with "real" network interfaces.
+    - Add debian/extra/udev.py: Apport hook.
+    - debian/extra/udev.startup, debian/rules: Don't install/support
+      /etc/udev/links.conf, that's a hack (if you want links, create udev
+      rules).
+    - Drop debian/source/{git-patches,options}, we use proper patches.
+    - debian/rules: We continue to use the old net iface naming schema for the
+      time being. Install old udev rule generator in debian/udev.install.
+    - debian/rules: Don't install init.d scripts, only the upstart jobs.
+    - debian/rules: Add an epoch to libgudev.
+    - Drop debian/udev.dirs, not necessary.
+    - Drop debian/udev.NEWS, debian/udev.maintscript: Not applicable to
+      Ubuntu.
+    - debian/udev.{postinst,postrm,preinst,prerm}: Keep our much simpler
+      versions (all platforms must support udev, no debconf).
+    - debian/rules: Drop doc dir symlinking. It creates havoc with dpkg
+      upgrades, and we already have the automatic per-file symlinking.
+    - Add debian/extra/rules/40-hyperv-hotadd.rules: Workaround for LP #1233466
+    - Various debian/patches/*, see patch headers.
+
+    Applicable to Debian:
+    - Add libpam-systemd.systemd-logind.upstart to bring up logind at boot
+      when using upstart.
+    - debian/control, debian/tests/: Add autopkgtest.
+    - debian/extra/initramfs.hook, debian/udev.*{pre,post}inst: Divert udevadm
+      to udevadm.upgrade during upgrades while udev is unconfigured.
+    - Add debian/extra/60-keyboard.hwdb: Latest upstream keymaps, for easy
+      backporting.
+    - debian/extra/initramfs.bottom: If LVM is installed, settle udev,
+      otherwise we get missing LV symlinks. (LP #1185394)
+    - Add debian/extra/README-{etc,lib}-rules.d documentation, install into
+      udev.
+    - debian/rules: Run tests during package build.
+    - debian/udev.udev-finish.upstart: Fix path to tmp-rules,
+      debian/extra/rule_generator.functions creates them in /run/udev/.
+    - debian/udev-udeb.install: Add 64-btrfs.rules, 75-probe_mtd.rules, and
+      80-drivers.rules, they are potentially useful in a d-i environment.
+    - debian/extra/rules/75-persistent-net-generator.rules: Add new block of
+      Windows Azure ethernet hardware address to ignore persistent naming
+      (LP #1274348).
+    - debian/extra/udev.startup: Mount devpts with the correct permissions to
+      avoid needing pt_chown.
+    - debian/libpam-systemd.prerm: Do proper refcounting of the PAM module
+      package on prerm, so that we don't drop the module from the PAM config
+      when uninstalling a foreign-arch package.  Related to LP #1295521.
+    - Run dh_install with --list-missing.
+
+    Upgrade fixes, keep until 16.04 LTS release:
+    - debian/control: Conflicts/Replaces/Provides systemd-services.
+  * debian/tests/timedated: Get along with comments in /etc/timezone,
+    cloud-init puts one there.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sat, 26 Apr 2014 17:29:00 +0200
+
+systemd (204-8) unstable; urgency=low
+
+  [ Michael Stapelberg ]
+  * move manpages from systemd to libsystemd-*-dev as appropriate
+    (Closes: #738723)
+  * fix systemctl enable/disable/… error message “Failed to issue method call:
+    No such file or directory” (the previous upload did actually not contain
+    this fix due to a merge conflict) (Closes: #738843)
+  * add explicit “Depends: sysv-rc” so that initscript’s “Depends: sysv-rc |
+    file-rc” will not be satisfied with file-rc. We need the invoke-rc.d and
+    update-rc.d from sysv-rc, file-rc’s doesn’t have support for systemd.
+    (Closes: #739679)
+  * set capabilities cap_dac_override,cap_sys_ptrace=ep for
+    systemd-detect-virt, so that it works for unprivileged users.
+    (Closes: #739699)
+  * pam: Check $XDG_RUNTIME_DIR owner (Closes: #731300)
+  * Ignore chkconfig headers entirely, they are often broken in Debian
+    (Closes: #634472)
+
+  [ Michael Biebl ]
+  * do a one-time migration of RAMTMP= from /etc/default/rcS and
+    /etc/default/tmpfs, i.e. enable tmp.mount (Closes: #738687)
+  * Bump Standards-Version to 3.9.5.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 19 Mar 2014 18:57:35 +0100
+
+systemd (204-7) unstable; urgency=low
+
+  * fix systemctl enable/disable/… error message “Failed to issue method call:
+    No such file or directory” (Closes: #734809)
+  * bug-script: attach instead of paste extra info with reportbug ≥ 6.5.0
+    (Closes: #722530)
+  * add stage1 bootstrap support to avoid Build-Depends cycles (Thanks Daniel
+    Schepler)
+  * cherry-pick:
+    order remote mounts from mountinfo before remote-fs.target (77009452cfd)
+    (Closes: #719945)
+    Fix CPUShares configuration option (ccd90a976dba) (Closes: #737156)
+    fix reference in systemd-inhibit(1) (07b4b9b) (Closes: #738316)
+
+ -- Michael Stapelberg <stapelberg@debian.org>  Tue, 11 Feb 2014 23:34:42 +0100
+
+systemd (204-6) unstable; urgency=low
+
+  [ Michael Stapelberg ]
+  * Run update-rc.d defaults before update-rc.d <enable|disable>
+    (Closes: #722523)
+  * preinst: preserve var-{lock,run}.mount when upgrading from 44 to 204
+    (Closes: #723936)
+  * fstab-generator: don’t rely on /usr being mounted in the initrd
+    (Closes: #724797)
+  * systemctl: mangle names when avoiding dbus (Closes: #723855)
+  * allow group adm read access on /var/log/journal (Closes: #717386)
+  * add systemd-journal group (Thanks Guido Günther) (Closes: #724668)
+  * copy /etc/localtime instead of symlinking (Closes: #726256)
+  * don’t try to start autovt units when not running with systemd as pid 1
+    (Closes: #726466)
+  * Add breaks/replaces for the new sysvinit-core package (Thanks Alf Gaida)
+    (Closes: #733240)
+  * Add myself to uploaders
+
+  [ Tollef Fog Heen ]
+  * Make 99-systemd.rules check for /run/systemd/systemd instead of the
+    ill-named cgroups directory.
+
+  [ Martin Pitt ]
+  * debian/udev.upstart: Fix path to udevd, the /sbin/udevd compat symlink
+    should go away at some point.
+  * debian/udev-udeb.install: Add 64-btrfs.rules and 75-probe_mtd.rules, they
+    are potentially useful in a d-i environment.
+  * debian/shlibs.local: Drop libudev; this unnecessarily generates overly
+    strict dependencies, the libudev ABI is stable.
+  * debian/extra/rules/75-persistent-net-generator.rules: Add Ravello systems
+    (LP: #1099278)
+
+ -- Michael Stapelberg <stapelberg@debian.org>  Tue, 31 Dec 2013 14:39:44 +0100
+
 systemd (204-5ubuntu20) trusty; urgency=medium
 
   * systemd-logind.conf: Don't use the limit stanza which fails the
