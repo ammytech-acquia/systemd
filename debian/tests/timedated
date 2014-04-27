@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-ORIG_TZ=`cat /etc/timezone`
+ORIG_TZ=`grep -v '^#' /etc/timezone`
 
 # should activate daemon and work
 STATUS=`timedatectl`
