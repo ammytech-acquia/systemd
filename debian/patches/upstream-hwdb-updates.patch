@@ -1,8 +1,22 @@
-Index: systemd/src/libudev/libudev-hwdb.c
-===================================================================
---- systemd.orig/src/libudev/libudev-hwdb.c	2013-08-27 10:49:32.349556246 +0200
-+++ systemd/src/libudev/libudev-hwdb.c	2013-08-27 10:49:32.337556245 +0200
-@@ -140,9 +140,13 @@
+From: Kay Sievers <kay@vrfy.org>
+Date: Sat, 26 Apr 2014 23:22:46 +0200
+Subject: upstream: hwdb updates
+
+Various upstream cherry-picks for hwdb, to make the keymap builtin work
+properly.
+---
+ src/libudev/libudev-hwdb.c     |  16 +++--
+ src/udev/udev-builtin-hwdb.c   |  79 +++++++++++++++++++----
+ src/udev/udev-builtin-net_id.c |   2 +-
+ src/udev/udev.h                |   3 +-
+ src/udev/udevadm-hwdb.c        | 139 +++++++++++++++++++++++++++++------------
+ 5 files changed, 178 insertions(+), 61 deletions(-)
+
+diff --git a/src/libudev/libudev-hwdb.c b/src/libudev/libudev-hwdb.c
+index e159ae7..8169926 100644
+--- a/src/libudev/libudev-hwdb.c
++++ b/src/libudev/libudev-hwdb.c
+@@ -140,9 +140,13 @@ static const struct trie_node_f *node_lookup_f(struct udev_hwdb *hwdb, const str
  }
  
  static int hwdb_add_property(struct udev_hwdb *hwdb, const char *key, const char *value) {
@@ -17,7 +31,7 @@ Index: systemd/src/libudev/libudev-hwdb.c
          if (udev_list_entry_add(&hwdb->properties_list, key+1, value) == NULL)
                  return -ENOMEM;
          return 0;
-@@ -300,11 +304,11 @@
+@@ -300,11 +304,11 @@ _public_ struct udev_hwdb *udev_hwdb_new(struct udev *udev) {
          }
  
          log_debug("=== trie on-disk ===\n");
@@ -34,10 +48,10 @@ Index: systemd/src/libudev/libudev-hwdb.c
          return hwdb;
  }
  
-Index: systemd/src/udev/udev-builtin-hwdb.c
-===================================================================
---- systemd.orig/src/udev/udev-builtin-hwdb.c	2013-08-27 10:49:32.349556246 +0200
-+++ systemd/src/udev/udev-builtin-hwdb.c	2013-08-27 10:49:32.341556245 +0200
+diff --git a/src/udev/udev-builtin-hwdb.c b/src/udev/udev-builtin-hwdb.c
+index 0b35d79..d6aa96b 100644
+--- a/src/udev/udev-builtin-hwdb.c
++++ b/src/udev/udev-builtin-hwdb.c
 @@ -23,20 +23,37 @@
  #include <inttypes.h>
  #include <ctype.h>
@@ -78,7 +92,7 @@ Index: systemd/src/udev/udev-builtin-hwdb.c
                  if (udev_builtin_add_property(dev, test,
                                                udev_list_entry_get_name(entry),
                                                udev_list_entry_get_value(entry)) < 0)
-@@ -66,12 +83,14 @@
+@@ -66,12 +83,14 @@ static const char *modalias_usb(struct udev_device *dev, char *s, size_t size) {
          return s;
  }
  
@@ -95,7 +109,7 @@ Index: systemd/src/udev/udev-builtin-hwdb.c
                  const char *dsubsys;
                  const char *modalias = NULL;
  
-@@ -83,16 +102,16 @@
+@@ -83,16 +102,16 @@ static int udev_builtin_hwdb_search(struct udev_device *dev, const char *subsyst
                  if (subsystem && !streq(dsubsys, subsystem))
                          continue;
  
@@ -118,7 +132,7 @@ Index: systemd/src/udev/udev-builtin-hwdb.c
                  if (n > 0)
                          break;
          }
-@@ -102,10 +121,17 @@
+@@ -102,10 +121,17 @@ static int udev_builtin_hwdb_search(struct udev_device *dev, const char *subsyst
  
  static int builtin_hwdb(struct udev_device *dev, int argc, char *argv[], bool test) {
          static const struct option options[] = {
@@ -136,7 +150,7 @@ Index: systemd/src/udev/udev-builtin-hwdb.c
  
          if (!hwdb)
                  return EXIT_FAILURE;
-@@ -113,20 +139,47 @@
+@@ -113,20 +139,47 @@ static int builtin_hwdb(struct udev_device *dev, int argc, char *argv[], bool te
          for (;;) {
                  int option;
  
@@ -187,10 +201,37 @@ Index: systemd/src/udev/udev-builtin-hwdb.c
  }
  
  /* called at udev startup and reload */
-Index: systemd/src/udev/udevadm-hwdb.c
-===================================================================
---- systemd.orig/src/udev/udevadm-hwdb.c	2013-08-27 10:49:32.349556246 +0200
-+++ systemd/src/udev/udevadm-hwdb.c	2013-08-27 10:49:32.341556245 +0200
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 5719021..20d2b1e 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -386,7 +386,7 @@ static int ieee_oui(struct udev_device *dev, struct netnames *names, bool test)
+         snprintf(str, sizeof(str), "OUI:%02X%02X%02X%02X%02X%02X",
+                  names->mac[0], names->mac[1], names->mac[2],
+                  names->mac[3], names->mac[4], names->mac[5]);
+-        udev_builtin_hwdb_lookup(dev, str, test);
++        udev_builtin_hwdb_lookup(dev, NULL, str, NULL, test);
+         return 0;
+ }
+ 
+diff --git a/src/udev/udev.h b/src/udev/udev.h
+index caec5f0..4f10c45 100644
+--- a/src/udev/udev.h
++++ b/src/udev/udev.h
+@@ -190,7 +190,8 @@ int udev_builtin_run(struct udev_device *dev, enum udev_builtin_cmd cmd, const c
+ void udev_builtin_list(struct udev *udev);
+ bool udev_builtin_validate(struct udev *udev);
+ int udev_builtin_add_property(struct udev_device *dev, bool test, const char *key, const char *val);
+-int udev_builtin_hwdb_lookup(struct udev_device *dev, const char *modalias, bool test);
++int udev_builtin_hwdb_lookup(struct udev_device *dev, const char *prefix, const char *modalias,
++                             const char *filter, bool test);
+ 
+ /* udev logging */
+ void udev_main_log(struct udev *udev, int priority,
+diff --git a/src/udev/udevadm-hwdb.c b/src/udev/udevadm-hwdb.c
+index 65f08f0..e1433c0 100644
+--- a/src/udev/udevadm-hwdb.c
++++ b/src/udev/udevadm-hwdb.c
 @@ -21,6 +21,7 @@
  #include <unistd.h>
  #include <getopt.h>
@@ -199,7 +240,7 @@ Index: systemd/src/udev/udevadm-hwdb.c
  
  #include "util.h"
  #include "strbuf.h"
-@@ -302,8 +303,10 @@
+@@ -302,8 +303,10 @@ static int64_t trie_store_nodes(struct trie_f *trie, struct trie_node *node) {
                  int64_t child_off;
  
                  child_off = trie_store_nodes(trie, node->children[i].child);
@@ -211,7 +252,7 @@ Index: systemd/src/udev/udevadm-hwdb.c
                  children[i].c = node->children[i].c;
                  children[i].child_off = htole64(child_off);
          }
-@@ -402,66 +405,122 @@
+@@ -402,66 +405,122 @@ out:
          return err;
  }
  
@@ -372,7 +413,7 @@ Index: systemd/src/udev/udevadm-hwdb.c
          return 0;
  }
  
-@@ -549,7 +608,7 @@
+@@ -549,7 +608,7 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
                  }
                  STRV_FOREACH(f, files) {
                          log_debug("reading file '%s'", *f);
@@ -380,31 +421,4 @@ Index: systemd/src/udev/udevadm-hwdb.c
 +                        import_file(udev, trie, *f);
                  }
                  strv_free(files);
- 
-Index: systemd/src/udev/udev.h
-===================================================================
---- systemd.orig/src/udev/udev.h	2013-08-27 10:49:32.349556246 +0200
-+++ systemd/src/udev/udev.h	2013-08-27 10:49:32.341556245 +0200
-@@ -190,7 +190,8 @@
- void udev_builtin_list(struct udev *udev);
- bool udev_builtin_validate(struct udev *udev);
- int udev_builtin_add_property(struct udev_device *dev, bool test, const char *key, const char *val);
--int udev_builtin_hwdb_lookup(struct udev_device *dev, const char *modalias, bool test);
-+int udev_builtin_hwdb_lookup(struct udev_device *dev, const char *prefix, const char *modalias,
-+                             const char *filter, bool test);
- 
- /* udev logging */
- void udev_main_log(struct udev *udev, int priority,
-Index: systemd/src/udev/udev-builtin-net_id.c
-===================================================================
---- systemd.orig/src/udev/udev-builtin-net_id.c	2013-04-08 17:26:34.317113774 +0200
-+++ systemd/src/udev/udev-builtin-net_id.c	2013-08-27 10:50:02.873557723 +0200
-@@ -386,7 +386,7 @@
-         snprintf(str, sizeof(str), "OUI:%02X%02X%02X%02X%02X%02X",
-                  names->mac[0], names->mac[1], names->mac[2],
-                  names->mac[3], names->mac[4], names->mac[5]);
--        udev_builtin_hwdb_lookup(dev, str, test);
-+        udev_builtin_hwdb_lookup(dev, NULL, str, NULL, test);
-         return 0;
- }
  
