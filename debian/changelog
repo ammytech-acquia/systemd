@@ -1,3 +1,32 @@
+systemd (204-10ubuntu4) utopic; urgency=medium
+
+  * Drop Fix-a-race-condition-at-boot-with-serio-devices.patch, superseded by
+    cherry-picked more generic upstream fix.
+  * logind.conf: Enable net_cls and netprio too, for compatibility with future
+    kernels. (LP: #1317179)
+  * Pull latest keymaps from upstream.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 25 May 2014 12:24:21 +0200
+
+systemd (204-11) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * Explain patch management in debian/README.source. (Closes: #739113)
+  * Replace "Always probe cpu support drivers" patch with cherry-picked
+    upstream fix which is more general.
+  * Advertise hibernation only if there's enough free swap. Patches backported
+    from current upstream. (LP: #1313522)
+  * Fix typo in sg loading rule to make it actually work.
+
+  [ Michael Biebl ]
+  * Make no-patch-numbers the default for gbp-pq.
+
+  [ Michael Stapelberg ]
+  * Clarify that “systemd” does not influence init whereas “systemd-sysv” does
+    (Closes: #747741)
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 27 Apr 2014 12:51:55 +0200
+
 systemd (204-10ubuntu3) utopic; urgency=medium
 
   * debian/patches/Add-cgmanager-support-to-logind.patch:
@@ -5,13 +34,6 @@ systemd (204-10ubuntu3) utopic; urgency=medium
       correctly note that cgmanager isn't available if it can't be pinged.
 
  -- Michael Terry <mterry@ubuntu.com>  Tue, 13 May 2014 15:45:14 -0400
-
-systemd (204-10ubuntu2) utopic; urgency=medium
-
-  * Update Enable-all-cgroup-controllers-in-logind.patch to also include
-    net_cls and net_prio. That should cover all existing cgroups.
-
- -- Stéphane Graber <stgraber@ubuntu.com>  Thu, 08 May 2014 18:27:59 -0500
 
 systemd (204-10ubuntu1) utopic; urgency=medium
 
@@ -52,12 +74,6 @@ systemd (204-10ubuntu1) utopic; urgency=medium
     - Remove obsolete systemd-logind upstart job.
 
  -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 27 Apr 2014 13:21:11 +0200
-
-systemd (204-11) UNRELEASED; urgency=medium
-
-  * Explain patch management in debian/README.source.
-
- -- Martin Pitt <mpitt@debian.org>  Sun, 27 Apr 2014 12:51:55 +0200
 
 systemd (204-10) unstable; urgency=medium
 

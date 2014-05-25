@@ -53,7 +53,8 @@ logind-if-a-user-is-sitting-in-front-of-the-computer.patch
 insserv.conf-generator.patch
 Add-targets-for-compatibility-with-Debian-insserv-sy.patch
 more-cd-aliases.patch
-Always-probe-cpu-support-drivers.patch
+rules-drivers-always-call-kmod-even-when-a-driver-is.patch
+Advertise-hibernation-only-if-there-s-enough-free-sw.patch
 Add-cgmanager-support-to-logind.patch
 Add-env-variable-for-machine-ID-path.patch
 Disable-tests-which-fail-on-buildds.patch
@@ -61,6 +62,5 @@ upstream-hwdb-updates.patch
 udev-add-builtin-keyboard-to-manage-key-mappings.patch
 Fix-FTBFS-against-recent-kernels-glibc.patch
 Enable-all-cgroup-controllers-in-logind.patch
-Fix-a-race-condition-at-boot-with-serio-devices.patch
 Create-disk-by-partlabel-links-for-mmcblk-partitions.patch
 Support-system-image-read-only-etc.patch
