@@ -1,3 +1,26 @@
+systemd (204-10ubuntu7) utopic; urgency=medium
+
+  * Drop udev.init's "Provides: lvm lvm2" and replace it with a dummy
+    lvm2.init. Otherwise we create a dependency loop between cryptdisks-early
+    and udev.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 28 May 2014 11:49:05 +0200
+
+systemd (204-10ubuntu6) utopic; urgency=medium
+
+  * No change rebuild to drop the upstart dependency introduced by the
+    new debhelper.
+
+ -- Stéphane Graber <stgraber@ubuntu.com>  Tue, 27 May 2014 15:53:04 +0200
+
+systemd (204-10ubuntu5) utopic; urgency=medium
+
+  * Make udev.init provide "mdadm-raid", "lvm", and "lvm2", as Ubuntu
+    assembles MD and LVM devices via udev rules instead of init scripts.
+    (LP: #1323274)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 26 May 2014 15:49:15 +0200
+
 systemd (204-10ubuntu4) utopic; urgency=medium
 
   * Drop Fix-a-race-condition-at-boot-with-serio-devices.patch, superseded by
