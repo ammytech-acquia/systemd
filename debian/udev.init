@@ -122,11 +122,6 @@ if [ ! -d /sys/class/ ]; then
   log_end_msg 1
 fi
 
-if [ ! -e /sys/kernel/uevent_helper ]; then
-  log_failure_msg "udev requires hotplug support, not started"
-  log_end_msg 1
-fi
-
 if ! ps --no-headers --format args ax | egrep -q '^\['; then
   log_warning_msg "udev does not support containers, not started"
   exit 0
@@ -173,9 +168,6 @@ case "$1" in
 
     # set the SELinux context for devices created in the initramfs
     [ -x /sbin/restorecon ] && /sbin/restorecon -R /dev
-
-    # /dev/null must be created before udevd is started
-    /lib/udev/create_static_nodes || true
 
     log_daemon_msg "Starting the hotplug events dispatcher" "udevd"
     if udevd --daemon; then

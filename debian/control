@@ -4,9 +4,10 @@ Priority: optional
 Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
 Uploaders: Tollef Fog Heen <tfheen@debian.org>, Michael Biebl <biebl@debian.org>, Marco d'Itri <md@linux.it>, Michael Stapelberg <stapelberg@debian.org>
 Standards-Version: 3.9.5
-Vcs-Git: git://anonscm.debian.org/pkg-systemd/systemd.git -b debian
+Vcs-Git: git://anonscm.debian.org/pkg-systemd/systemd.git
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-systemd/systemd.git;a=summary
 X-Python-Version: >= 2.7
+XS-Testsuite: autopkgtest
 Homepage: http://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 9),
                pkg-config,
@@ -67,17 +68,19 @@ Description: system and service manager
  It also provides process supervision using cgroups and the ability to
  not only depend on other init script being started, but also
  availability of a given mount point or dbus service.
+ .
+ Installing the systemd package will not switch your init system unless you
+ boot with init=/bin/systemd or install systemd-sysv in addition.
 
 Package: systemd-sysv
 Architecture: linux-any
 Section: admin
 Priority: extra
-Conflicts: sysvinit (<< 2.88dsf-44~),
-           upstart,
-           runit-run
+Conflicts: sysvinit-core,
+           upstart
 Replaces: sysvinit (<< 2.88dsf-44~),
-          sysvinit-core
-Breaks: sysvinit-core
+          sysvinit-core,
+          upstart
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version})
@@ -91,7 +94,8 @@ Description: system and service manager - SysV links
  availability of a given mount point or dbus service.
  .
  This package provides the manual pages and links needed for systemd
- to replace sysvinit.
+ to replace sysvinit. Installing systemd-sysv will overwrite /sbin/init with a
+ link to systemd.
 
 Package: libpam-systemd
 Architecture: linux-any
@@ -102,7 +106,8 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
-         libpam-runtime (>= 1.0.1-6)
+         libpam-runtime (>= 1.0.1-6),
+         systemd-sysv | systemd-shim
 Description: system and service manager - PAM module
  systemd is a replacement for sysvinit.  It is dependency-based and
  able to read the LSB init script headers in addition to parsing rcN.d
@@ -116,6 +121,8 @@ Description: system and service manager - PAM module
  the systemd control group hierarchy.
  .
  If in doubt, do install this package.
+ .
+ Packages that depend on logind functionality need to depend on libpam-systemd.
 
 Package: libsystemd-login0
 Architecture: linux-any
@@ -131,6 +138,7 @@ Description: systemd login utility library
 
 Package: libsystemd-login-dev
 Architecture: linux-any
+Multi-Arch: same
 Section: libdevel
 Priority: optional
 Depends: ${shlibs:Depends},
@@ -158,6 +166,7 @@ Description: systemd utility library
 
 Package: libsystemd-daemon-dev
 Architecture: linux-any
+Multi-Arch: same
 Section: libdevel
 Priority: optional
 Depends: ${shlibs:Depends},
@@ -185,6 +194,7 @@ Description: systemd journal utility library
 
 Package: libsystemd-journal-dev
 Architecture: linux-any
+Multi-Arch: same
 Section: libdevel
 Priority: optional
 Depends: ${shlibs:Depends},
@@ -213,6 +223,7 @@ Description: systemd 128 bit ID utility library
 
 Package: libsystemd-id128-dev
 Architecture: linux-any
+Multi-Arch: same
 Section: libdevel
 Priority: optional
 Depends: ${shlibs:Depends},
@@ -259,6 +270,7 @@ Package: libudev-dev
 Section: libdevel
 Priority: optional
 Architecture: linux-any
+Multi-Arch: same
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libudev1 (= ${binary:Version})
@@ -340,3 +352,27 @@ Depends: ${shlibs:Depends},
          ${python:Depends}
 Description: python bindings for systemd
  This package contains Python bindings for the systemd libraries.
+
+Package: systemd-dbg
+Architecture: linux-any
+Section: debug
+Priority: extra
+Depends: ${misc:Depends},
+         systemd (= ${binary:Version}),
+         udev (= ${binary:Version}),
+         libsystemd-login0 (= ${binary:Version}),
+         libsystemd-daemon0 (= ${binary:Version}),
+         libsystemd-journal0 (= ${binary:Version}),
+         libsystemd-id128-0 (= ${binary:Version}),
+         libudev1 (= ${binary:Version})
+Description: system and service manager (debug symbols)
+ systemd is a replacement for sysvinit.  It is dependency-based and
+ able to read the LSB init script headers in addition to parsing rcN.d
+ links as hints.
+ .
+ It also provides process supervision using cgroups and the ability to
+ not only depend on other init script being started, but also
+ availability of a given mount point or dbus service.
+ .
+ This package contains the debugging symbols for systemd, udev and
+ related libraries.
