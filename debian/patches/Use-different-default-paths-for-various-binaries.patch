@@ -8,31 +8,37 @@ Update the defaults in configure.ac so we don't have to build-depend on
 quota, libcap2-bin, procps, kmod and kexec-tools just to get the correct
 paths.  Closes: #721347
 ---
- configure.ac | 12 ++++++------
- 1 file changed, 6 insertions(+), 6 deletions(-)
+ configure.ac | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
 
 diff --git a/configure.ac b/configure.ac
-index e1278e8..b2871d1 100644
+index 9605b38..b7f8a74 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -64,12 +64,12 @@ AC_PROG_GCC_TRADITIONAL
+@@ -67,16 +67,16 @@ AC_PROG_GCC_TRADITIONAL
  AC_PATH_PROG([M4], [m4])
  AC_PATH_PROG([XSLTPROC], [xsltproc])
  
--AC_PATH_PROG([QUOTAON], [quotaon], [/usr/sbin/quotaon])
--AC_PATH_PROG([QUOTACHECK], [quotacheck], [/usr/sbin/quotacheck])
-+AC_PATH_PROG([QUOTAON], [quotaon], [/sbin/quotaon])
-+AC_PATH_PROG([QUOTACHECK], [quotacheck], [/sbin/quotacheck])
+-AC_PATH_PROG([QUOTAON], [quotaon], [/usr/sbin/quotaon], [$PATH:/usr/sbin:/sbin])
+-AC_PATH_PROG([QUOTACHECK], [quotacheck], [/usr/sbin/quotacheck], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([QUOTAON], [quotaon], [/sbin/quotaon], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([QUOTACHECK], [quotacheck], [/sbin/quotacheck], [$PATH:/usr/sbin:/sbin])
  
--AC_PATH_PROG([SETCAP], [setcap], [/usr/sbin/setcap])
-+AC_PATH_PROG([SETCAP], [setcap], [/sbin/setcap])
+-AC_PATH_PROG([SETCAP], [setcap], [/usr/sbin/setcap], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([SETCAP], [setcap], [/sbin/setcap], [$PATH:/usr/sbin:/sbin])
  
--AC_PATH_PROG([KILL], [kill], [/usr/bin/kill])
-+AC_PATH_PROG([KILL], [kill], [/bin/kill])
+-AC_PATH_PROG([KILL], [kill], [/usr/bin/kill], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([KILL], [kill], [/bin/kill], [$PATH:/usr/sbin:/sbin])
  
- # gtkdocize greps for '^GTK_DOC_CHECK', so it needs to be on its own line
- m4_ifdef([GTK_DOC_CHECK], [
-@@ -680,13 +680,13 @@ AC_ARG_WITH(kbd-loadkeys,
+-AC_PATH_PROG([KMOD], [kmod], [/usr/bin/kmod], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([KMOD], [kmod], [/bin/kmod], [$PATH:/usr/sbin:/sbin])
+ 
+-AC_PATH_PROG([KEXEC], [kexec], [/usr/sbin/kexec], [$PATH:/usr/sbin:/sbin])
++AC_PATH_PROG([KEXEC], [kexec], [/sbin/kexec], [$PATH:/usr/sbin:/sbin])
+ 
+ AS_IF([! ln --relative --help > /dev/null 2>&1], [AC_MSG_ERROR([*** ln doesn't support --relative ***])])
+ 
+@@ -792,13 +792,13 @@ AC_ARG_WITH(kbd-loadkeys,
          AS_HELP_STRING([--with-kbd-loadkeys=PATH],
                  [Path to loadkeys]),
          [KBD_LOADKEYS="$withval"],
