@@ -23,11 +23,11 @@ https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=752259
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/core/transaction.c b/src/core/transaction.c
-index fa97b69..8a4f50f 100644
+index 203070f..45e06b0 100644
 --- a/src/core/transaction.c
 +++ b/src/core/transaction.c
 @@ -374,7 +374,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
-                                       "Walked on cycle path to %s/%s",
+                                       "Found dependency on %s/%s",
                                        k->unit->id, job_type_to_string(k->type));
  
 -                        if (!delete &&
