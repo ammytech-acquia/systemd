@@ -12,7 +12,8 @@ start on (startup
 	  and stopped udevtrigger
 	  and stopped udevmonitor)
 
-pre-start script
+task
+script
     # Save udev log in /var/log/udev
     if [ -e /dev/.udev.log ]
     then
@@ -20,5 +21,5 @@ pre-start script
     fi
 
     # Copy any rules generated while the root filesystem was read-only
-    exec /lib/udev/udev-finish
+    /lib/udev/udev-finish
 end script

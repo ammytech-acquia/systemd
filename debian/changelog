@@ -1,16 +1,134 @@
-systemd (204-14ubuntu2) utopic; urgency=medium
+systemd (208-6ubuntu1) utopic; urgency=medium
 
-  * Add-cgmanager-support-to-logind.patch: Don't nih_unref a NULL value.
-    Thanks to James Hunt! (LP: #1342586)
+  * Merge with Debian unstable. Remaining Ubuntu changes:
+    - Add patches for specifying an alternate /etc/machine-id location, skip
+      tests that fail on buildds (presumably due to missing /etc/hostname),
+      and run tests during package build.
+    - Fix FTBFS against recent kernels & glibc.
+    - Create disk/by-partlabel links for mmcblk partitions.
+    - Hack to support system-image read-only /etc, and modify files in
+      /etc/writable/ instead.
+    - debian/rules: Drop doc dir symlinking. It creates havoc with dpkg
+      upgrades, and we already have the automatic per-file symlinking.
+    - debian/rules: Add an epoch to libgudev.
+    - Don't build the systemd-sysv package for now.
+    - Drop 80-networking.rules and the Debian *.agent scripts, we never
+      supported them in Ubuntu.
+    - Keep our much simpler udev maintainer scripts (all platforms must
+      support udev, no debconf).
+    - Add udev Apport package hook.
+    - debian/extra/initramfs.top: Drop $ROOTDELAY, we do that in a more
+      sensible way with wait-for-root. Will get applicable to Debian once
+      Debian gets wait-for-root in initramfs-tools.
+    - debian/extra/initramfs.bottom: If LVM is installed, settle udev,
+      otherwise we get missing LV symlinks. Workaround for LP #1185394.
+    - Add 40-hyperv-hotadd.rules: Workaround for LP #1233466.
+    - Mark graphics devices as PRIMARY_DEVICE_FOR_DISPLAY so that we can wait
+      for those in plymouth.
+    - Add debian/udev.lvm2.init: Dummy SysV init script to satisfy insserv
+      dependencies to "lvm2" which is handled with udev rules in Ubuntu.
+    - Re-add systemd-shim alternative dependency to libpam-systemd, and
+      version it to ensure cgmanager support. (LP: #1343802)
+    - Revert 2d54bc3: Drop patches to make logind D-Bus activatable; this
+      was wrong to do in Debian, as it's necessary for non-systemd pid 1.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 17 Jul 2014 13:03:19 +0200
+    Upgrade fixes, keep until 16.04 LTS release:
+    - systemd Conflicts/Replaces/Provides systemd-services.
+    - Remove obsolete systemd-logind upstart job.
 
-systemd (204-14ubuntu1) utopic; urgency=medium
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 21 Jul 2014 12:56:58 +0200
 
-  * Merge with Debian unstable. See 204-10ubuntu1 for remaining Ubuntu
-    changes.
+systemd (208-7) UNRELEASED; urgency=medium
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 15 Jul 2014 16:14:36 +0200
+  [ Michael Biebl ]
+  * Mask remaining services provided by the initscripts package and document
+    in more detail why certain services have been masked. (Closes: #659264)
+
+  [ Jon Severinsson ]
+  * Cherry-pick upstream fix for journal file permissions.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 17 Jul 2014 00:48:14 +0200
+
+systemd (208-6) unstable; urgency=medium
+
+  [ Jon Severinsson ]
+  * Add v208-stable patch series.
+    - Update Debian patches to apply on top of v208-stable.
+    - Move new manpages to libsystemd-*-dev as appropriate.
+
+  [ Michael Biebl ]
+  * Upload to unstable.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 16 Jul 2014 00:44:15 +0200
+
+systemd (208-5) experimental; urgency=medium
+
+  * Merge changes from unstable branch.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 28 Jun 2014 13:41:32 +0200
+
+systemd (208-4) experimental; urgency=medium
+
+  * Merge changes from unstable branch.
+  * Drop alternative dependency on systemd-shim in libpam-systemd. The
+    systemd-shim package no longer provides an environment to run
+    systemd-logind standalone. See #752939 for further details.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 28 Jun 2014 01:22:11 +0200
+
+systemd (208-3) experimental; urgency=medium
+
+  * Merge changes from unstable branch.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 25 Jun 2014 11:29:07 +0200
+
+systemd (208-2) experimental; urgency=medium
+
+  [ Sjoerd Simons ]
+  * Don't stop a running user manager from garbage collecting the users. Fixes
+    long shutdown times when using a systemd user session
+
+  [ Michael Stapelberg ]
+  * Fix bug-script: “systemctl dump” is now “systemd-analyze dump”
+    (Closes: #748311)
+
+  [ Michael Biebl ]
+  * Merge changes from unstable branch.
+  * Cherry-pick upstream fixes to make sd_session_get_vt() actually work.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 24 Jun 2014 17:45:26 +0200
+
+systemd (208-1) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream release. (Closes: #729566)
+  * Update patches.
+  * Update symbols files for libsystemd-journal and libsystemd-login.
+  * Install new files and remove the ones we don't use.
+  * Install zsh completion files. (Closes: #717540)
+  * Create a compat symlink /etc/sysctl.d/99-sysctl.conf as systemd-sysctl no
+    longer reads /etc/sysctl.conf.
+  * Bump Build-Depends on kmod to (>= 14).
+  * Bump Build-Depends on libcryptsetup-dev to (>= 2:1.6.0) for tcrypt
+    support.
+  * Make kmod-static-nodes.service check for the kmod binary since we don't
+    want a hard dependency on kmod e.g. for container installations.
+  * Disable various features which aren't required for the udeb build.
+  * Move new sd_pid_get_slice and sd_session_get_vt man pages into
+    libsystemd-login-dev.
+  * Make no-patch-numbers the default for gbp-pq.
+  * Adjust systemd-user pam config file for Debian.
+    This pam config file is used by libpam-systemd/systemd-logind when
+    launching systemd user instances.
+  * Drop patches to make logind D-Bus activatable. The cgroup handling has
+    been reworked in v205 and logind no longer creates cgroup hierarchies on
+    its own. That means that the standalone logind is no longer functional
+    without support from systemd (or an equivalent cgroup manager).
+
+  [ Martin Pitt ]
+  * Explain patch management in debian/README.source.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 28 Apr 2014 00:22:57 +0200
 
 systemd (204-14) unstable; urgency=medium
 
@@ -38,15 +156,6 @@ systemd (204-13) unstable; urgency=medium
     CONFIG_UEVENT_HELPER completely. (Closes: #752742)
 
  -- Michael Biebl <biebl@debian.org>  Sat, 28 Jun 2014 00:01:16 +0200
-
-systemd (204-12ubuntu1) utopic; urgency=medium
-
-  * Merge with Debian unstable. See 204-10ubuntu1 for remaining Ubuntu
-    changes.
-  * udev.postinst: Don't restart udev in a chroot or during debootstrap.
-    (LP: #1329684)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 26 Jun 2014 11:21:23 +0200
 
 systemd (204-12) unstable; urgency=medium
 
@@ -108,102 +217,6 @@ systemd (204-11) unstable; urgency=medium
     (Closes: #751472)
 
  -- Michael Biebl <biebl@debian.org>  Tue, 24 Jun 2014 17:03:43 +0200
-
-systemd (204-10ubuntu9) utopic; urgency=medium
-
-  * Fix various issues with the cgmanager integration (LP: #1309025):
-     - Always nih_free variables that were potentially nih allocated.
-     - Always initialize the children listings to NULL.
-
- -- Stéphane Graber <stgraber@ubuntu.com>  Wed, 18 Jun 2014 23:34:41 -0400
-
-systemd (204-10ubuntu8) utopic; urgency=medium
-
-  * debian/udev.udev-finish.upstart: Don't make this a task anymore, as
-    startpar needs this job to be running.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 29 May 2014 10:00:01 +0200
-
-systemd (204-10ubuntu7) utopic; urgency=medium
-
-  * Drop udev.init's "Provides: lvm lvm2" and replace it with a dummy
-    lvm2.init. Otherwise we create a dependency loop between cryptdisks-early
-    and udev.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 28 May 2014 11:49:05 +0200
-
-systemd (204-10ubuntu6) utopic; urgency=medium
-
-  * No change rebuild to drop the upstart dependency introduced by the
-    new debhelper.
-
- -- Stéphane Graber <stgraber@ubuntu.com>  Tue, 27 May 2014 15:53:04 +0200
-
-systemd (204-10ubuntu5) utopic; urgency=medium
-
-  * Make udev.init provide "mdadm-raid", "lvm", and "lvm2", as Ubuntu
-    assembles MD and LVM devices via udev rules instead of init scripts.
-    (LP: #1323274)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 26 May 2014 15:49:15 +0200
-
-systemd (204-10ubuntu4) utopic; urgency=medium
-
-  * Drop Fix-a-race-condition-at-boot-with-serio-devices.patch, superseded by
-    cherry-picked more generic upstream fix.
-  * logind.conf: Enable net_cls and netprio too, for compatibility with future
-    kernels. (LP: #1317179)
-  * Pull latest keymaps from upstream.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 25 May 2014 12:24:21 +0200
-
-systemd (204-10ubuntu3) utopic; urgency=medium
-
-  * debian/patches/Add-cgmanager-support-to-logind.patch:
-    - Fix an uninitialized variable bug that could cause a crash and
-      correctly note that cgmanager isn't available if it can't be pinged.
-
- -- Michael Terry <mterry@ubuntu.com>  Tue, 13 May 2014 15:45:14 -0400
-
-systemd (204-10ubuntu1) utopic; urgency=medium
-
-  * Merge with Debian unstable. Remaining Ubuntu changes:
-    - Add cgmanager support for logind.
-    - Add patches for specifying an alternate /etc/machine-id location, skip
-      tests that fail on buildds (presumably due to missing /etc/hostname),
-      and run tests during package build.
-    - Cherry-pick hwdb updates and the keymap builtin, and pull latest keymap
-      hwdb from upstream trunk.
-    - Fix FTBFS against recent kernels & glibc.
-    - Enable all cgroup controllers in logind, for unprivileged LXC
-      containers.
-    - Fix a race condition at boot with serio devices. (LP #1014460)
-    - Create disk/by-partlabel links for mmcblk partitions.
-    - Hack to support system-image read-only /etc, and modify files in
-      /etc/writable/ instead.
-    - debian/rules: Drop doc dir symlinking. It creates havoc with dpkg
-      upgrades, and we already have the automatic per-file symlinking.
-    - debian/rules: Add an epoch to libgudev.
-    - Don't build the systemd-sysv package for now.
-    - Drop 80-networking.rules and the Debian *.agent scripts, we never
-      supported them in Ubuntu.
-    - Keep our much simpler udev maintainer scripts (all platforms must
-      support udev, no debconf).
-    - Add udev Apport package hook.
-    - debian/extra/initramfs.top: Drop $ROOTDELAY, we do that in a more
-      sensible way with wait-for-root. Will get applicable to Debian once
-      Debian gets wait-for-root in initramfs-tools.
-    - debian/extra/initramfs.bottom: If LVM is installed, settle udev,
-      otherwise we get missing LV symlinks. Workaround for LP #1185394.
-    - Add 40-hyperv-hotadd.rules: Workaround for LP #1233466.
-    - Mark graphics devices as PRIMARY_DEVICE_FOR_DISPLAY so that we can wait
-      for those in plymouth.
-
-    Upgrade fixes, keep until 16.04 LTS release:
-    - systemd Conflicts/Replaces/Provides systemd-services.
-    - Remove obsolete systemd-logind upstart job.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 27 Apr 2014 13:21:11 +0200
 
 systemd (204-10) unstable; urgency=medium
 

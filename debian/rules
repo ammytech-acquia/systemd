@@ -23,7 +23,6 @@ CONFFLAGS = \
 	--disable-coredump \
 	--disable-efi \
 	--disable-myhostname \
-	--disable-keymap \
 	--disable-vconsole \
 	--disable-silent-rules
 ifeq (,$(findstring stage1,$(DEB_BUILD_PROFILES)))
@@ -36,16 +35,20 @@ CONFFLAGS_deb = \
 	--enable-gtk-doc
 
 CONFFLAGS_udeb = \
-	--disable-cgmanager \
 	--disable-selinux \
+	--disable-smack \
+	--disable-ima \
 	--disable-introspection \
 	--disable-gtk-doc \
 	--disable-binfmt \
 	--disable-readahead \
 	--disable-bootchart \
 	--disable-quotacheck \
+	--disable-tmpfiles \
 	--disable-randomseed \
+	--disable-backlight \
 	--disable-logind \
+	--disable-machined \
 	--disable-hostnamed \
 	--disable-timedated \
 	--disable-localed \
@@ -88,8 +91,11 @@ override_dh_install:
 	rm -f debian/install/*/etc/init.d/README
 	rm -f debian/install/*/usr/share/man/man8/kernel-install.8
 	rm -f debian/install/*/usr/bin/kernel-install
+	rm -f debian/install/*/usr/share/zsh/site-functions/_kernel-install
+	rm -f debian/install/*/usr/share/bash-completion/completions/kernel-install
 	rm -rf debian/install/*/usr/lib/kernel/install.d
 	rm -rf debian/install/*/etc/rpm/
+	rm -rf debian/install/*/usr/lib/rpm/
 	rm -rf debian/install/*/etc/kernel/
 	rm -f debian/install/*/usr/lib/sysctl.d/50-default.conf
 	find debian/install/ -name '*.la' -delete
