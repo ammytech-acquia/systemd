@@ -12,4 +12,3 @@ usr/share/pkgconfig/udev.pc
 
 # Ubuntu
 ../../extra/udev.py usr/share/apport/package-hooks
-../../extra/*.hwdb lib/udev/hwdb.d
