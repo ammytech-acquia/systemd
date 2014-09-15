@@ -15,7 +15,6 @@ but target chosen by user.
 
 Suggested-by: Michal Schmidt <mschmidt@redhat.com>
 (cherry picked from commit d3381512282f2ca1c7669f77fb736a90fdce6982)
-(cherry picked from commit 7a4ab10135c2b8fdeedb53c0585c67a0d6448ce6)
 ---
  units/emergency.service.in | 3 +--
  units/rescue.service.m4.in | 3 +--

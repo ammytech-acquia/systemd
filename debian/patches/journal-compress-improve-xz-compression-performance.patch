@@ -28,18 +28,16 @@ LZ4: compressed & decompressed 2535303543 bytes in 1.60s (1510.60MiB/s), mean co
 
 Conflicts:
 	src/journal/compress.c
-
-(cherry picked from commit 00464ad8a698fe7735737fab57420f8a44013890)
 ---
  src/journal/compress.c | 14 ++++++++++++--
  1 file changed, 12 insertions(+), 2 deletions(-)
 
 diff --git a/src/journal/compress.c b/src/journal/compress.c
-index a83dcea..77465c7 100644
+index 1fc62ea..9c0b74c 100644
 --- a/src/journal/compress.c
 +++ b/src/journal/compress.c
-@@ -28,6 +28,13 @@
- #include "macro.h"
+@@ -30,6 +30,13 @@
+ #include "util.h"
  
  bool compress_blob(const void *src, uint64_t src_size, void *dst, uint64_t *dst_size) {
 +        static const lzma_options_lzma opt = {
@@ -52,7 +50,7 @@ index a83dcea..77465c7 100644
          lzma_ret ret;
          size_t out_pos = 0;
  
-@@ -39,8 +46,11 @@ bool compress_blob(const void *src, uint64_t src_size, void *dst, uint64_t *dst_
+@@ -41,8 +48,11 @@ bool compress_blob(const void *src, uint64_t src_size, void *dst, uint64_t *dst_
          /* Returns false if we couldn't compress the data or the
           * compressed result is longer than the original */
  
