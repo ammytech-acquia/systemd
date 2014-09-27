@@ -14,17 +14,16 @@ waiting an extra 100ms really doesn't make a difference anyways
 compared to the time it takes the user to log in.
 
 (cherry picked from commit 4bf04322b8b7ecca4f3d65cfc642d0ac16356129)
-(cherry picked from commit 89b958ef6a43400d1f7b25c58b02f4b5c3c59b36)
 ---
  units/serial-getty@.service.m4 | 1 -
  1 file changed, 1 deletion(-)
 
 diff --git a/units/serial-getty@.service.m4 b/units/serial-getty@.service.m4
-index aea078f..1c2a521 100644
+index 4ac51e7..4522d0d 100644
 --- a/units/serial-getty@.service.m4
 +++ b/units/serial-getty@.service.m4
 @@ -25,7 +25,6 @@ IgnoreOnIsolate=yes
- ExecStart=-/sbin/agetty --keep-baud %I 115200,38400,9600
+ ExecStart=-/sbin/agetty --keep-baud 115200,38400,9600 %I $TERM
  Type=idle
  Restart=always
 -RestartSec=0

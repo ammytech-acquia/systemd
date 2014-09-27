@@ -6,7 +6,6 @@ Parameters to hostnamectl command are not optional and should not be marked
 as such in the man page.
 
 (cherry picked from commit 1ed774956406941d4812a3fb4493d2915f130f12)
-(cherry picked from commit ba838f7f9b3de1777f3528c0fe211f9bedbd2a8b)
 ---
  man/hostnamectl.xml               | 73 +++++++++++++++++++++------------------
  shell-completion/bash/hostnamectl |  3 ++
@@ -15,10 +14,10 @@ as such in the man page.
  4 files changed, 75 insertions(+), 37 deletions(-)
 
 diff --git a/man/hostnamectl.xml b/man/hostnamectl.xml
-index f3038b3..b4aa43d 100644
+index 001bfce..13e5bd5 100644
 --- a/man/hostnamectl.xml
 +++ b/man/hostnamectl.xml
-@@ -172,13 +172,14 @@
+@@ -141,13 +141,14 @@
                          </varlistentry>
  
                          <varlistentry>
@@ -38,7 +37,7 @@ index f3038b3..b4aa43d 100644
                                  <option>--static</option>,
                                  <option>--transient</option>,
                                  <option>--pretty</option> are used,
-@@ -199,55 +200,61 @@
+@@ -168,55 +169,61 @@
                                  the hostname string is not done if
                                  only the transient and/or static host
                                  names are set, and the pretty host
@@ -150,7 +149,7 @@ index 9c75da9..22f8f06 100644
                  comps=''
          fi
 diff --git a/shell-completion/zsh/_hostnamectl b/shell-completion/zsh/_hostnamectl
-index 45b9597..52945d8 100644
+index 7effa04..be86876 100644
 --- a/shell-completion/zsh/_hostnamectl
 +++ b/shell-completion/zsh/_hostnamectl
 @@ -1,5 +1,30 @@
@@ -184,7 +183,7 @@ index 45b9597..52945d8 100644
  _hostnamectl_command() {
      local -a _hostnamectl_cmds
      _hostnamectl_cmds=(
-@@ -13,8 +38,11 @@ _hostnamectl_command() {
+@@ -14,8 +39,11 @@ _hostnamectl_command() {
          local curcontext="$curcontext"
          cmd="${${_hostnamectl_cmds[(r)$words[1]:*]%%:*}}"
          if (( $#cmd )); then
@@ -199,7 +198,7 @@ index 45b9597..52945d8 100644
              _message "unknown hostnamectl command: $words[1]"
          fi
 diff --git a/shell-completion/zsh/_localectl b/shell-completion/zsh/_localectl
-index c04f4f3..7756eb9 100644
+index 87432da..d8af4d1 100644
 --- a/shell-completion/zsh/_localectl
 +++ b/shell-completion/zsh/_localectl
 @@ -22,8 +22,8 @@ _localectl_set-locale() {
@@ -212,7 +211,7 @@ index c04f4f3..7756eb9 100644
          _describe keymaps _keymaps
      else
          _message "no more options"
-@@ -73,7 +73,7 @@ _localectl_command() {
+@@ -77,7 +77,7 @@ _localectl_command() {
          if (( $+functions[_localectl_$cmd] )); then
              _localectl_$cmd
          else

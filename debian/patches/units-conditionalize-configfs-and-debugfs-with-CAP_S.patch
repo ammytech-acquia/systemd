@@ -10,7 +10,6 @@ Conditionalize them with CAP_SYS_RAWIO since that's required to access
 npsawn containers lack that capability.
 
 (cherry picked from commit fa229d09281d435153b4cfd138a2a62fa66d889b)
-(cherry picked from commit b654a1065f278c93b3891cc5993645026e0d3702)
 ---
  units/sys-kernel-config.mount | 1 +
  units/sys-kernel-debug.mount  | 1 +

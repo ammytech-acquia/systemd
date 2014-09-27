@@ -5,15 +5,23 @@ Subject: =?utf-8?q?don=E2=80=99t_try_to_start_autovt_units_when_not_runnin?=
 
 Closes: #726466
 ---
- src/login/logind-core.c | 5 +++++
- 1 file changed, 5 insertions(+)
+ src/login/logind-core.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
 
 diff --git a/src/login/logind-core.c b/src/login/logind-core.c
-index 36999ac..2011f91 100644
+index 053d2ed..695ca03 100644
 --- a/src/login/logind-core.c
 +++ b/src/login/logind-core.c
-@@ -477,6 +477,11 @@ int manager_spawn_autovt(Manager *m, int vtnr) {
-             (unsigned) vtnr != m->reserve_vt)
+@@ -34,6 +34,7 @@
+ #include "bus-error.h"
+ #include "udev-util.h"
+ #include "logind.h"
++#include "sd-daemon.h"
+ 
+ int manager_add_device(Manager *m, const char *sysfs, bool master, Device **_device) {
+         Device *d;
+@@ -451,6 +452,11 @@ int manager_spawn_autovt(Manager *m, unsigned int vtnr) {
+             vtnr != m->reserve_vt)
                  return 0;
  
 +        /* It only makes sense to send a StartUnit call to systemd if this
@@ -21,6 +29,6 @@ index 36999ac..2011f91 100644
 +        if (!sd_booted())
 +                return 0;
 +
-         if ((unsigned) vtnr != m->reserve_vt) {
+         if (vtnr != m->reserve_vt) {
                  /* If this is the reserved TTY, we'll start the getty
                   * on it in any case, but otherwise only if it is not

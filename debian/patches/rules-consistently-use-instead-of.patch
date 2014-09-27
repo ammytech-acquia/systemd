@@ -3,14 +3,13 @@ Date: Tue, 15 Jul 2014 02:04:47 +0200
 Subject: rules: consistently use "?*" instead of "*?"
 
 (cherry picked from commit 64dfe7b74446bd56e2d0e1588f900372ac13ae42)
-(cherry picked from commit 9221fcfe485a71dd206691f25fc7db3b02076bf3)
 ---
  rules/99-systemd.rules.in  |  2 +-
  src/login/70-uaccess.rules | 12 ++++++------
  2 files changed, 7 insertions(+), 7 deletions(-)
 
 diff --git a/rules/99-systemd.rules.in b/rules/99-systemd.rules.in
-index 713e052..ed0df75 100644
+index db72373..c3ef81b 100644
 --- a/rules/99-systemd.rules.in
 +++ b/rules/99-systemd.rules.in
 @@ -43,7 +43,7 @@ SUBSYSTEM=="net", KERNEL!="lo", TAG+="systemd", ENV{SYSTEMD_ALIAS}+="/sys/subsys
@@ -23,7 +22,7 @@ index 713e052..ed0df75 100644
  
  SUBSYSTEM=="printer", TAG+="systemd", ENV{SYSTEMD_WANTS}+="printer.target"
 diff --git a/src/login/70-uaccess.rules b/src/login/70-uaccess.rules
-index 01484c9..c4fc956 100644
+index e1cf897..57f619d 100644
 --- a/src/login/70-uaccess.rules
 +++ b/src/login/70-uaccess.rules
 @@ -12,7 +12,7 @@ ENV{MAJOR}=="", GOTO="uaccess_end"
@@ -35,7 +34,7 @@ index 01484c9..c4fc956 100644
  
  # SCSI and USB scanners
  ENV{libsane_matched}=="yes", TAG+="uaccess"
-@@ -49,13 +49,13 @@ SUBSYSTEM=="drm", KERNEL=="card*", TAG+="uaccess"
+@@ -49,13 +49,13 @@ SUBSYSTEM=="drm", KERNEL=="card*|renderD*", TAG+="uaccess"
  SUBSYSTEM=="misc", KERNEL=="kvm", TAG+="uaccess"
  
  # smart-card readers
