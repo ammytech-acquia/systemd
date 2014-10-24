@@ -7,16 +7,15 @@ a long time coming, depending on the sensor device, ask the kernel
 for the last state for that particular input device.
 
 (cherry picked from commit a545c6e1aa31b4d7e80c9d3609d9fc4fc9921498)
-(cherry picked from commit e27bfc22bba932950a398b32bf57be6f825438ee)
 ---
  src/udev/accelerometer/accelerometer.c | 33 ++++++---------------------------
  1 file changed, 6 insertions(+), 27 deletions(-)
 
 diff --git a/src/udev/accelerometer/accelerometer.c b/src/udev/accelerometer/accelerometer.c
-index 9610d7c..d192e57 100644
+index 925d38d..32adf27 100644
 --- a/src/udev/accelerometer/accelerometer.c
 +++ b/src/udev/accelerometer/accelerometer.c
-@@ -179,7 +179,7 @@ get_prev_orientation(struct udev_device *dev)
+@@ -180,7 +180,7 @@ get_prev_orientation(struct udev_device *dev)
          return string_to_orientation(value);
  }
  
@@ -25,7 +24,7 @@ index 9610d7c..d192e57 100644
  
  /* accelerometers */
  static void test_orientation(struct udev *udev,
-@@ -188,10 +188,9 @@ static void test_orientation(struct udev *udev,
+@@ -189,10 +189,9 @@ static void test_orientation(struct udev *udev,
  {
          OrientationUp old, new;
          _cleanup_close_ int fd = -1;
@@ -38,7 +37,7 @@ index 9610d7c..d192e57 100644
          char text[64];
  
          old = get_prev_orientation(dev);
-@@ -200,30 +199,10 @@ static void test_orientation(struct udev *udev,
+@@ -201,30 +200,10 @@ static void test_orientation(struct udev *udev,
          if (fd < 0)
                  return;
  

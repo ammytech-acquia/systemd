@@ -10,22 +10,22 @@ environment.
 
 Bug: https://bugs.freedesktop.org/show_bug.cgi?id=62344
 ---
- src/libsystemd-id128/sd-id128.c | 6 +++++-
+ src/libsystemd/sd-id128/sd-id128.c | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)
 
-diff --git a/src/libsystemd-id128/sd-id128.c b/src/libsystemd-id128/sd-id128.c
-index 64ddd09..47351c8 100644
---- a/src/libsystemd-id128/sd-id128.c
-+++ b/src/libsystemd-id128/sd-id128.c
-@@ -115,6 +115,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index a1e44e6..1ee1e21 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -111,6 +111,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
          ssize_t k;
          unsigned j;
          sd_id128_t t;
 +        const char *machine_id_path;
  
-         if (!ret)
-                 return -EINVAL;
-@@ -124,7 +125,10 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+         assert_return(ret, -EINVAL);
+ 
+@@ -119,7 +120,10 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
                  return 0;
          }
  

@@ -7,7 +7,6 @@ for the journal to get our cgroup information. But even that information
 is not vital to the test, so a sleep(1) should be just fine.
 
 (cherry picked from commit 037ee337f0f64bd35ced765f2e2d97f496d4e7c7)
-(cherry picked from commit 918af53be96fe4284538ebf8eb4fac1aa8839529)
 ---
  src/journal/test-journal-send.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

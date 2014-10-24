@@ -4,7 +4,6 @@ Subject: vconsole-setup: run setfont before loadkeys
 
 https://bugs.freedesktop.org/show_bug.cgi?id=80685
 (cherry picked from commit abee28c56d523e55751b0c007d0bf812cc285c00)
-(cherry picked from commit 20a575e8935cf5d2d078bbe3acf21fff56f2345c)
 ---
  src/vconsole/vconsole-setup.c | 48 +++++++++++++++++++++----------------------
  1 file changed, 23 insertions(+), 25 deletions(-)
