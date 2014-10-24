@@ -25,13 +25,12 @@ On Tue, Jul 15, 2014 at 1:52 PM, Alick Zhao <alick9188@gmail.com> wrote:
 > [1] http://en.wikipedia.org/wiki/List_of_software-defined_radios
 
 (cherry picked from commit 30632d97d9d68c8202e562f34afae8f8d6e9c377)
-(cherry picked from commit 4e0d085ff52a7d7858a30c651e37b18f3e92618b)
 ---
  src/login/70-uaccess.rules | 3 +++
  1 file changed, 3 insertions(+)
 
 diff --git a/src/login/70-uaccess.rules b/src/login/70-uaccess.rules
-index c4fc956..6bbd182 100644
+index 57f619d..694df2c 100644
 --- a/src/login/70-uaccess.rules
 +++ b/src/login/70-uaccess.rules
 @@ -72,4 +72,7 @@ ENV{DDC_DEVICE}=="?*", TAG+="uaccess"

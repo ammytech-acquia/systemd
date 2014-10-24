@@ -10,16 +10,16 @@ we need to update those files instead if the original files are symlinks into
 Forwarded: OMGno, this is a rather nasty hack until we get a clean solution for an /etc overlay
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
- src/hostname/hostnamed.c | 34 +++++++++++++++++++++++++++-------
+ src/hostname/hostnamed.c | 27 +++++++++++++++++++++++----
  src/timedate/timedated.c | 37 ++++++++++++++++++++++++++++---------
- 2 files changed, 55 insertions(+), 16 deletions(-)
+ 2 files changed, 51 insertions(+), 13 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 769f25c..65252a6 100644
+index eaae113..93a4364 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -108,6 +108,26 @@ static void free_data(void) {
-         }
+@@ -72,6 +72,25 @@ static void context_free(Context *c, sd_bus *bus) {
+         bus_verify_polkit_async_registry_free(bus, c->polkit_registry);
  }
  
 +/* Hack for Ubuntu phone: check if path is an existing symlink to
@@ -41,27 +41,12 @@ index 769f25c..65252a6 100644
 +        return result;
 +}
 +
-+
- static int read_data(void) {
+ static int context_read_data(Context *c) {
          int r;
+         struct utsname u;
+@@ -299,12 +318,12 @@ static int context_write_data_static_hostname(Context *c) {
  
-@@ -117,11 +137,11 @@ static int read_data(void) {
-         if (!data[PROP_HOSTNAME])
-                 return -ENOMEM;
- 
--        r = read_one_line_file("/etc/hostname", &data[PROP_STATIC_HOSTNAME]);
-+        r = read_one_line_file(writable_filename("/etc/hostname"), &data[PROP_STATIC_HOSTNAME]);
-         if (r < 0 && r != -ENOENT)
-                 return r;
- 
--        r = parse_env_file("/etc/machine-info", NEWLINE,
-+        r = parse_env_file(writable_filename("/etc/machine-info"), NEWLINE,
-                            "PRETTY_HOSTNAME", &data[PROP_PRETTY_HOSTNAME],
-                            "ICON_NAME", &data[PROP_ICON_NAME],
-                            "CHASSIS", &data[PROP_CHASSIS],
-@@ -285,12 +305,12 @@ static int write_data_static_hostname(void) {
- 
-         if (isempty(data[PROP_STATIC_HOSTNAME])) {
+         if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
 -                if (unlink("/etc/hostname") < 0)
 +                if (unlink(writable_filename("/etc/hostname")) < 0)
@@ -69,21 +54,12 @@ index 769f25c..65252a6 100644
  
                  return 0;
          }
--        return write_string_file_atomic_label("/etc/hostname", data[PROP_STATIC_HOSTNAME]);
-+        return write_string_file_atomic_label(writable_filename("/etc/hostname"), data[PROP_STATIC_HOSTNAME]);
+-        return write_string_file_atomic_label("/etc/hostname", c->data[PROP_STATIC_HOSTNAME]);
++        return write_string_file_atomic_label(writable_filename("/etc/hostname"), c->data[PROP_STATIC_HOSTNAME]);
  }
  
- static int write_data_other(void) {
-@@ -304,7 +324,7 @@ static int write_data_other(void) {
-         char **l = NULL;
-         int r, p;
- 
--        r = load_env_file("/etc/machine-info", NULL, &l);
-+        r = load_env_file(writable_filename("/etc/machine-info"), NULL, &l);
-         if (r < 0 && r != -ENOENT)
-                 return r;
- 
-@@ -334,13 +354,13 @@ static int write_data_other(void) {
+ static int context_write_data_machine_info(Context *c) {
+@@ -349,13 +368,13 @@ static int context_write_data_machine_info(Context *c) {
  
          if (strv_isempty(l)) {
  
@@ -94,17 +70,17 @@ index 769f25c..65252a6 100644
                  return 0;
          }
  
--        r = write_env_file_label("/etc/machine-info", l);
-+        r = write_env_file_label(writable_filename("/etc/machine-info"), l);
-         strv_free(l);
+-        return write_env_file_label("/etc/machine-info", l);
++        return write_env_file_label(writable_filename("/etc/machine-info"), l);
+ }
  
-         return r;
+ static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index eb6a6d8..b8de7c2 100644
+index b56e43a..77447e2 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -105,6 +105,25 @@ static void free_data(void) {
-         tz.local_rtc = false;
+@@ -62,6 +62,25 @@ static void context_free(Context *c, sd_bus *bus) {
+         bus_verify_polkit_async_registry_free(bus, c->polkit_registry);
  }
  
 +/* Hack for Ubuntu phone: check if path is an existing symlink to
@@ -129,19 +105,28 @@ index eb6a6d8..b8de7c2 100644
  static bool valid_timezone(const char *name) {
          const char *p;
          char *t;
-@@ -247,7 +266,7 @@ static int read_data(void) {
+@@ -204,7 +223,7 @@ static int context_read_data(Context *c) {
  
-         free_data();
+         assert(c);
  
 -        r = readlink_malloc("/etc/localtime", &t);
 +        r = readlink_malloc(writable_filename("/etc/localtime"), &t);
          if (r < 0) {
                  if (r == -EINVAL)
-                         log_warning("/etc/localtime should be a symbolic link to a timezone data file in /usr/share/zoneinfo/.");
-@@ -295,25 +314,25 @@ static int write_data_timezone(void) {
-         struct stat st;
+                         log_warning("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
+@@ -228,7 +247,7 @@ static int context_read_data(Context *c) {
+                 }
+         }
  
-         if (!tz.zone) {
+-        r = read_one_line_file("/etc/timezone", &c->zone);
++        r = read_one_line_file(writable_filename("/etc/timezone"), &c->zone);
+         if (r < 0) {
+                 if (r != -ENOENT)
+                         log_warning("Failed to read /etc/timezone: %s", strerror(-r));
+@@ -253,10 +272,10 @@ static int context_write_data_timezone(Context *c) {
+         assert(c);
+ 
+         if (isempty(c->zone)) {
 -                if (unlink("/etc/localtime") < 0 && errno != ENOENT)
 +                if (unlink(writable_filename("/etc/localtime")) < 0 && errno != ENOENT)
                          r = -errno;
@@ -151,10 +136,7 @@ index eb6a6d8..b8de7c2 100644
                          r = -errno;
  
                  return r;
-         }
- 
--        p = strappend("../usr/share/zoneinfo/", tz.zone);
-+        p = strappend("/usr/share/zoneinfo/", tz.zone);
+@@ -266,12 +285,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -164,14 +146,14 @@ index eb6a6d8..b8de7c2 100644
                  return r;
  
 -        if (stat("/etc/timezone", &st) == 0 && S_ISREG(st.st_mode)) {
--                r = write_string_file_atomic("/etc/timezone", tz.zone);
+-                r = write_string_file_atomic("/etc/timezone", c->zone);
 +        if (stat(writable_filename("/etc/timezone"), &st) == 0 && S_ISREG(st.st_mode)) {
-+                r = write_string_file_atomic(writable_filename("/etc/timezone"), tz.zone);
++                r = write_string_file_atomic(writable_filename("/etc/timezone"), c->zone);
                  if (r < 0)
                          return r;
          }
-@@ -364,7 +383,7 @@ static int write_data_local_rtc(void) {
-                 *(char*) mempcpy(stpcpy(mempcpy(w, s, a), tz.local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
+@@ -323,7 +342,7 @@ static int context_write_data_local_rtc(Context *c) {
+                 *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {
 -                        if (unlink("/etc/adjtime") < 0)
@@ -179,9 +161,9 @@ index eb6a6d8..b8de7c2 100644
                                  if (errno != ENOENT)
                                          return -errno;
  
-@@ -372,7 +391,7 @@ static int write_data_local_rtc(void) {
-                 }
+@@ -332,7 +351,7 @@ static int context_write_data_local_rtc(Context *c) {
          }
+ 
          label_init("/etc");
 -        return write_string_file_atomic_label("/etc/adjtime", w);
 +        return write_string_file_atomic_label(writable_filename("/etc/adjtime"), w);

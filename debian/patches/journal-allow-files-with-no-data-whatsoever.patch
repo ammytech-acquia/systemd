@@ -8,16 +8,15 @@ considered "corrupted". This should be totally fine, and even in
 read mode, an empty file can become non-empty later on.
 
 (cherry picked from commit b3306e9c3c1e036396bc6bf74555eecea3f45ad9)
-(cherry picked from commit ae1d412f96829802688194e6957f75d37da9d7e9)
 ---
  src/journal/journal-file.c | 6 ------
  1 file changed, 6 deletions(-)
 
 diff --git a/src/journal/journal-file.c b/src/journal/journal-file.c
-index 2d2d289..2d79dce 100644
+index b3b1ffc..ef54af4 100644
 --- a/src/journal/journal-file.c
 +++ b/src/journal/journal-file.c
-@@ -274,12 +274,6 @@ static int journal_file_verify_header(JournalFile *f) {
+@@ -271,12 +271,6 @@ static int journal_file_verify_header(JournalFile *f) {
              !VALID64(le64toh(f->header->entry_array_offset)))
                  return -ENODATA;
  

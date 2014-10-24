@@ -6,7 +6,6 @@ Introduced in abee28c56d.
 
 Pointed-out-by: Werner Fink <werner@suse.de>
 (cherry picked from commit 3dde3f819732aaa66ab8e881305488adaea17641)
-(cherry picked from commit 14c30a407a7599c96af2e9998c3038574005c368)
 ---
  src/vconsole/vconsole-setup.c | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)
