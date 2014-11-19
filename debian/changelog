@@ -1,20 +1,4 @@
-systemd (215-5ubuntu2) vivid; urgency=medium
-
-  * Merge fixes from Debian:
-    - Adjust timedated and hostnamed autopkgtests to current upstream version.
-    - Replace our Debian hwdb.bin location patch with what got committed
-      upstream. Run hwdb update with the new --usr option to keep current
-      behaviour.
-    - debian/README.Debian: Document how to debug boot or shutdown problems with
-      the debug shell. (Closes: #766039)
-    - Skip-99-systemd.rules-when-not-running-systemd-as-in.patch: Call path_id
-      under all init systems, to get consistent ID_PATH attributes. This is
-      required so that tools like systemd-rfkill can be used with SysVinit or
-      upstart scripts, too. (LP: #1387282)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 03 Nov 2014 07:15:38 +0100
-
-systemd (215-5ubuntu1) vivid; urgency=medium
+systemd (215-6ubuntu1) vivid; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Create disk/by-partlabel links for mmcblk partitions.
@@ -23,9 +7,9 @@ systemd (215-5ubuntu1) vivid; urgency=medium
     - debian/rules: Drop doc dir symlinking. It creates havoc with dpkg
       upgrades, and we already have the automatic per-file symlinking.
     - debian/rules: Add an epoch to libgudev.
-    - Drop 80-networking.rules and the Debian *.agent scripts, we never
-      supported them in Ubuntu. Instead, extend systemd's "net" device udev
-      rule to trigger ifup@.service on network devices.
+    - Don't install 80-networking.rules and the Debian *.agent scripts, we
+      never supported them in Ubuntu. Instead, extend systemd's "net" device
+      udev rule to trigger ifup@.service on network devices.
     - Keep our much simpler udev maintainer scripts (all platforms must
       support udev, no debconf).
     - Add udev Apport package hook.
@@ -41,8 +25,6 @@ systemd (215-5ubuntu1) vivid; urgency=medium
       dependencies to "lvm2" which is handled with udev rules in Ubuntu.
     - Add /run/shm -> /dev/shm symlink in debian/tmpfiles.d/debian.conf
       (LP: #1320534, Closes: #674755).
-    - Make libpam-systemd prefer systemd-shim over systemd-sysv for now, until
-      systemd becomes our default init.
     - Lower Breaks: to lvm2 again. Our lvm2 package has always used udev for
       device setup, and thus is be compatible with systemd, too.
     - Lower Breaks: to plymouth version which has the udev inotify fix in
@@ -61,11 +43,17 @@ systemd (215-5ubuntu1) vivid; urgency=medium
     - Remove obsolete systemd-logind upstart job.
 
   * Clean up obsolete /etc/udev/rules.d/README on upgrades. (LP: #1381655)
+  * Add Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch: In Ubuntu
+    we currently keep the setting whether the RTC is in local or UTC time
+    in /etc/default/rcS "UTC=yes|no", instead of /etc/adjtime. (LP: #1377258)
+  * Add systemd Apport hook for adding systemd-delta and information about
+    failed units.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Fri, 24 Oct 2014 14:21:54 -0400
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 19 Nov 2014 08:55:55 +0100
 
-systemd (215-6) UNRELEASED; urgency=medium
+systemd (215-6) unstable; urgency=medium
 
+  [ Martin Pitt ]
   * Cherry-pick upstream patch to fix udev crash in link_config_get().
   * Cherry-pick upstream patch to fix tests in limited schroot environments.
   * Add d/p/Add-env-variable-for-machine-ID-path.patch: Allow specifying an
@@ -87,8 +75,21 @@ systemd (215-6) UNRELEASED; urgency=medium
     under all init systems, to get consistent ID_PATH attributes. This is
     required so that tools like systemd-rfkill can be used with SysVinit or
     upstart scripts, too. (LP: #1387282)
+  * Switch libpam-systemd dependencies to prefer systemd-shim over
+    systemd-sysv, to implement the CTTE decision #746578. This is a no-op on
+    systems which already have systemd-sysv installed, but will prevent
+    installing that on upgrades. (Closes: #769747)
+  * Remove Tollef from Uploaders: as per his request. Thanks Tollef for all
+    you work!
+  * net.agent: Properly close stdout/err FDs, to avoid long hangs during udev
+    settle. Thanks to Ben Hutchings! (Closes: #754987)
+  * Bump Standards-Version to 3.9.6 (no changes necessary).
 
- -- Martin Pitt <mpitt@debian.org>  Sun, 12 Oct 2014 17:29:00 +0200
+  [ Didier Roche ]
+  * debian/ifup@.service: add a ConditionPath on /run/network, to avoid
+    failing the unit if /etc/init.d/networking is disabled. (Closes: #769528)
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 18 Nov 2014 12:37:22 +0100
 
 systemd (215-5) unstable; urgency=medium
 
