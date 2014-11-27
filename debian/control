@@ -3,7 +3,7 @@ Section: admin
 Priority: optional
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
-Uploaders: Michael Biebl <biebl@debian.org>, Marco d'Itri <md@linux.it>, Michael Stapelberg <stapelberg@debian.org>, Sjoerd Simons <sjoerd@debian.org>
+Uploaders: Michael Biebl <biebl@debian.org>, Marco d'Itri <md@linux.it>, Michael Stapelberg <stapelberg@debian.org>, Sjoerd Simons <sjoerd@debian.org>, Martin Pitt <mpitt@debian.org>
 Standards-Version: 3.9.6
 Vcs-Git: git://anonscm.debian.org/pkg-systemd/systemd.git
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-systemd/systemd.git;a=summary
@@ -24,6 +24,7 @@ Build-Depends: debhelper (>= 9),
                gperf,
                libcap-dev,
                libpam0g-dev,
+               libapparmor-dev,
                libaudit-dev,
                libdbus-1-dev (>= 1.3.2),
                libglib2.0-dev (>= 2.22.0),
