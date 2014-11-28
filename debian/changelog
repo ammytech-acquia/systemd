@@ -1,3 +1,137 @@
+systemd (217-1) experimental; urgency=medium
+
+  [ Martin Pitt ]
+  * New upstream release. Drop all cherry-picked patches and port the Debian
+    specific ones.
+  * Disable systemd-resolved for now. It still needs to mature, and
+    integration into Debian should be discussed first.
+  * Bump util-linux dependency to >= 2.25 as per NEWS.
+  * Drop installation of 50-firmware.rules, not shipped upstream any more.
+    Firmware loading is now exclusively done by the kernel.
+  * Drop installation of readahead related services and code, readahead got
+    dropped in this version.
+  * Ship new networkctl CLI tool.
+  * debian/libsystemd0.symbols: Add new symbols from this release.
+  * debian/rules: Call dpkg-gensymbols with -c4 to immediately spot
+    changed/missing symbols during build.
+  * boot-and-services autopkgtest: Test AppArmor confined units (LP #1396270)
+  * Create new "systemd-journal-remote" system group, for
+    systemd-tmpfiles-setup.service.
+
+  [ Marc Deslauriers ]
+  * Build-depend on libapparmor-dev to enable AppArmor support. (LP: #1396270)
+
+  [ Didier Roche ]
+  * Handle display-manager transitions: (Closes: #748668)
+    - Add a generator to ensure /etc/X11/default-display-manager is controlling
+      which display-manager is started.
+    - Modify insserv generator to mask of sysvinit-only dms with insserv
+      $x-display-manager tag if they don't match
+      /etc/X11/default-display-manager. This avoids starting multiple dms at
+      boot.
+  * Cherry-pick Shared-add-readlink_value.patch as using that function in the
+    generator.
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 28 Nov 2014 10:53:58 +0100
+
+systemd (215-7) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Add myself to Uploaders.
+  * Add boot-and-services autopkgtest: Check booting with systemd-sysv and
+    that the most crucial services behave as expected.
+  * logind autopkgtest: Fix stderr output in waiting loop for scsi_debug.
+  * Add nspawn test to boot-and-services autopkgtest.
+  * Make systemd-nspawn@.service work out of the box: (Closes: #770275)
+    - Pre-create /var/lib/container with a secure mode (0700) via tmpfiles.d.
+    - Add new try-{guest,host} modes for --link-journal to silently skip
+      setting up the guest journal if the host has no persistant journal.
+    - Extend boot-and-services autopkgtest to cover systemd-nspawn@.service.
+  * Cherry-pick upstream patch to fix SELinux unit access check (regression
+    in 215).
+  * sysv-generator: Avoid wrong dependencies for failing units. Thanks to
+    Michael Biebl for the patch! (Closes: #771118)
+  * Cherry-pick patches to recognize and respect the "discard" mount option
+    for swap devices. Thanks to Aurelien Jarno for finding and testing!
+    (Closes: #769734)
+
+  [ Jon Severinsson]
+  * Add /run/shm -> /dev/shm symlink in debian/tmpfiles.d/debian.conf. This
+    avoids breakage in Jessie for packages which still refer to /run/shm, and
+    while https://wiki.debian.org/ReleaseGoals/RunDirectory is still official.
+    (LP: #1320534, Closes: #674755).
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 28 Nov 2014 06:43:15 +0100
+
+systemd (215-6) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Cherry-pick upstream patch to fix udev crash in link_config_get().
+  * Cherry-pick upstream patch to fix tests in limited schroot environments.
+  * Add d/p/Add-env-variable-for-machine-ID-path.patch: Allow specifying an
+    alternate /etc/machine-id location. This is necessary for running tests
+    as long as it isn't in our base images (see Debian #745876)
+  * Run tests during package build. For the first round don't make them fatal
+    for now (that will happen once we see results from all the architectures).
+  * Drop our Check-for-kmod-binary.patch as the upstream patch
+    units-conditionalize-static-device-node-logic-on-CAP.patch supersedes it.
+  * Drop Use-comment-systemd.-syntax-in-systemd.mount-man-pag.patch, as
+    our util-linux is now recent enough. Bump dependency to >= 2.21.
+  * Adjust timedated and hostnamed autopkgtests to current upstream version.
+  * Replace our Debian hwdb.bin location patch with what got committed
+    upstream. Run hwdb update with the new --usr option to keep current
+    behaviour.
+  * debian/README.Debian: Document how to debug boot or shutdown problems with
+    the debug shell. (Closes: #766039)
+  * Skip-99-systemd.rules-when-not-running-systemd-as-in.patch: Call path_id
+    under all init systems, to get consistent ID_PATH attributes. This is
+    required so that tools like systemd-rfkill can be used with SysVinit or
+    upstart scripts, too. (LP: #1387282)
+  * Switch libpam-systemd dependencies to prefer systemd-shim over
+    systemd-sysv, to implement the CTTE decision #746578. This is a no-op on
+    systems which already have systemd-sysv installed, but will prevent
+    installing that on upgrades. (Closes: #769747)
+  * Remove Tollef from Uploaders: as per his request. Thanks Tollef for all
+    you work!
+  * net.agent: Properly close stdout/err FDs, to avoid long hangs during udev
+    settle. Thanks to Ben Hutchings! (Closes: #754987)
+  * Bump Standards-Version to 3.9.6 (no changes necessary).
+
+  [ Didier Roche ]
+  * debian/ifup@.service: add a ConditionPath on /run/network, to avoid
+    failing the unit if /etc/init.d/networking is disabled. (Closes: #769528)
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 18 Nov 2014 12:37:22 +0100
+
+systemd (215-5) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Unblacklist hyperv_fb again, it is needed for graphical support on Hyper-V
+    platforms. Thanks Andy Whitcroft! (LP: #1359933)
+  * Bump systemd-shim Depends/Breaks to 8-2 to ensure a lockstep upgrade.
+    (Closes: #761947)
+
+  [ Sjoerd Simons ]
+  * d/p/sd-bus-Accept-no-sender-as-the-destination-field.patch
+    + Fix compatibility between systemctl v215 and v208. Resolves issue when
+      reloads of services is requested before systemd is re-execed
+      (Closes: #762146)
+
+  [ Michael Biebl ]
+  * Don't overmount existing /run/user/<UID> directories with a per-user tmpfs
+    on upgrades. (Closes: #762041)
+  * Re-enable mount propagation for udevd. This avoids that broken software
+    like laptop-mode-tools, which runs mount from within udev rules, causes
+    the root file system to end up read-only. (Closes: #762018)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 27 Sep 2014 17:49:47 +0200
+
+systemd (215-4) unstable; urgency=medium
+
+  * Upload to unstable.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 15 Sep 2014 17:38:30 +0200
+
 systemd (215-3) experimental; urgency=medium
 
   [ Ben Howard ]
