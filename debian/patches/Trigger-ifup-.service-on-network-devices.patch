@@ -10,10 +10,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1374521
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/rules/99-systemd.rules.in b/rules/99-systemd.rules.in
-index df83a38..f670348 100644
+index 78d2760..9f59fd8 100644
 --- a/rules/99-systemd.rules.in
 +++ b/rules/99-systemd.rules.in
-@@ -40,7 +40,7 @@ ACTION=="add", SUBSYSTEM=="block", KERNEL=="nbd*", ENV{SYSTEMD_READY}="0"
+@@ -45,7 +45,7 @@ ACTION=="add", SUBSYSTEM=="block", KERNEL=="nbd*", ENV{SYSTEMD_READY}="0"
  #
  # http://cgit.freedesktop.org/systemd/systemd/tree/src/libudev/libudev-enumerate.c#n922
  

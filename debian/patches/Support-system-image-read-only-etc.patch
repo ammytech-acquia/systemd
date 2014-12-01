@@ -11,15 +11,15 @@ Forwarded: OMGno, this is a rather nasty hack until we get a clean solution for 
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
  src/hostname/hostnamed.c | 27 +++++++++++++++++++++++----
- src/timedate/timedated.c | 37 ++++++++++++++++++++++++++++---------
- 2 files changed, 51 insertions(+), 13 deletions(-)
+ src/timedate/timedated.c | 35 +++++++++++++++++++++++++++--------
+ 2 files changed, 50 insertions(+), 12 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index eaae113..93a4364 100644
+index a449610..f761ae7 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -72,6 +72,25 @@ static void context_free(Context *c, sd_bus *bus) {
-         bus_verify_polkit_async_registry_free(bus, c->polkit_registry);
+@@ -76,6 +76,25 @@ static void context_free(Context *c) {
+         bus_verify_polkit_async_registry_free(c->polkit_registry);
  }
  
 +/* Hack for Ubuntu phone: check if path is an existing symlink to
@@ -59,10 +59,10 @@ index eaae113..93a4364 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -349,13 +368,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -350,13 +369,13 @@ static int context_write_data_machine_info(Context *c) {
+         }
  
          if (strv_isempty(l)) {
- 
 -                if (unlink("/etc/machine-info") < 0)
 +                if (unlink(writable_filename("/etc/machine-info")) < 0)
                          return errno == ENOENT ? 0 : -errno;
@@ -76,11 +76,11 @@ index eaae113..93a4364 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index b56e43a..77447e2 100644
+index 74a926f..ddc0292 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -62,6 +62,25 @@ static void context_free(Context *c, sd_bus *bus) {
-         bus_verify_polkit_async_registry_free(bus, c->polkit_registry);
+@@ -151,13 +151,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
+         return r;
  }
  
 +/* Hack for Ubuntu phone: check if path is an existing symlink to
@@ -102,10 +102,9 @@ index b56e43a..77447e2 100644
 +        return result;
 +}
 +
- static bool valid_timezone(const char *name) {
-         const char *p;
-         char *t;
-@@ -204,7 +223,7 @@ static int context_read_data(Context *c) {
+ static int context_read_data(Context *c) {
+         _cleanup_free_ char *t = NULL;
+         int r;
  
          assert(c);
  
@@ -114,7 +113,7 @@ index b56e43a..77447e2 100644
          if (r < 0) {
                  if (r == -EINVAL)
                          log_warning("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
-@@ -228,7 +247,7 @@ static int context_read_data(Context *c) {
+@@ -181,7 +200,7 @@ static int context_read_data(Context *c) {
                  }
          }
  
@@ -123,7 +122,7 @@ index b56e43a..77447e2 100644
          if (r < 0) {
                  if (r != -ENOENT)
                          log_warning("Failed to read /etc/timezone: %s", strerror(-r));
-@@ -253,10 +272,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -206,10 +225,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -136,7 +135,7 @@ index b56e43a..77447e2 100644
                          r = -errno;
  
                  return r;
-@@ -266,12 +285,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -219,12 +238,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -152,7 +151,7 @@ index b56e43a..77447e2 100644
                  if (r < 0)
                          return r;
          }
-@@ -323,7 +342,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -276,7 +295,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {
@@ -161,12 +160,3 @@ index b56e43a..77447e2 100644
                                  if (errno != ENOENT)
                                          return -errno;
  
-@@ -332,7 +351,7 @@ static int context_write_data_local_rtc(Context *c) {
-         }
- 
-         label_init("/etc");
--        return write_string_file_atomic_label("/etc/adjtime", w);
-+        return write_string_file_atomic_label(writable_filename("/etc/adjtime"), w);
- }
- 
- static char** get_ntp_services(void) {

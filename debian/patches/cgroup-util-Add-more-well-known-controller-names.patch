@@ -10,10 +10,10 @@ ease readability and avoid typos.
  2 files changed, 19 insertions(+), 6 deletions(-)
 
 diff --git a/src/shared/cgroup-util.c b/src/shared/cgroup-util.c
-index c1c4d40..a1591d2 100644
+index da8e885..6a09e9f 100644
 --- a/src/shared/cgroup-util.c
 +++ b/src/shared/cgroup-util.c
-@@ -1599,7 +1599,13 @@ static const char mask_names[] =
+@@ -1595,7 +1595,13 @@ static const char mask_names[] =
          "cpuacct\0"
          "blkio\0"
          "memory\0"
