@@ -7,16 +7,16 @@ which display-manager is started.
 ---
  Makefile.am                                        |  11 ++-
  src/default-display-manager-generator/Makefile     |  28 ++++++
- .../default-display-manager-generator.c            | 105 +++++++++++++++++++++
- 3 files changed, 143 insertions(+), 1 deletion(-)
+ .../default-display-manager-generator.c            | 103 +++++++++++++++++++++
+ 3 files changed, 141 insertions(+), 1 deletion(-)
  create mode 100644 src/default-display-manager-generator/Makefile
  create mode 100644 src/default-display-manager-generator/default-display-manager-generator.c
 
 diff --git a/Makefile.am b/Makefile.am
-index 28370df..1cb15ca 100644
+index be921b0..f1299ef 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -402,7 +402,8 @@ systemgenerator_PROGRAMS = \
+@@ -403,7 +403,8 @@ systemgenerator_PROGRAMS = \
  	systemd-getty-generator \
  	systemd-fstab-generator \
  	systemd-system-update-generator \
@@ -26,7 +26,7 @@ index 28370df..1cb15ca 100644
  
  dist_bashcompletion_DATA = \
  	shell-completion/bash/busctl \
-@@ -2191,6 +2192,14 @@ systemd_delta_LDADD = \
+@@ -2293,6 +2294,14 @@ systemd_delta_LDADD = \
  	libsystemd-shared.la
  
  # ------------------------------------------------------------------------------
@@ -77,10 +77,10 @@ index 0000000..b29b937
 +.PHONY: all clean
 diff --git a/src/default-display-manager-generator/default-display-manager-generator.c b/src/default-display-manager-generator/default-display-manager-generator.c
 new file mode 100644
-index 0000000..2fe9521
+index 0000000..7ca9d53
 --- /dev/null
 +++ b/src/default-display-manager-generator/default-display-manager-generator.c
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,103 @@
 +/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 +
 +/***
@@ -136,10 +136,8 @@ index 0000000..2fe9521
 +        default_dm = strstrip(basename(default_dm_path));
 +
 +        r = readlink_value(dm_service_unit, &enabled_dm_unit);
-+        if (r < 0) {
-+                log_warning("No default display manager unit service enabled, setup is manual or a sysvinit file");
-+                return 0;
-+        }
++        if (r < 0)
++                enabled_dm_unit = strdup("");
 +
 +        /* all is fine if the info matches */
 +        if (streq(strappenda(default_dm, ".service"), enabled_dm_unit))

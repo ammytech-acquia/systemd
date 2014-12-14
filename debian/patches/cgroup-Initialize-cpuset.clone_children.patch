@@ -1,3 +1,4 @@
+From 0417816814b6150c24a663e79d8597912b96695b Mon Sep 17 00:00:00 2001
 From: Martin Pitt <martin.pitt@ubuntu.com>
 Date: Wed, 26 Nov 2014 15:41:44 +0100
 Subject: cgroup: Initialize cpuset.clone_children
@@ -12,10 +13,10 @@ https://www.kernel.org/doc/Documentation/cgroups/cgroups.txt for details.
  1 file changed, 4 insertions(+)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index e604c3c..58e1758 100644
+index 35b862d..7e41cfa 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -904,6 +904,10 @@ int manager_setup_cgroup(Manager *m) {
+@@ -935,6 +935,10 @@ int manager_setup_cgroup(Manager *m) {
  
                  /* 6.  Always enable hierarchial support if it exists... */
                  cg_set_attribute("memory", "/", "memory.use_hierarchy", "1");
@@ -26,3 +27,6 @@ index e604c3c..58e1758 100644
          }
  
          /* 7. Figure out which controllers are supported */
+-- 
+2.1.3
+
