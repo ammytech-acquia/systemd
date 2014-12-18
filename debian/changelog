@@ -1,3 +1,130 @@
+systemd (218-2ubuntu3) vivid; urgency=medium
+
+  * core-Put-session-scopes-into-all-cgroup-controllers.patch: Revert upstream
+    commit 02ba8fb3357d to fix eternal kernel deep sleep hangs when unmounting
+    an ntfs-3g partition. (LP: #1398859)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 18 Dec 2014 13:32:49 +0100
+
+systemd (218-2ubuntu2) vivid; urgency=medium
+
+  * debian/udev.postinst: Fix missing --usr, so that hwdb.bin goes back to
+    /lib/udev/.
+  * debian/udev.postinst: Clean up /etc/udev/hwdb.bin after missing --usr from
+    early vivid versions.
+  * Make failure of boot-and-services NSpawn.test_boot non-fatal for now. This
+    currently fails when being triggered by Jenkins, but is totally
+    unreproducible when running this manually on the exact same machine.
+  * build-logind autopkgtest: Re-enforce that sd_login_monitor_new() succeeds,
+    and restrict this test to isolation-container. (Reproduces LP #1400203)
+  * Bring back patch to make sd_login_monitor_new() work under other init
+    systems where /sys/fs/cgroup/systemd/machine does not exist.
+    (LP: #1400203)
+  * build-login autopkgtest: Build against libsystemd, not libsystemd-login
+    any more.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 17 Dec 2014 09:56:07 +0100
+
+systemd (218-2ubuntu1) vivid; urgency=medium
+
+  * Merge with Debian unstable. Remaining Ubuntu changes:
+    - Create disk/by-partlabel links for mmcblk partitions.
+    - Hack to support system-image read-only /etc, and modify files in
+      /etc/writable/ instead.
+    - Don't install 80-networking.rules and the Debian *.agent scripts, we
+      never supported them in Ubuntu. Instead, extend systemd's "net" device
+      udev rule to trigger ifup@.service on network devices.
+    - Keep our much simpler udev maintainer scripts (all platforms must
+      support udev, no debconf).
+    - debian/extra/initramfs.top: Drop $ROOTDELAY, we do that in a more
+      sensible way with wait-for-root. Will get applicable to Debian once
+      Debian gets wait-for-root in initramfs-tools.
+    - debian/extra/initramfs.bottom: If LVM is installed, settle udev,
+      otherwise we get missing LV symlinks. Workaround for LP #1185394.
+    - Add 40-hyperv-hotadd.rules: Workaround for LP #1233466.
+    - Mark graphics devices as PRIMARY_DEVICE_FOR_DISPLAY so that we can wait
+      for those in plymouth.
+    - Add debian/udev.lvm2.init: Dummy SysV init script to satisfy insserv
+      dependencies to "lvm2" which is handled with udev rules in Ubuntu.
+    - Add HP ProLiant Server Cartridge power control support.
+    - Provide shutdown fallback for upstart. (LP: #1370329)
+    - debian/ifup@.service: Additionally run for "auto" class. We don't really
+      support "allow-hotplug" in Ubuntu at the moment, so we need to deal with
+      "auto" devices appearing after "/etc/init.d/networking start" already
+      ran.  (LP: #1374521)
+    - Lower Breaks: to plymouth version which has the udev inotify fix in
+      Ubuntu.
+    - Add Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch: In
+      Ubuntu we currently keep the setting whether the RTC is in local or UTC
+      time in /etc/default/rcS "UTC=yes|no", instead of /etc/adjtime.
+      (LP: #1377258)
+    - Put session scopes into all cgroup controllers. This makes unprivileged
+      user LXC containers work under systemd. (LP: #1346734)
+
+    Upgrade fixes, keep until 16.04 LTS release:
+    - systemd Conflicts/Replaces/Provides systemd-services.
+    - Remove obsolete systemd-logind upstart job.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 16 Dec 2014 08:50:52 +0100
+
+systemd (218-2) experimental; urgency=medium
+
+  * boot-and-services AppArmor autopkgtest: Stop checking the dmesg log; it is
+    racy as sometimes message bursts are suppressed.
+  * Fix crash in timedatectl with Etc/UTC.
+  * Prefer-etc-X11-default-display-manager-if-present.patch: Drop wrong
+    copy&paste'd comment, fix log strings. Thanks Adam D. Barratt.
+  * boot-and-services: Robustify Nspawn tests, and show systemd-nspawn output
+    on failure.
+  * Disable tests which fail on buildds, presumably due to too old kernels,
+    misconfigured /etc/hosts, and similar problems. Make failures of the test
+    suite fatal now.
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 16 Dec 2014 08:24:38 +0100
+
+systemd (218-1) experimental; urgency=medium
+
+  * New upstream release. Drop all cherry-picked patches and port the Debian
+    specific ones.
+    - Create /etc/machine-id on boot if missing. (LP: #1387090)
+  * Add new libmount-dev build dependency.
+  * Configure with --enable-split-usr.
+  * Merge some permanent Ubuntu changes, using dpkg-vendor:
+    - Don't symlink udev doc directories.
+    - Add epoch to gudev packages; Ubuntu packaged the standalone gudev before
+      it got merged into udev.
+    - Add Apport hooks for udev and systemd.
+  * udev-fallback-graphics upstart job: Guard the modprobe with || true to
+    avoid a failure when vesafb is compiled in. (LP: #1367241)
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 14 Dec 2014 13:58:39 +0100
+
+systemd (217-4) experimental; urgency=medium
+
+  [ Martin Pitt ]
+  * Reinstate a debian/extra/rules/50-firmware.rules which immediately tells
+    the kernel that userspace firmware loading failed. Otherwise it tries for a
+    minute to call the userspace helper (if CONFIG_FW_LOADER_USER_HELPER is
+    enabled) in vain, which causes long delays with devices which have a range
+    of possible firmware versions. (LP: #1398458)
+  * debian/systemd.postinst: Don't always restart journald, as this currently
+    can't be done without losing the current journal and breaking attached
+    processes. So only restart it from upgrades < 215-3 (where the socket
+    location got moved) as an one-time upgrade path from wheezy.
+    (Closes: #771122)
+  * Revert "Modify insserv generator to mask sysvinit-only display managers".
+    This is still under dispute, a bit risky, and might get a different
+    implementation. Also, nodm really needs to be fixed properly, working
+    around it is both too risky and also too hard to get right.
+
+  [ Didier Roche ]
+  * Add display managers autopkgtests.
+  * Reset display-manager symlink to match /e/X/d-d-m even if
+    display-manager.service was removed. Adapt the autopkgtests for it.
+    (LP: #1400680)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 11 Dec 2014 18:06:54 +0200
+
 systemd (217-3ubuntu1) vivid; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
@@ -53,16 +180,6 @@ systemd (217-3ubuntu1) vivid; urgency=medium
     - Clean up obsolete /etc/udev/rules.d/README on upgrades. (LP: #1381655)
 
  -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 02 Dec 2014 19:37:35 +0100
-
-systemd (217-4) UNRELEASED; urgency=medium
-
-  * Reinstate a debian/extra/rules/50-firmware.rules which immediately tells
-    the kernel that userspace firmware loading failed. Otherwise it tries for a
-    minute to call the userspace helper (if CONFIG_FW_LOADER_USER_HELPER is
-    enabled) in vain, which causes long delays with devices which have a range
-    of possible firmware versions. (LP: #1398458)
-
- -- Martin Pitt <mpitt@debian.org>  Tue, 02 Dec 2014 18:47:43 +0100
 
 systemd (217-3) experimental; urgency=medium
 

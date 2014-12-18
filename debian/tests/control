@@ -3,11 +3,16 @@ Depends: systemd, libpam-systemd, acl
 Restrictions: needs-root isolation-machine
 
 Tests: build-login
-Depends: libsystemd-login-dev, build-essential, pkg-config
+Depends: libsystemd-dev, build-essential, pkg-config
+Restrictions: isolation-container
 
 Tests: python3
 Depends: python3-systemd
 
 Tests: boot-and-services
 Depends: lightdm, cron, network-manager, busybox-static, apparmor
+Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
+
+Tests: display-managers
+Depends: systemd, lightdm
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
