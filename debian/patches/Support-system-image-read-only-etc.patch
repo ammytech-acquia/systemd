@@ -15,7 +15,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 50 insertions(+), 12 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index a449610..f761ae7 100644
+index 0b38cde..554a15d 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -76,6 +76,25 @@ static void context_free(Context *c) {
@@ -44,7 +44,7 @@ index a449610..f761ae7 100644
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -299,12 +318,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -300,12 +319,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -59,7 +59,7 @@ index a449610..f761ae7 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -350,13 +369,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -351,13 +370,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -76,10 +76,10 @@ index a449610..f761ae7 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 74a926f..ddc0292 100644
+index b757be2..e5a9e30 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -151,13 +151,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
+@@ -157,13 +157,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
          return r;
  }
  
@@ -112,8 +112,8 @@ index 74a926f..ddc0292 100644
 +        r = readlink_malloc(writable_filename("/etc/localtime"), &t);
          if (r < 0) {
                  if (r == -EINVAL)
-                         log_warning("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
-@@ -181,7 +200,7 @@ static int context_read_data(Context *c) {
+                         log_debug("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
+@@ -187,7 +206,7 @@ static int context_read_data(Context *c) {
                  }
          }
  
@@ -122,7 +122,7 @@ index 74a926f..ddc0292 100644
          if (r < 0) {
                  if (r != -ENOENT)
                          log_warning("Failed to read /etc/timezone: %s", strerror(-r));
-@@ -206,10 +225,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -212,10 +231,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -135,7 +135,7 @@ index 74a926f..ddc0292 100644
                          r = -errno;
  
                  return r;
-@@ -219,12 +238,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -225,12 +244,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -151,7 +151,7 @@ index 74a926f..ddc0292 100644
                  if (r < 0)
                          return r;
          }
-@@ -276,7 +295,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -282,7 +301,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {
