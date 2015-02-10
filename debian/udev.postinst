@@ -25,6 +25,7 @@ in_debootstrap() {
 
 case "$1" in
     configure)
+        addgroup --quiet --system input
         # update/create hwdb before we (re)start udev
         update_hwdb
 
