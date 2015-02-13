@@ -29,10 +29,10 @@ https://launchpad.net/bugs/1346734
  4 files changed, 94 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 35b862d..7e41cfa 100644
+index 06e113c..173c868 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -935,6 +935,10 @@ int manager_setup_cgroup(Manager *m) {
+@@ -953,6 +953,10 @@ int manager_setup_cgroup(Manager *m) {
  
                  /* 6.  Always enable hierarchial support if it exists... */
                  cg_set_attribute("memory", "/", "memory.use_hierarchy", "1");
@@ -76,7 +76,7 @@ index e0da6e4..6c484b2 100644
          if (r < 0)
                  return r;
 diff --git a/src/shared/cgroup-util.c b/src/shared/cgroup-util.c
-index 1bcba01..74ddc97 100644
+index b1d92b5..80e99c8 100644
 --- a/src/shared/cgroup-util.c
 +++ b/src/shared/cgroup-util.c
 @@ -609,6 +609,27 @@ int cg_create(const char *controller, const char *path) {
@@ -122,7 +122,7 @@ index 1bcba01..74ddc97 100644
  
  int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask mask, const char *path) {
          CGroupControllerMask bit = 1;
-@@ -1624,6 +1651,33 @@ int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask ma
+@@ -1622,6 +1649,33 @@ int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask ma
          return 0;
  }
  
