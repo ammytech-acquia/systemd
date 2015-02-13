@@ -1,13 +1,6 @@
-systemd (218-8ubuntu2) vivid; urgency=medium
+systemd (218-10ubuntu1) vivid; urgency=medium
 
-  * debian/tests/logind: With dropped systemd-logind-launch we don't have a
-    visible /sys/fs/cgroup/systemd/ any more under cgmanager. So adjust the
-    test to check /proc/self/cgroup instead.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 10 Feb 2015 10:37:01 +0100
-
-systemd (218-8ubuntu1) vivid; urgency=medium
-
+  [ Martin Pitt ]
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
       /etc/writable/ instead.
@@ -49,7 +42,65 @@ systemd (218-8ubuntu1) vivid; urgency=medium
     - Remove obsolete systemd-logind upstart job.
     - Clean up obsolete /etc/udev/rules.d/README.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 09 Feb 2015 19:32:25 +0100
+  * ifup@.service: Fix syntax error. (LP: #1421556, #1420601)
+
+  [ Didier Roche ]
+  * Add systemd-fsckd multiplexer and feed its output to plymouth. This
+    provides an aggregate progress report of running file system checks and
+    also allows cancelling them with ^C.
+    (LP: #1316796; Closes: #775093, #758902)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Fri, 13 Feb 2015 15:51:59 +0100
+
+systemd (218-10) experimental; urgency=medium
+
+  * Pull latest keymaps from upstream git. (LP: #1334968, #1409721)
+  * rules: Fix by-path of mmc RPMB partitions and don't blkid them. Avoids
+    kernel buffer I/O errors and timeouts. (LP: #1333140)
+  * Clean up stale mounts when ejecting CD drives with the hardware eject
+    button. (LP: #1168742)
+  * Document systemctl --failed option. (Closes: #767267)
+  * Quiesce confusing and irrelevant "failed to reset devices.list" warning.
+    (LP: #1413193)
+  * When booting with systemd-bootchart, default to run systemd rather than
+    /sbin/init (which might not be systemd). (LP: #1417059)
+  * boot-and-services autopkgtest: Add CgroupsTest to check cgroup
+    creation/cleanup behaviour. This reproduces #777601 and verifies the fix
+    for it.
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 13 Feb 2015 12:25:06 +0100
+
+systemd (218-9) experimental; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/logind: With dropped systemd-logind-launch we don't have a
+    visible /sys/fs/cgroup/systemd/ any more under cgmanager. So adjust the
+    test to check /proc/self/cgroup instead.
+  * Add unit-config autopkgtest to check systemd unit/sysv init enabling and
+    disabling via systemctl. This also reproduces #777613.
+  * systemctl: Always install/enable/disable native units, even if there is a
+    corresponding SysV script and we call update-rc.d; while the latter
+    handles WantedBy=, it does not handle Alias=. (Closes: #777613)
+  * cgroup: Don't trim cgroup trees created by someone else, just the ones
+    that systemd itself created. This avoids cleaning up empty cgroups from
+    e.g. LXC. (Closes: #777601)
+  * Don't parse /etc/mtab for current mounts, but /proc/self/mountinfo. If the
+    former is a file, it's most likely outdated on boot, leading to race
+    conditions and unmounts during boot. (LP: #1419623)
+
+  [ Michael Biebl ]
+  * Explicitly disable the features we don't want to build for those with
+    autodetection. This ensures reliable build results in dirty build
+    environments.
+  * Disable AppArmor support in the udeb build.
+  * core: Don't fail to run services in --user instances if $HOME is missing.
+    (Closes: #759320)
+
+  [ Didier Roche ]
+  * default-display-manager-generator: Avoid unnecessary /dev/null symlink and
+    warning if there is no display-manager.service unit.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Feb 2015 18:45:12 +0100
 
 systemd (218-8) experimental; urgency=medium
 
