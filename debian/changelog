@@ -1,28 +1,6 @@
-systemd (218-10ubuntu2) vivid; urgency=medium
+systemd (219-1ubuntu1) vivid; urgency=medium
 
-  * Merge changes from experimental branch.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 16 Feb 2015 19:49:17 +0100
-
-systemd (218-11) UNRELEASED; urgency=medium
-
-  * /lib/lsb/init-functions.d/40-systemd: Call systemctl is-system-running
-    with --quiet. (LP: #1421058)
-  * debian/systemd.postrm: Clean getty@tty1.service and remote-fs.target
-    enablement symlinks on purge. (Closes: #778499)
-  * Move all Debian specific units in the systemd package into
-    debian/extra/units/ and simplify debian/systemd.install.
-  * Enable timesyncd by default. Add a config drop-in to not start if ntp,
-    openntpd, or chrony is installed. (Closes: #755722)
-  * debian/systemd.links: Drop obsolete hwclockfirst.service mask link, this
-    was dropped in wheezy's util-linux already.
-
- -- Martin Pitt <mpitt@debian.org>  Sun, 15 Feb 2015 16:44:52 +0100
-
-systemd (218-10ubuntu1) vivid; urgency=medium
-
-  [ Martin Pitt ]
-  * Merge with Debian unstable. Remaining Ubuntu changes:
+  * Merge with Debian experimental. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
       /etc/writable/ instead.
     - Keep our much simpler udev maintainer scripts (all platforms must
@@ -51,6 +29,10 @@ systemd (218-10ubuntu1) vivid; urgency=medium
       (LP: #1377258)
     - Put session scopes into all cgroup controllers. This makes unprivileged
       user LXC containers work under systemd. (LP: #1346734)
+    - Add systemd-fsckd multiplexer and feed its output to plymouth. This
+      provides an aggregate progress report of running file system checks and
+      also allows cancelling them with ^C.
+      (LP: #1316796; Closes: #775093, #758902)
     - Lower Breaks: to plymouth version which has the udev inotify fix in
       Ubuntu.
     - Lower libappamor1 dep to the Ubuntu version where it moved to /lib.
@@ -63,15 +45,59 @@ systemd (218-10ubuntu1) vivid; urgency=medium
     - Remove obsolete systemd-logind upstart job.
     - Clean up obsolete /etc/udev/rules.d/README.
 
-  * ifup@.service: Fix syntax error. (LP: #1421556, #1420601)
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 18 Feb 2015 09:48:57 +0100
 
-  [ Didier Roche ]
-  * Add systemd-fsckd multiplexer and feed its output to plymouth. This
-    provides an aggregate progress report of running file system checks and
-    also allows cancelling them with ^C.
-    (LP: #1316796; Closes: #775093, #758902)
+systemd (219-2) UNRELEASED; urgency=medium
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Fri, 13 Feb 2015 15:51:59 +0100
+  * Fix UTF-16 to UTF-8 conversion on big-endian machines. (Closes: #778654)
+  * Disable new new test-sigbus, it fails on some buildds due to too old
+    kernels. (part of #778654)
+  * debian/README.Debian: Drop setfacl call for /var/log/journal, this is now
+    done automatically by tmpfiles.d/systemd.conf.
+  * debian/tests/boot-and-services: Move to using /var/lib/machines/,
+    /var/lib/containers is deprecated.
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 18 Feb 2015 06:57:13 +0100
+
+systemd (219-1) experimental; urgency=medium
+
+  [ Martin Pitt ]
+  * New upstream release:
+    - Fix spelling mistake in systemd.unit(5). (Closes: #773302)
+    - Fix timeouts with D-Bus, leading to SIGFPE. (Closes: #774012)
+    - Fix load/save of multiple rfkill states. (Closes: #759489)
+    - Non-persistant journal (/run/log/journal) is now readable by group adm.
+      (Closes: #771980)
+    - Read netdev user mount option to correctly order network mounts after
+      network.target. (Closes: #769186)
+    - Fix 60-keyboard.hwdb documentation and whitespace handling.
+      (Closes: #757367)
+    - Fix ThinkPad X1 Carbon 20BT trackpad buttons (LP: #1414930)
+    - Drop all backported patches and port the others to new upstream release.
+  * Bump libblkid-dev build dependency as per upstream configure.ac.
+  * debian/systemd.install: Add new language-fallback-map file.
+  * debian/udev.install: Add new systemd-hwdb tool.
+  * debian/libsystemd0.symbols: Add new symbols from this release.
+  * tmpfiles.d/systemd.conf: Drop "wheel" ACL (that group does not exist in
+    Debian) to make the ACL for "adm" actually work.
+  * debian/rules: Explicitly disable importd for now; it should still mature a
+    bit. Explicitly enable hwdb support.
+  * /lib/lsb/init-functions.d/40-systemd: Call systemctl is-system-running
+    with --quiet. (LP: #1421058)
+  * debian/systemd.postrm: Clean getty@tty1.service and remote-fs.target
+    enablement symlinks on purge. (Closes: #778499)
+  * Move all Debian specific units in the systemd package into
+    debian/extra/units/ and simplify debian/systemd.install.
+  * Enable timesyncd by default. Add a config drop-in to not start if ntp,
+    openntpd, or chrony is installed. (Closes: #755722)
+  * debian/systemd.links: Drop obsolete hwclockfirst.service mask link, this
+    was dropped in wheezy's util-linux already.
+  * debian/udev.postinst: Call systemd-hwdb instead of udevadm hwdb.
+
+  [ Michael Biebl ]
+  * Stop removing firstboot man pages. They are now installed conditionally.
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 17 Feb 2015 15:51:38 +0100
 
 systemd (218-10) experimental; urgency=medium
 

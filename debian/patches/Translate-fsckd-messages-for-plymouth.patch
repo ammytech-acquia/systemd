@@ -11,16 +11,16 @@ readable data.
  2 files changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/po/POTFILES.in b/po/POTFILES.in
-index 2829c87..9730079 100644
+index b4c1121..70e7594 100644
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -3,3 +3,4 @@ src/locale/org.freedesktop.locale1.policy.in
+@@ -5,3 +5,4 @@ src/locale/org.freedesktop.locale1.policy.in
  src/login/org.freedesktop.login1.policy.in
+ src/machine/org.freedesktop.machine1.policy.in
  src/timedate/org.freedesktop.timedate1.policy.in
- src/core/org.freedesktop.systemd1.policy.in.in
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-index f24f8c1..158ef3e 100644
+index a6a64db..2f98d1e 100644
 --- a/src/fsckd/fsckd.c
 +++ b/src/fsckd/fsckd.c
 @@ -24,6 +24,7 @@
@@ -31,16 +31,16 @@ index f24f8c1..158ef3e 100644
  #include <math.h>
  #include <stdbool.h>
  #include <stdlib.h>
-@@ -181,7 +182,7 @@ static int send_message_plymouth(Manager *m, const char *message) {
+@@ -182,7 +183,7 @@ static int send_message_plymouth(Manager *m, const char *message) {
                  if (r < 0)
                          return log_warning_errno(errno, "Can't send to plymouth cancel key: %m");
                  m->plymouth_cancel_sent = true;
--                plymouth_cancel_message = strappenda("fsckd-cancel-msg:", "Press Ctrl+C to cancel all checks in progress");
-+                plymouth_cancel_message = strappenda("fsckd-cancel-msg:", _("Press Ctrl+C to cancel all checks in progress"));
+-                plymouth_cancel_message = strjoina("fsckd-cancel-msg:", "Press Ctrl+C to cancel all filesystem checks in progress");
++                plymouth_cancel_message = strjoina("fsckd-cancel-msg:", _("Press Ctrl+C to cancel all filesystem checks in progress"));
                  r = send_message_plymouth_socket(m->plymouth_fd, plymouth_cancel_message, false);
                  if (r < 0)
-                         log_warning_errno(r, "Can't send cancel user message to plymouth: %m");
-@@ -221,8 +222,10 @@ static int update_global_progress(Manager *m) {
+                         log_warning_errno(r, "Can't send filesystem cancel message to plymouth: %m");
+@@ -222,8 +223,10 @@ static int update_global_progress(Manager *m) {
                  m->numdevices = current_numdevices;
                  m->percent = current_percent;
  
@@ -53,7 +53,7 @@ index f24f8c1..158ef3e 100644
                          return -ENOMEM;
                  if (asprintf(&fsck_message, "fsckd:%d:%3.1f:%s", m->numdevices, m->percent, console_message) < 0)
                          return -ENOMEM;
-@@ -505,6 +508,7 @@ int main(int argc, char *argv[]) {
+@@ -507,6 +510,7 @@ int main(int argc, char *argv[]) {
          log_set_target(LOG_TARGET_AUTO);
          log_parse_environment();
          log_open();

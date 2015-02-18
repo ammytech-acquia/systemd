@@ -13,19 +13,21 @@ systemd-fsckd stops on idle when no systemd-fsck is connected.
 Make the necessary changes to systemd-fsck to connect to the systemd-fsckd
 socket.
 ---
- Makefile.am       |  13 ++
- src/fsck/fsck.c   |  88 +++++-------
- src/fsckd/fsckd.c | 403 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
- src/fsckd/fsckd.h |  34 +++++
- 4 files changed, 484 insertions(+), 54 deletions(-)
+ Makefile.am        |  13 ++
+ src/fsck/fsck.c    |  88 ++++--------
+ src/fsckd/Makefile |   1 +
+ src/fsckd/fsckd.c  | 404 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/fsckd/fsckd.h  |  34 +++++
+ 5 files changed, 483 insertions(+), 57 deletions(-)
+ create mode 120000 src/fsckd/Makefile
  create mode 100644 src/fsckd/fsckd.c
  create mode 100644 src/fsckd/fsckd.h
 
 diff --git a/Makefile.am b/Makefile.am
-index 8e34220..7879101 100644
+index 43f9726..58847e8 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -384,6 +384,7 @@ rootlibexec_PROGRAMS = \
+@@ -390,6 +390,7 @@ rootlibexec_PROGRAMS = \
  	systemd-remount-fs \
  	systemd-reply-password \
  	systemd-fsck \
@@ -33,7 +35,7 @@ index 8e34220..7879101 100644
  	systemd-machine-id-commit \
  	systemd-ac-power \
  	systemd-sysctl \
-@@ -2253,6 +2254,18 @@ systemd_fsck_LDADD = \
+@@ -2361,6 +2362,18 @@ systemd_fsck_LDADD = \
  	libsystemd-shared.la
  
  # ------------------------------------------------------------------------------
@@ -53,7 +55,7 @@ index 8e34220..7879101 100644
  	src/machine-id-commit/machine-id-commit.c \
  	src/core/machine-id-setup.c \
 diff --git a/src/fsck/fsck.c b/src/fsck/fsck.c
-index 20b7940..9d9739b 100644
+index 78ceeb6..6ccb2e7 100644
 --- a/src/fsck/fsck.c
 +++ b/src/fsck/fsck.c
 @@ -27,6 +27,7 @@
@@ -73,7 +75,7 @@ index 20b7940..9d9739b 100644
  
  static bool arg_skip = false;
  static bool arg_force = false;
-@@ -132,58 +135,42 @@ static void test_files(void) {
+@@ -132,58 +135,36 @@ static void test_files(void) {
                  arg_show_progress = true;
  }
  
@@ -108,26 +110,23 @@ index 20b7940..9d9739b 100644
 -        bool locked = false;
 -        int clear = 0;
 +        fsckd_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-+        if (fsckd_fd < 0) {
-+                log_warning_errno(errno, "Cannot open fsckd socket, we won't report fsck progress: %m");
-+                return -errno;
-+        }
-+        if (connect(fsckd_fd, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(sa.un.sun_path)) < 0) {
-+                log_warning_errno(errno, "Cannot connect to fsckd socket, we won't report fsck progress: %m");
-+                return -errno;
-+        }
++        if (fsckd_fd < 0)
++                return log_warning_errno(errno, "Cannot open fsckd socket, we won't report fsck progress: %m");
++        if (connect(fsckd_fd, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(sa.un.sun_path)) < 0)
++                return log_warning_errno(errno, "Cannot connect to fsckd socket, we won't report fsck progress: %m");
  
          f = fdopen(fd, "r");
-         if (!f) {
+-        if (!f) {
 -                safe_close(fd);
-+                log_warning_errno(errno, "Cannot connect to fsck, we won't report fsck progress: %m");
-                 return -errno;
-         }
- 
+-                return -errno;
+-        }
+-
 -        console = fopen("/dev/console", "we");
 -        if (!console)
 -                return -ENOMEM;
--
++        if (!f)
++                return log_warning_errno(errno, "Cannot connect to fsck, we won't report fsck progress: %m");
+ 
          while (!feof(f)) {
 -                int pass, m;
 -                unsigned long cur, max;
@@ -154,7 +153,7 @@ index 20b7940..9d9739b 100644
                  /* Only update once every 50ms */
                  t = now(CLOCK_MONOTONIC);
                  if (last + 50 * USEC_PER_MSEC > t)
-@@ -191,22 +178,15 @@ static int process_progress(int fd) {
+@@ -191,22 +172,15 @@ static int process_progress(int fd) {
  
                  last = t;
  
@@ -185,7 +184,7 @@ index 20b7940..9d9739b 100644
          }
  
          return 0;
-@@ -359,7 +339,7 @@ int main(int argc, char *argv[]) {
+@@ -358,7 +332,7 @@ int main(int argc, char *argv[]) {
          progress_pipe[1] = safe_close(progress_pipe[1]);
  
          if (progress_pipe[0] >= 0) {
@@ -194,12 +193,20 @@ index 20b7940..9d9739b 100644
                  progress_pipe[0] = -1;
          }
  
+diff --git a/src/fsckd/Makefile b/src/fsckd/Makefile
+new file mode 120000
+index 0000000..d0b0e8e
+--- /dev/null
++++ b/src/fsckd/Makefile
+@@ -0,0 +1 @@
++../Makefile
+\ No newline at end of file
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..4a16f3d
+index 0000000..39fe899
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,404 @@
 +/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 +
 +/***
@@ -355,6 +362,7 @@ index 0000000..4a16f3d
 +                        client->buflen = buflen;
 +                /* we got twice the same size from a bad behaving client, kick it off the list */
 +                else {
++                        log_warning("Closing bad behaving fsck client connection at fd %d", client->fd);
 +                        remove_client(&(m->clients), client);
 +                        r = update_global_progress(m);
 +                        if (r < 0)

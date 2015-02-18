@@ -15,7 +15,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 50 insertions(+), 12 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 0b38cde..554a15d 100644
+index 7cd4a1d..7546f30 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -76,6 +76,25 @@ static void context_free(Context *c) {
@@ -76,7 +76,7 @@ index 0b38cde..554a15d 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index b757be2..e5a9e30 100644
+index 9021420..ba31bad 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -157,13 +157,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
