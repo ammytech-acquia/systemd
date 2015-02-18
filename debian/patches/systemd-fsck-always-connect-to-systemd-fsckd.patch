@@ -11,7 +11,7 @@ progress or not.
  2 files changed, 9 insertions(+), 11 deletions(-)
 
 diff --git a/src/fsck/fsck.c b/src/fsck/fsck.c
-index 9d9739b..d5aaf9e 100644
+index 6ccb2e7..9ecba99 100644
 --- a/src/fsck/fsck.c
 +++ b/src/fsck/fsck.c
 @@ -45,7 +45,6 @@
@@ -31,7 +31,7 @@ index 9d9739b..d5aaf9e 100644
  }
  
  static int process_progress(int fd, dev_t device_num) {
-@@ -292,11 +289,10 @@ int main(int argc, char *argv[]) {
+@@ -286,11 +283,10 @@ int main(int argc, char *argv[]) {
                          log_warning_errno(r, "fsck.%s cannot be used for %s: %m", type, device);
          }
  
@@ -48,10 +48,10 @@ index 9d9739b..d5aaf9e 100644
          cmdline[i++] = "/sbin/fsck";
          cmdline[i++] =  arg_repair;
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-index 4a16f3d..45b8d64 100644
+index 39fe899..6b2eeb0 100644
 --- a/src/fsckd/fsckd.c
 +++ b/src/fsckd/fsckd.c
-@@ -258,9 +258,11 @@ static int manager_new(Manager **ret, int fd) {
+@@ -259,9 +259,11 @@ static int manager_new(Manager **ret, int fd) {
                  return r;
  
          m->connection_fd = fd;
