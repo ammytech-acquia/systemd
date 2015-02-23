@@ -9,7 +9,7 @@ Subject: Add gettext support
  3 files changed, 11 insertions(+)
 
 diff --git a/configure.ac b/configure.ac
-index ca2be8d..77d3792 100644
+index 97a29d6..ca64ce8 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -75,6 +75,7 @@ AS_IF([test -z "$INTLTOOL_POLICY_RULE"], [
@@ -21,7 +21,7 @@ index ca2be8d..77d3792 100644
  AC_PROG_MKDIR_P
  AC_PROG_LN_S
 diff --git a/src/shared/util.c b/src/shared/util.c
-index 436ea39..49d15dd 100644
+index ba035ca..deb9839 100644
 --- a/src/shared/util.c
 +++ b/src/shared/util.c
 @@ -25,6 +25,8 @@
@@ -41,7 +41,7 @@ index 436ea39..49d15dd 100644
  #include "macro.h"
  #include "util.h"
  #include "ioprio.h"
-@@ -5785,6 +5788,11 @@ void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
+@@ -5782,6 +5785,11 @@ void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
          return NULL;
  }
  
