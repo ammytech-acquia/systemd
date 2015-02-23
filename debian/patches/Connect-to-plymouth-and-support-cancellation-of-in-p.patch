@@ -125,7 +125,7 @@ index 9ecba99..e718534 100644
  
          } else
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-index 6b2eeb0..a6a64db 100644
+index 6b2eeb0..dc00fc6 100644
 --- a/src/fsckd/fsckd.c
 +++ b/src/fsckd/fsckd.c
 @@ -34,6 +34,7 @@
@@ -140,7 +140,7 @@ index 6b2eeb0..a6a64db 100644
  #include "util.h"
  
  #define IDLE_TIME_SECONDS 30
-+#define PLYMOUTH_REQUEST_KEY "K"
++#define PLYMOUTH_REQUEST_KEY "K\2\2\3"
  
  struct Manager;
  
@@ -212,7 +212,7 @@ index 6b2eeb0..a6a64db 100644
 +                       log_error("Message update to plymouth wasn't delivered successfully");
 +
 +               /* the only answer support type we requested is a key interruption */
-+               if (buffer[0] == '\2' && buffer[5] == 'c') {
++               if (buffer[0] == '\2' && buffer[5] == '\3') {
 +                       m->cancel_requested = true;
 +                       /* cancel all connected clients */
 +                       LIST_FOREACH(clients, current, m->clients)
@@ -260,7 +260,7 @@ index 6b2eeb0..a6a64db 100644
 +                m->plymouth_cancel_sent = false;
 +                r = send_message_plymouth_socket(m->plymouth_fd, "", false);
 +                if (r < 0)
-+                        log_warning_errno(r, "Can't clear filesystem cancel message to plymouth: %m");
++                        log_warning_errno(r, "Can't clear plymouth filesystem cancel message: %m");
 +        }
 +
 +        r = send_message_plymouth_socket(m->plymouth_fd,  message, true);

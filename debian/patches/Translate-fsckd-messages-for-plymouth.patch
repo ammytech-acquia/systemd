@@ -20,7 +20,7 @@ index b4c1121..70e7594 100644
  src/timedate/org.freedesktop.timedate1.policy.in
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-index a6a64db..2f98d1e 100644
+index dc00fc6..834476c 100644
 --- a/src/fsckd/fsckd.c
 +++ b/src/fsckd/fsckd.c
 @@ -24,6 +24,7 @@

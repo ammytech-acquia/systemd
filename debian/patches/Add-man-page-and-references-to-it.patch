@@ -7,11 +7,11 @@ as well as the socket activation part.
 Adapt existing fsck man page.
 ---
  Makefile-man.am                |  12 +++
- man/systemd-fsck@.service.xml  |   2 +-
+ man/systemd-fsck@.service.xml  |  26 +++----
  man/systemd-fsckd.service.xml  | 162 +++++++++++++++++++++++++++++++++++++++++
  units/systemd-fsckd.service.in |   1 +
  units/systemd-fsckd.socket     |   2 +-
- 5 files changed, 177 insertions(+), 2 deletions(-)
+ 5 files changed, 189 insertions(+), 14 deletions(-)
  create mode 100644 man/systemd-fsckd.service.xml
 
 diff --git a/Makefile-man.am b/Makefile-man.am
@@ -66,18 +66,50 @@ index d0fb9aa..7a9612e 100644
  	man/systemd-getty-generator.xml \
  	man/systemd-gpt-auto-generator.xml \
 diff --git a/man/systemd-fsck@.service.xml b/man/systemd-fsck@.service.xml
-index 32ba062..eeb3d44 100644
+index 88e11e8..69b8fdd 100644
 --- a/man/systemd-fsck@.service.xml
 +++ b/man/systemd-fsck@.service.xml
-@@ -81,7 +81,7 @@
+@@ -81,10 +81,10 @@
      last check, number of mounts, unclean unmount, etc.</para>
  
      <para><filename>systemd-fsck</filename> will forward file system
 -    checking progress to the console. If a file system check fails for
-+    checking progress to <filename>systemd-fsckd.service</filename> socket. If a file system check fails for
-     a service without <option>nofail</option>, emergency mode is
-     activated, by isolating to
-     <filename>emergency.target</filename>.</para>
+-    a service without <option>nofail</option>, emergency mode is
+-    activated, by isolating to
+-    <filename>emergency.target</filename>.</para>
++    checking progress to <filename>systemd-fsckd.service</filename>
++    socket. If a file system check fails for a service without
++    <option>nofail</option>, emergency mode is activated, by isolating
++    to <filename>emergency.target</filename>.</para>
+   </refsect1>
+ 
+   <refsect1>
+@@ -125,16 +125,16 @@
+     <title>See Also</title>
+     <para>
+       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-quotacheck.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.btrfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.cramfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.ext4</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.fat</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.hfsplus</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.minix</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.ntfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>fsck.xfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++      <citerefentry project='man-pages'><refentrytitle>fsck.btrfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.cramfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.ext4</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.fat</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.hfsplus</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.minix</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.ntfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry project='man-pages'><refentrytitle>fsck.xfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+     </para>
+   </refsect1>
+ 
 diff --git a/man/systemd-fsckd.service.xml b/man/systemd-fsckd.service.xml
 new file mode 100644
 index 0000000..2ad7844
