@@ -1,3 +1,69 @@
+systemd (215-14) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Map $x-display-manager LSB facility to display-manager.service instead of
+    making it a target. Using a target had the downside that multiple display
+    managers could hook into it at the same time which could lead to several
+    failed start attempts for the non-default display manager.
+  * Update insserv-generator and map $x-display-manager to
+    display-manager.service, following the recent change in sysv-generator.
+    This avoids creating references to a no longer existing
+    x-display-manager.target unit.
+  * Cherry-pick upstream fix to increase the SendBuffer of /dev/log to 8M.
+
+  [ Martin Pitt ]
+  * scope: Make attachment of initial PIDs more robust. Fixes crash with
+    processes that get started by an init.d script with a different (aliased)
+    name when the cgroup becomes empty. (Closes: #781210)
+  * boot-and-services, display-managers autopkgtests: Add missing python3 test
+    dependency.
+  * Don't attempt to mount the same swap partition twice through different
+    device node aliases. (Closes: #772182, LP: #1399595)
+
+  [ Christian Seiler ]
+  * Make the journald to syslog forwarding more robust by increasing the
+    maximum datagram queue length from 10 to 512. (Closes: #762700)
+
+  [ Marco d'Itri ]
+  * Avoid writing duplicate entries in 70-persistent-net.rules by double
+    checking if the new udev rule has already been written for the given
+    interface. This happens if multiple add events are generated before the
+    write_net_rules script returns and udevd renames the interface.
+    (Closes: #765577)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 30 Mar 2015 13:26:52 +0200
+
+systemd (215-13) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Add hwclock-save.service to sync the system clock to the hardware clock on
+    shutdown, to provide monotonic time for reboots. (Note: this is a hack for
+    jessie; the next Debian release will enable timesyncd by default).
+    (Closes: #755722)
+  * Check for correct architecture identifiers for SuperH. (Closes: #779710)
+  * networkd: Fix stopping v4 dhcpclient when the carrier is lost. Thanks
+    Christos Trochalakis! (Closes: #779571)
+  * Fix segfault with units that depend on themselves. (Closes: #780675)
+  * tmpfiles-setup-dev: Call tmpfiles with --boot to allow unsafe device
+    creation. Fixes creation of static device nodes with kmod 20.
+    (Closes: #780263)
+
+  [ Christian Seiler ]
+  * core: Don't migrate PIDs for units that may contain subcgroups.
+    This stops messing up lxc/libvirt/other custom cgroup layouts after
+    daemon-reload. (Closes: #777164)
+  * sysv-generator: add support for /etc/insserv/overrides. (Closes: #759001)
+
+  [ Michael Biebl ]
+  * debian/udev.init: Recognize '!' flag with static device lists, to work
+    with kmod 20. (Closes: #780263)
+
+  [ Didier Roche ]
+  * Ensure PrivateTmp doesn't require tmpfs through tmp.mount, but rather adds
+    an After relationship. (Closes: #779902)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 26 Mar 2015 14:23:35 +0100
+
 systemd (215-12) unstable; urgency=medium
 
   [ Martin Pitt ]
