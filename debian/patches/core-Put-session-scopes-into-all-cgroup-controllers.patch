@@ -44,7 +44,7 @@ index 069d857..488aafa 100644
  
          /* 7. Figure out which controllers are supported */
 diff --git a/src/core/scope.c b/src/core/scope.c
-index b41db78..69bfd05 100644
+index ae6614f..9e3137c 100644
 --- a/src/core/scope.c
 +++ b/src/core/scope.c
 @@ -288,6 +288,27 @@ static int scope_start(Unit *u) {

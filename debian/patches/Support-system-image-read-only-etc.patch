@@ -76,7 +76,7 @@ index 7cd4a1d..7546f30 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 9021420..ba31bad 100644
+index 972396f..fa23fa1 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -157,13 +157,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
