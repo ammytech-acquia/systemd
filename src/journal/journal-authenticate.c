@@ -229,7 +229,7 @@ int journal_file_maybe_append_tag(JournalFile *f, uint64_t realtime) {
         return 0;
 }
 
-int journal_file_hmac_put_object(JournalFile *f, ObjectType type, Object *o, uint64_t p) {
+int journal_file_hmac_put_object(JournalFile *f, int type, Object *o, uint64_t p) {
         int r;
 
         assert(f);
@@ -246,7 +246,7 @@ int journal_file_hmac_put_object(JournalFile *f, ObjectType type, Object *o, uin
                 if (r < 0)
                         return r;
         } else {
-                if (type > OBJECT_UNUSED && o->object.type != type)
+                if (type >= 0 && o->object.type != type)
                         return -EBADMSG;
         }
 
@@ -339,7 +339,7 @@ int journal_file_fss_load(JournalFile *f) {
         fd = open(p, O_RDWR|O_CLOEXEC|O_NOCTTY, 0600);
         if (fd < 0) {
                 if (errno != ENOENT)
-                        log_error_errno(errno, "Failed to open %s: %m", p);
+                        log_error("Failed to open %s: %m", p);
 
                 r = -errno;
                 goto finish;

@@ -25,7 +25,7 @@
 #include "snapshot.h"
 #include "unit-name.h"
 #include "dbus-snapshot.h"
-#include "bus-common-errors.h"
+#include "bus-errors.h"
 
 static const UnitActiveState state_translation_table[_SNAPSHOT_STATE_MAX] = {
         [SNAPSHOT_DEAD] = UNIT_INACTIVE,
@@ -51,7 +51,7 @@ static void snapshot_set_state(Snapshot *s, SnapshotState state) {
         s->state = state;
 
         if (state != old_state)
-                log_unit_debug(UNIT(s)->id,
+                log_debug_unit(UNIT(s)->id,
                                "%s changed %s -> %s",
                                UNIT(s)->id,
                                snapshot_state_to_string(old_state),
@@ -111,7 +111,7 @@ static int snapshot_start(Unit *u) {
         if (s->cleanup)
                 unit_add_to_cleanup_queue(u);
 
-        return 1;
+        return 0;
 }
 
 static int snapshot_stop(Unit *u) {
@@ -121,7 +121,7 @@ static int snapshot_stop(Unit *u) {
         assert(s->state == SNAPSHOT_ACTIVE);
 
         snapshot_set_state(s, SNAPSHOT_DEAD);
-        return 1;
+        return 0;
 }
 
 static int snapshot_serialize(Unit *u, FILE *f, FDSet *fds) {
@@ -155,7 +155,7 @@ static int snapshot_deserialize_item(Unit *u, const char *key, const char *value
 
                 state = snapshot_state_from_string(value);
                 if (state < 0)
-                        log_unit_debug(u->id, "Failed to parse state value %s", value);
+                        log_debug_unit(u->id, "Failed to parse state value %s", value);
                 else
                         s->deserialized_state = state;
 
@@ -163,7 +163,7 @@ static int snapshot_deserialize_item(Unit *u, const char *key, const char *value
 
                 r = parse_boolean(value);
                 if (r < 0)
-                        log_unit_debug(u->id, "Failed to parse cleanup value %s", value);
+                        log_debug_unit(u->id, "Failed to parse cleanup value %s", value);
                 else
                         s->cleanup = r;
 
@@ -173,7 +173,7 @@ static int snapshot_deserialize_item(Unit *u, const char *key, const char *value
                 if (r < 0)
                         return r;
         } else
-                log_unit_debug(u->id, "Unknown serialization key '%s'", key);
+                log_debug_unit(u->id, "Unknown serialization key '%s'", key);
 
         return 0;
 }
@@ -208,7 +208,7 @@ int snapshot_create(Manager *m, const char *name, bool cleanup, sd_bus_error *e,
                         return sd_bus_error_setf(e, SD_BUS_ERROR_INVALID_ARGS, "Unit name %s lacks snapshot suffix.", name);
 
                 if (manager_get_unit(m, name))
-                        return sd_bus_error_setf(e, BUS_ERROR_UNIT_EXISTS, "Snapshot %s exists already.", name);
+                        sd_bus_error_setf(e, BUS_ERROR_UNIT_EXISTS, "Snapshot %s exists already.", name);
 
         } else {
 
@@ -258,7 +258,7 @@ int snapshot_create(Manager *m, const char *name, bool cleanup, sd_bus_error *e,
         SNAPSHOT(u)->cleanup = cleanup;
         *_s = SNAPSHOT(u);
 
-        log_unit_info(u->id, "Created snapshot %s.", u->id);
+        log_info_unit(u->id, "Created snapshot %s.", u->id);
 
         return 0;
 
@@ -272,7 +272,7 @@ fail:
 void snapshot_remove(Snapshot *s) {
         assert(s);
 
-        log_unit_info(UNIT(s)->id, "Removing snapshot %s.", UNIT(s)->id);
+        log_info_unit(UNIT(s)->id, "Removing snapshot %s.", UNIT(s)->id);
 
         unit_add_to_cleanup_queue(UNIT(s));
 }

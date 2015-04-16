@@ -1,5 +1,5 @@
 '\" t
-.TH "TMPFILES\&.D" "5" "" "systemd 219" "tmpfiles.d"
+.TH "TMPFILES\&.D" "5" "" "systemd 215" "tmpfiles.d"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -72,7 +72,7 @@ override files with the same name in
 /usr/lib/tmpfiles\&.d\&. Packages should install their configuration files in
 /usr/lib/tmpfiles\&.d\&. Files in
 /etc/tmpfiles\&.d
-are reserved for the local administrator, who may use this logic to override the configuration files installed by vendor packages\&. All configuration files are sorted by their filename in lexicographic order, regardless of which of the directories they reside in\&. If multiple files specify the same path, the entry in the file with the lexicographically earliest name will be applied\&. All other conflicting entries will be logged as errors\&. When two lines are prefix and suffix of each other, then the prefix is always processed first, the suffix later\&. Otherwise, the files/directories are processed in the order they are listed\&.
+are reserved for the local administrator, who may use this logic to override the configuration files installed by vendor packages\&. All configuration files are sorted by their filename in lexicographic order, regardless of which of the directories they reside in\&. If multiple files specify the same path, the entry in the file with the lexicographically earliest name will be applied, all all other conflicting entries will be logged as errors\&. When two lines are prefix and suffix of each other, then the prefix is always processed first, the suffix later\&. Otherwise, the files/directories are processed in the order they are listed\&.
 .PP
 If the administrator wants to disable a configuration file supplied by the vendor, the recommended way is to place a symlink to
 /dev/null
@@ -87,8 +87,8 @@ The configuration format is one line per path containing type, path, mode, owner
 .\}
 .nf
 #Type Path        Mode UID  GID  Age Argument
-    d    /run/user   0755 root root 10d \-
-    L    /tmp/foobar \-    \-    \-    \-   /dev/null
+d    /run/user   0755 root root 10d \-
+L    /tmp/foobar \-    \-    \-    \-   /dev/null
 .fi
 .if n \{\
 .RE
@@ -124,12 +124,6 @@ Create a directory if it does not exist yet\&.
 Create or empty a directory\&.
 .RE
 .PP
-\fIv\fR
-.RS 4
-Create a subvolume if the path does not exist yet and the file system supports this (btrfs)\&. Otherwise create a normal directory, in the same way as
-\fId\fR\&.
-.RE
-.PP
 \fIp\fR, \fIp+\fR
 .RS 4
 Create a named pipe (FIFO) if it does not exist yet\&. If suffixed with
@@ -150,14 +144,14 @@ are created\&.
 .RS 4
 Create a character device node if it does not exist yet\&. If suffixed with
 \fI+\fR
-and a file already exists where the device node is to be created, it will be removed and be replaced by the device node\&. It is recommended to suffix this entry with an exclamation mark to only create static device nodes at boot, as udev will not manage static device nodes that are created at runtime\&.
+and a file already exists where the device node is to be created, it will be removed and be replaced by the device node\&.
 .RE
 .PP
 \fIb\fR, \fIb+\fR
 .RS 4
 Create a block device node if it does not exist yet\&. If suffixed with
 \fI+\fR
-and a file already exists where the device node is to be created, it will be removed and be replaced by the device node\&. It is recommended to suffix this entry with an exclamation mark to only create static device nodes at boot, as udev will not manage static device nodes that are created at runtime\&.
+and a file already exists where the device node is to be created, it will be removed and be replaced by the device node\&.
 .RE
 .PP
 \fIC\fR
@@ -208,32 +202,6 @@ Adjust the access mode, group and user, and restore the SELinux security context
 Recursively set the access mode, group and user, and restore the SELinux security context of a file or directory if it exists, as well as of its subdirectories and the files contained therein (if applicable)\&. Lines of this type accept shell\-style globs in place of normal path names\&.
 .RE
 .PP
-\fIt\fR
-.RS 4
-Set extended attributes\&. Lines of this type accept shell\-style globs in place of normal path names\&. This can be useful for setting SMACK labels\&.
-.RE
-.PP
-\fIT\fR
-.RS 4
-Recursively set extended attributes\&. Lines of this type accept shell\-style globs in place of normal path names\&. This can be useful for setting SMACK labels\&.
-.RE
-.PP
-\fIa\fR, \fIa+\fR
-.RS 4
-Set POSIX ACLs (access control lists)\&. If suffixed with
-\fI+\fR, specified entries will be added to the existing set\&.
-\fBsystemd\-tmpfiles\fR
-will automatically add the required base entries for user and group based on the access mode of the file, unless base entries already exist or are explictly specified\&. The mask will be added if not specified explicitly or already present\&. Lines of this type accept shell\-style globs in place of normal path names\&. This can be useful for allowing additional access to certain files\&.
-.RE
-.PP
-\fIA\fR, \fIA+\fR
-.RS 4
-Same as
-\fIa\fR
-and
-\fIa+\fR, but recursive\&.
-.RE
-.PP
 If the exclamation mark is used, this line is only safe of execute during boot, and can break a running system\&. Lines without the exclamation mark are presumed to be safe to execute at any time, e\&.g\&. on package upgrades\&.
 \fBsystemd\-tmpfiles\fR
 will execute line with an exclamation mark only if option
@@ -247,10 +215,10 @@ For example:
 .\}
 .nf
 # Make sure these are created by default so that nobody else can
-      d /tmp/\&.X11\-unix 1777 root root 10d
+d /tmp/\&.X11\-unix 1777 root root 10d
 
-      # Unlink the X11 lock files
-      r! /tmp/\&.X[0\-9]*\-lock
+# Unlink the X11 lock files
+r! /tmp/\&.X[0\-9]*\-lock
 .fi
 .if n \{\
 .RE
@@ -322,8 +290,7 @@ T}
 .sp 1
 .SS "Mode"
 .PP
-The file access mode to use when creating this file or directory\&. If omitted or when set to
-"\-", the default is used: 0755 for directories, 0644 for all other file objects\&. For
+The file access mode to use when creating this file or directory\&. If omitted or when set to \-, the default is used: 0755 for directories, 0644 for all other file objects\&. For
 \fIz\fR,
 \fIZ\fR
 lines, if omitted or when set to
@@ -331,9 +298,7 @@ lines, if omitted or when set to
 \fIx\fR,
 \fIr\fR,
 \fIR\fR,
-\fIL\fR,
-\fIt\fR, and
-\fIa\fR
+\fIL\fR
 lines\&.
 .PP
 Optionally, if prefixed with
@@ -345,14 +310,11 @@ The user and group to use for this file or directory\&. This may either be a num
 "\-", the default 0 (root) is used\&. For
 \fIz\fR,
 \fIZ\fR
-lines, when omitted or when set to
-"\-", the file ownership will not be modified\&. These parameters are ignored for
+lines, when omitted or when set to \-, the file ownership will not be modified\&. These parameters are ignored for
 \fIx\fR,
 \fIr\fR,
 \fIR\fR,
-\fIL\fR,
-\fIt\fR, and
-\fIa\fR
+\fIL\fR
 lines\&.
 .SS "Age"
 .PP
@@ -362,9 +324,7 @@ The date field, when set, is used to decide what files to delete when cleaning\&
 .RS 4
 .RE
 .PP
-If multiple integers and units are specified, the time values are summed up\&. If an integer is given without a unit,
-\fIs\fR
-is assumed\&.
+If multiple integers and units are specified, the time values are summed up\&. If an integer is given without a unit, s is assumed\&.
 .PP
 When the age is set to zero, the files are cleaned unconditionally\&.
 .PP
@@ -390,11 +350,7 @@ determines the major/minor of the device node, with major and minor formatted as
 \fIF\fR, and
 \fIw\fR
 may be used to specify a short string that is written to the file, suffixed by a newline\&. For
-\fIC\fR, specifies the source file or directory\&. For
-\fIt\fR
-determines extended attributes to be set\&. For
-\fIa\fR
-determines ACL attributes to be set\&. Ignored for all other lines\&.
+\fIC\fR, specifies the source file or directory\&. Ignored for all other lines\&.
 .SH "EXAMPLE"
 .PP
 \fBExample\ \&1.\ \&/etc/tmpfiles.d/screen.conf example\fR
@@ -407,8 +363,7 @@ needs two directories created at boot with specific modes and ownership\&.
 .\}
 .nf
 d /run/screens  1777 root root 10d
-      d /run/uscreens 0755 root root 10d12h
-      t /run/screen \- \- \- \- user\&.name="John Smith" security\&.SMACK64=screen
+d /run/uscreens 0755 root root 10d12h
 .fi
 .if n \{\
 .RE
@@ -424,7 +379,7 @@ needs a directory created at boot with specific mode and ownership and its conte
 .\}
 .nf
 d /var/tmp/abrt 0755 abrt abrt
-      x /var/tmp/abrt/*
+x /var/tmp/abrt/*
 .fi
 .if n \{\
 .RE
@@ -434,9 +389,4 @@ d /var/tmp/abrt 0755 abrt abrt
 \fBsystemd\fR(1),
 \fBsystemd-tmpfiles\fR(8),
 \fBsystemd-delta\fR(1),
-\fBsystemd.exec\fR(5),
-\fBattr\fR(5),
-\fBgetfattr\fR(1),
-\fBsetfattr\fR(1),
-\fBsetfacl\fR(1),
-\fBgetfacl\fR(1)
+\fBsystemd.exec\fR(5)

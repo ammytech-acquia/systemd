@@ -28,19 +28,6 @@ if [ "$1" = "triggered" ]; then
     exit 0
 fi
 
-# Enable getty and remote-fs.target by default on new installs, and on
-# upgrades from old systemd versions (where the symlinks included as deb
-# content, and will thus have been removed by dpkg during the upgrade).
-if dpkg --compare-versions "$2" lt "214-1"; then
-    systemctl enable getty@tty1.service || true
-    systemctl enable remote-fs.target || true
-fi
-
-# Enable timesyncd by default on new installs installs and upgrades
-if dpkg --compare-versions "$2" lt "218-11~"; then
-    systemctl enable systemd-timesyncd.service || true
-fi
-
 # Cleanup state files from the auto-enabler which we used in wheezy
 if dpkg --compare-versions "$2" lt "204-1"; then
     rm -f /var/lib/systemd/enabled-units
@@ -111,7 +98,6 @@ systemd-machine-id-setup
 
 # Setup system users and groups
 addgroup --quiet --system systemd-journal
-addgroup --quiet --system systemd-journal-remote
 
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Time Synchronization" systemd-timesync
@@ -128,11 +114,15 @@ _update_catalog
 # Make systemd-detect-virt utility usable for non-root users
 setcap cap_dac_override,cap_sys_ptrace=ep /usr/bin/systemd-detect-virt || true
 
-# Re-run systemctl enable for any service that was enabled when preinst was run.
-if dpkg --compare-versions "$2" ge "204"; then
-    while read UNIT ; do
-        systemctl enable $UNIT || true
-    done </run/systemd/was-enabled || true
+# We don’t ship /var/log/journal currently, so only run the following fix for
+# systems where the administrator has explicitly enabled persistent logging by
+# creating /var/log/journal.
+if [ -d /var/log/journal ]; then
+    # Grant read access to /var/log/journal for members of the adm group
+    # via a filesystem ACL. This makes them able to read the journal.
+    # Failure is ignored since there might be file systems mounted without
+    # ACL support.
+    setfacl -R -nm g:adm:rx,d:g:adm:rx /var/log/journal || true
 fi
 
 if [ -n "$2" ]; then
@@ -141,6 +131,25 @@ if [ -n "$2" ]; then
     _systemctl try-restart systemd-networkd.service || true
     _systemctl try-restart systemd-resolved.service || true
     _systemctl try-restart systemd-timesyncd.service || true
+fi
+
+# Enable getty and remote-fs.target by default on new installs, and on
+# upgrades from old systemd versions (where the symlinks included as deb
+# content, and will thus have been removed by dpkg during the upgrade).
+if dpkg --compare-versions "$2" lt "214-1"; then
+    systemctl enable getty@tty1.service || true
+    systemctl enable remote-fs.target || true
+fi
+
+if dpkg --compare-versions "$2" lt "215-13"; then
+    systemctl enable hwclock-save.service || true
+fi
+
+# Re-run systemctl enable for any service that was enabled when preinst was run.
+if dpkg --compare-versions "$2" ge "204"; then
+    while read UNIT ; do
+        systemctl enable $UNIT || true
+    done </run/systemd/was-enabled || true
 fi
 
 # The /dev/log socket and /dev/initctl FIFO have been moved to /run and
@@ -158,21 +167,4 @@ if dpkg --compare-versions "$2" lt-nl "215-3"; then
     _systemctl try-restart systemd-journald.service || true
 fi
 
-# In experimental we had created duplicate ACLs on /var/log/journal for a while
-# (https://bugs.debian.org/778656). Clean up after that.
-if dpkg --compare-versions "$2" lt-nl "219-4" && \
-    [ -d /var/log/journal ] && type setfacl >/dev/null 2>&1; then
-    echo "Cleaning up duplicate ACLs on /var/log/journal"
-    if setfacl -Rb /var/log/journal/; then
-        systemd-tmpfiles --create /usr/lib/tmpfiles.d/systemd.conf || true
-    fi
-fi
-
-# Cleanup hwclock-save.service, which was shipped in jessie.
-if dpkg --compare-versions "$2" lt-nl "219-8"; then
-   for t in reboot halt poweroff ; do
-       rm -f /etc/systemd/system/${t}.target.wants/hwclock-save.service
-       rmdir --ignore-fail-on-non-empty /etc/systemd/system/${t}.target.wants 2> /dev/null || true
-   done
-fi
 #DEBHELPER#

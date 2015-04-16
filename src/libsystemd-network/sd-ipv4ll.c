@@ -186,8 +186,8 @@ static void ipv4ll_set_next_wakeup(sd_ipv4ll *ll, int sec, int random_sec) {
         if (random_sec)
                 next_timeout += random_u32() % (random_sec * USEC_PER_SEC);
 
-        if (sd_event_now(ll->event, clock_boottime_or_monotonic(), &time_now) < 0)
-                time_now = now(clock_boottime_or_monotonic());
+        if (sd_event_now(ll->event, CLOCK_MONOTONIC, &time_now) < 0)
+                time_now = now(CLOCK_MONOTONIC);
 
         ll->next_wakeup = time_now + next_timeout;
         ll->next_wakeup_valid = 1;
@@ -289,7 +289,7 @@ static void ipv4ll_run_state_machine(sd_ipv4ll *ll, IPv4LLTrigger trigger, void 
 
                         if (ipv4ll_arp_conflict(ll, in_packet)) {
 
-                                r = sd_event_now(ll->event, clock_boottime_or_monotonic(), &time_now);
+                                r = sd_event_now(ll->event, CLOCK_MONOTONIC, &time_now);
                                 if (r < 0)
                                         goto out;
 
@@ -344,16 +344,12 @@ static void ipv4ll_run_state_machine(sd_ipv4ll *ll, IPv4LLTrigger trigger, void 
 
         if (ll->next_wakeup_valid) {
                 ll->timer = sd_event_source_unref(ll->timer);
-                r = sd_event_add_time(ll->event, &ll->timer, clock_boottime_or_monotonic(),
+                r = sd_event_add_time(ll->event, &ll->timer, CLOCK_MONOTONIC,
                                       ll->next_wakeup, 0, ipv4ll_timer, ll);
                 if (r < 0)
                         goto out;
 
                 r = sd_event_source_set_priority(ll->timer, ll->event_priority);
-                if (r < 0)
-                        goto out;
-
-                r = sd_event_source_set_description(ll->timer, "ipv4ll-timer");
                 if (r < 0)
                         goto out;
         }
@@ -564,24 +560,17 @@ int sd_ipv4ll_start (sd_ipv4ll *ll) {
         if (r < 0)
                 goto out;
 
-        r = sd_event_source_set_description(ll->receive_message, "ipv4ll-receive-message");
-        if (r < 0)
-                goto out;
-
         r = sd_event_add_time(ll->event,
                               &ll->timer,
-                              clock_boottime_or_monotonic(),
-                              now(clock_boottime_or_monotonic()), 0,
+                              CLOCK_MONOTONIC,
+                              now(CLOCK_MONOTONIC), 0,
                               ipv4ll_timer, ll);
 
         if (r < 0)
                 goto out;
 
         r = sd_event_source_set_priority(ll->timer, ll->event_priority);
-        if (r < 0)
-                goto out;
 
-        r = sd_event_source_set_description(ll->timer, "ipv4ll-timer");
 out:
         if (r < 0)
                 ipv4ll_stop(ll, IPV4LL_EVENT_STOP);
@@ -605,7 +594,7 @@ sd_ipv4ll *sd_ipv4ll_ref(sd_ipv4ll *ll) {
 }
 
 sd_ipv4ll *sd_ipv4ll_unref(sd_ipv4ll *ll) {
-        if (ll && REFCNT_DEC(ll->n_ref) == 0) {
+        if (ll && REFCNT_DEC(ll->n_ref) <= 0) {
                 ll->receive_message =
                         sd_event_source_unref(ll->receive_message);
                 ll->fd = safe_close(ll->fd);

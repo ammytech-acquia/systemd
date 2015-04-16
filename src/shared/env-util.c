@@ -78,9 +78,7 @@ bool env_value_is_valid(const char *e) {
         if (!utf8_is_valid(e))
                 return false;
 
-        /* bash allows tabs in environment variables, and so should
-         * we */
-        if (string_has_cc(e, "\t"))
+        if (string_has_cc(e))
                 return false;
 
         /* POSIX says the overall size of the environment block cannot
@@ -414,7 +412,7 @@ char *strv_env_get(char **l, const char *name) {
         return strv_env_get_n(l, name, strlen(name));
 }
 
-char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const char *p, void *userdata), void *userdata) {
+char **strv_env_clean_log(char **e, const char *message) {
         char **p, **q;
         int k = 0;
 
@@ -423,8 +421,8 @@ char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const cha
                 bool duplicate = false;
 
                 if (!env_assignment_is_valid(*p)) {
-                        if (invalid_callback)
-                                invalid_callback(*p, userdata);
+                        if (message)
+                                log_error("Ignoring invalid environment '%s': %s", *p, message);
                         free(*p);
                         continue;
                 }
@@ -448,4 +446,8 @@ char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const cha
                 e[k] = NULL;
 
         return e;
+}
+
+char **strv_env_clean(char **e) {
+        return strv_env_clean_log(e, NULL);
 }

@@ -23,7 +23,7 @@
 
 #include "architecture.h"
 
-int uname_architecture(void) {
+Architecture uname_architecture(void) {
 
         /* Return a sanitized enum identifying the architecture we are
          * running on. This is based on uname(), and the user may
@@ -41,7 +41,7 @@ int uname_architecture(void) {
 
         static const struct {
                 const char *machine;
-                int arch;
+                Architecture arch;
         } arch_map[] = {
 #if defined(__x86_64__) || defined(__i386__)
                 { "x86_64",     ARCHITECTURE_X86_64   },
@@ -115,13 +115,14 @@ int uname_architecture(void) {
 #elif defined(__tilegx__)
                 { "tilegx",     ARCHITECTURE_TILEGX   },
 #elif defined(__cris__)
+                { "cris",       ARCHITECTURE_CRIS     },
                 { "crisv32",    ARCHITECTURE_CRIS     },
 #else
 #error "Please register your architecture here!"
 #endif
         };
 
-        static int cached = _ARCHITECTURE_INVALID;
+        static Architecture cached = _ARCHITECTURE_INVALID;
         struct utsname u;
         unsigned i;
 
@@ -153,9 +154,7 @@ static const char *const architecture_table[_ARCHITECTURE_MAX] = {
         [ARCHITECTURE_SPARC] = "sparc",
         [ARCHITECTURE_SPARC64] = "sparc64",
         [ARCHITECTURE_MIPS] = "mips",
-        [ARCHITECTURE_MIPS_LE] = "mips-le",
         [ARCHITECTURE_MIPS64] = "mips64",
-        [ARCHITECTURE_MIPS64_LE] = "mips64-le",
         [ARCHITECTURE_ALPHA] = "alpha",
         [ARCHITECTURE_ARM] = "arm",
         [ARCHITECTURE_ARM_BE] = "arm-be",
@@ -168,4 +167,4 @@ static const char *const architecture_table[_ARCHITECTURE_MAX] = {
         [ARCHITECTURE_CRIS] = "cris",
 };
 
-DEFINE_STRING_TABLE_LOOKUP(architecture, int);
+DEFINE_STRING_TABLE_LOOKUP(architecture, Architecture);

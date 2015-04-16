@@ -22,7 +22,6 @@
 ***/
 
 typedef struct Path Path;
-typedef struct PathSpec PathSpec;
 
 #include "unit.h"
 #include "mount.h"

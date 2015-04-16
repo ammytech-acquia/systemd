@@ -67,10 +67,6 @@
         _Pragma("GCC diagnostic push");                                 \
         _Pragma("GCC diagnostic ignored \"-Wshadow\"")
 
-#define DISABLE_WARNING_INCOMPATIBLE_POINTER_TYPES                      \
-        _Pragma("GCC diagnostic push");                                 \
-        _Pragma("GCC diagnostic ignored \"-Wincompatible-pointer-types\"")
-
 #define REENABLE_WARNING                                                \
         _Pragma("GCC diagnostic pop")
 
@@ -83,8 +79,7 @@
 #define XCONCATENATE(x, y) x ## y
 #define CONCATENATE(x, y) XCONCATENATE(x, y)
 
-#define UNIQ_T(x, uniq) CONCATENATE(__unique_prefix_, CONCATENATE(x, uniq))
-#define UNIQ __COUNTER__
+#define UNIQUE(prefix) CONCATENATE(prefix, __LINE__)
 
 /* Rounds up */
 
@@ -99,15 +94,15 @@
 #error "Wut? Pointers are neither 4 nor 8 bytes long?"
 #endif
 
-#define ALIGN_PTR(p) ((void*) ALIGN((unsigned long) (p)))
-#define ALIGN4_PTR(p) ((void*) ALIGN4((unsigned long) (p)))
-#define ALIGN8_PTR(p) ((void*) ALIGN8((unsigned long) (p)))
+#define ALIGN_PTR(p) ((void*) ALIGN((unsigned long) p))
+#define ALIGN4_PTR(p) ((void*) ALIGN4((unsigned long) p))
+#define ALIGN8_PTR(p) ((void*) ALIGN8((unsigned long) p))
 
 static inline size_t ALIGN_TO(size_t l, size_t ali) {
         return ((l + ali - 1) & ~(ali - 1));
 }
 
-#define ALIGN_TO_PTR(p, ali) ((void*) ALIGN_TO((unsigned long) (p), (ali)))
+#define ALIGN_TO_PTR(p, ali) ((void*) ALIGN_TO((unsigned long) p, ali))
 
 /* align to next higher power-of-2 (except for: 0 => 0, overflow => 0) */
 static inline unsigned long ALIGN_POWER2(unsigned long u) {
@@ -129,88 +124,52 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
  * @ptr: the pointer to the member.
  * @type: the type of the container struct this is embedded in.
  * @member: the name of the member within the struct.
+ *
  */
-#define container_of(ptr, type, member) __container_of(UNIQ, (ptr), type, member)
-#define __container_of(uniq, ptr, type, member)                         \
+#define container_of(ptr, type, member)                                 \
         __extension__ ({                                                \
-                const typeof( ((type*)0)->member ) *UNIQ_T(A, uniq) = (ptr); \
-                (type*)( (char *)UNIQ_T(A, uniq) - offsetof(type,member) ); \
-        })
+                        const typeof( ((type *)0)->member ) *__mptr = (ptr); \
+                        (type *)( (char *)__mptr - offsetof(type,member) ); \
+                })
 
 #undef MAX
-#define MAX(a, b) __MAX(UNIQ, (a), UNIQ, (b))
-#define __MAX(aq, a, bq, b)                             \
-        __extension__ ({                                \
-                const typeof(a) UNIQ_T(A, aq) = (a);    \
-                const typeof(b) UNIQ_T(B, bq) = (b);    \
-                UNIQ_T(A,aq) > UNIQ_T(B,bq) ? UNIQ_T(A,aq) : UNIQ_T(B,bq); \
-        })
+#define MAX(a,b)                                 \
+        __extension__ ({                         \
+                        typeof(a) _a = (a);      \
+                        typeof(b) _b = (b);      \
+                        _a > _b ? _a : _b;       \
+                })
 
-/* evaluates to (void) if _A or _B are not constant or of different types */
-#define CONST_MAX(_A, _B) \
-        __extension__ (__builtin_choose_expr(                           \
-                __builtin_constant_p(_A) &&                             \
-                __builtin_constant_p(_B) &&                             \
-                __builtin_types_compatible_p(typeof(_A), typeof(_B)),   \
-                ((_A) > (_B)) ? (_A) : (_B),                            \
-                (void)0))
-
-/* takes two types and returns the size of the larger one */
-#define MAXSIZE(A, B) (sizeof(union _packed_ { typeof(A) a; typeof(B) b; }))
-
-#define MAX3(x,y,z)                                     \
-        __extension__ ({                                \
-                        const typeof(x) _c = MAX(x,y);  \
-                        MAX(_c, z);                     \
+#define MAX3(x,y,z)                              \
+        __extension__ ({                         \
+                        typeof(x) _c = MAX(x,y); \
+                        MAX(_c, z);              \
                 })
 
 #undef MIN
-#define MIN(a, b) __MIN(UNIQ, (a), UNIQ, (b))
-#define __MIN(aq, a, bq, b)                             \
-        __extension__ ({                                \
-                const typeof(a) UNIQ_T(A, aq) = (a);    \
-                const typeof(b) UNIQ_T(B, bq) = (b);    \
-                UNIQ_T(A,aq) < UNIQ_T(B,bq) ? UNIQ_T(A,aq) : UNIQ_T(B,bq); \
-        })
-
-#define MIN3(x,y,z)                                     \
-        __extension__ ({                                \
-                        const typeof(x) _c = MIN(x,y);  \
-                        MIN(_c, z);                     \
+#define MIN(a,b)                                \
+        __extension__ ({                        \
+                        typeof(a) _a = (a);     \
+                        typeof(b) _b = (b);     \
+                        _a < _b ? _a : _b;      \
                 })
 
-#define LESS_BY(a, b) __LESS_BY(UNIQ, (a), UNIQ, (b))
-#define __LESS_BY(aq, a, bq, b)                         \
-        __extension__ ({                                \
-                const typeof(a) UNIQ_T(A, aq) = (a);    \
-                const typeof(b) UNIQ_T(B, bq) = (b);    \
-                UNIQ_T(A,aq) > UNIQ_T(B,bq) ? UNIQ_T(A,aq) - UNIQ_T(B,bq) : 0; \
-        })
+#define LESS_BY(A,B)                            \
+        __extension__ ({                        \
+                        typeof(A) _A = (A);     \
+                        typeof(B) _B = (B);     \
+                        _A > _B ? _A - _B : 0;  \
+                })
 
-#undef CLAMP
-#define CLAMP(x, low, high) __CLAMP(UNIQ, (x), UNIQ, (low), UNIQ, (high))
-#define __CLAMP(xq, x, lowq, low, highq, high)                          \
+#ifndef CLAMP
+#define CLAMP(x, low, high)                                             \
         __extension__ ({                                                \
-                const typeof(x) UNIQ_T(X,xq) = (x);                     \
-                const typeof(low) UNIQ_T(LOW,lowq) = (low);             \
-                const typeof(high) UNIQ_T(HIGH,highq) = (high);         \
-                        UNIQ_T(X,xq) > UNIQ_T(HIGH,highq) ?             \
-                                UNIQ_T(HIGH,highq) :                    \
-                                UNIQ_T(X,xq) < UNIQ_T(LOW,lowq) ?       \
-                                        UNIQ_T(LOW,lowq) :              \
-                                        UNIQ_T(X,xq);                   \
-        })
-
-/* [(x + y - 1) / y] suffers from an integer overflow, even though the
- * computation should be possible in the given type. Therefore, we use
- * [x / y + !!(x % y)]. Note that on "Real CPUs" a division returns both the
- * quotient and the remainder, so both should be equally fast. */
-#define DIV_ROUND_UP(_x, _y)                                            \
-        __extension__ ({                                                \
-                const typeof(_x) __x = (_x);                            \
-                const typeof(_y) __y = (_y);                            \
-                (__x / __y + !!(__x % __y));                            \
-        })
+                        typeof(x) _x = (x);                             \
+                        typeof(low) _low = (low);                       \
+                        typeof(high) _high = (high);                    \
+                        ((_x > _high) ? _high : ((_x < _low) ? _low : _x)); \
+                })
+#endif
 
 #define assert_se(expr)                                                 \
         do {                                                            \
@@ -242,7 +201,7 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
 #else
 #define assert_cc(expr)                                                 \
         DISABLE_WARNING_DECLARATION_AFTER_STATEMENT;                    \
-        struct CONCATENATE(_assert_struct_, __COUNTER__) {              \
+        struct UNIQUE(_assert_struct_) {                                \
                 char x[(expr) ? 0 : -1];                                \
         };                                                              \
         REENABLE_WARNING
@@ -275,17 +234,6 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
 #define INT64_TO_PTR(u) ((void *) ((intptr_t) (u)))
 #define PTR_TO_UINT64(p) ((uint64_t) ((uintptr_t) (p)))
 #define UINT64_TO_PTR(u) ((void *) ((uintptr_t) (u)))
-
-#define PTR_TO_SIZE(p) ((size_t) ((uintptr_t) (p)))
-#define SIZE_TO_PTR(u) ((void *) ((uintptr_t) (u)))
-
-/* The following macros add 1 when converting things, since UID 0 is a
- * valid UID, while the pointer NULL is special */
-#define PTR_TO_UID(p) ((uid_t) (((uintptr_t) (p))-1))
-#define UID_TO_PTR(u) ((void*) (((uintptr_t) (u))+1))
-
-#define PTR_TO_GID(p) ((gid_t) (((uintptr_t) (p))-1))
-#define GID_TO_PTR(u) ((void*) (((uintptr_t) (u))+1))
 
 #define memzero(x,l) (memset((x), 0, (l)))
 #define zero(x) (memzero(&(x), sizeof(x)))
@@ -383,8 +331,7 @@ do {                                                                    \
 
 /* Returns the number of chars needed to format variables of the
  * specified type as a decimal string. Adds in extra space for a
- * negative '-' prefix (hence works correctly on signed
- * types). Includes space for the trailing NUL. */
+ * negative '-' prefix. */
 #define DECIMAL_STR_MAX(type)                                           \
         (2+(sizeof(type) <= 1 ? 3 :                                     \
             sizeof(type) <= 2 ? 5 :                                     \
@@ -407,21 +354,6 @@ do {                                                                    \
                         }                                               \
                 _found;                                                 \
         })
-
-/* Return a nulstr for a standard cascade of configuration directories,
- * suitable to pass to conf_files_list_nulstr or config_parse_many. */
-#define CONF_DIRS_NULSTR(n) \
-        "/etc/" n ".d\0" \
-        "/run/" n ".d\0" \
-        "/usr/local/lib/" n ".d\0" \
-        "/usr/lib/" n ".d\0" \
-        CONF_DIR_SPLIT_USR(n)
-
-#ifdef HAVE_SPLIT_USR
-#define CONF_DIR_SPLIT_USR(n) "/lib/" n ".d\0"
-#else
-#define CONF_DIR_SPLIT_USR(n)
-#endif
 
 /* Define C11 thread_local attribute even on older gcc compiler
  * version */
@@ -446,16 +378,5 @@ do {                                                                    \
 #define noreturn __attribute__((noreturn))
 #endif
 #endif
-
-#define UID_INVALID ((uid_t) -1)
-#define GID_INVALID ((gid_t) -1)
-#define MODE_INVALID ((mode_t) -1)
-
-#define DEFINE_TRIVIAL_CLEANUP_FUNC(type, func)                 \
-        static inline void func##p(type *p) {                   \
-                if (*p)                                         \
-                        func(*p);                               \
-        }                                                       \
-        struct __useless_struct_to_allow_trailing_semicolon__
 
 #include "log.h"

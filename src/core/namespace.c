@@ -35,6 +35,7 @@
 #include "strv.h"
 #include "util.h"
 #include "path-util.h"
+#include "namespace.h"
 #include "missing.h"
 #include "execute.h"
 #include "loopback-setup.h"
@@ -42,8 +43,6 @@
 #include "dev-setup.h"
 #include "def.h"
 #include "label.h"
-#include "selinux-util.h"
-#include "namespace.h"
 
 typedef enum MountMode {
         /* This is ordered by priority! */
@@ -52,7 +51,6 @@ typedef enum MountMode {
         PRIVATE_TMP,
         PRIVATE_VAR_TMP,
         PRIVATE_DEV,
-        PRIVATE_BUS_ENDPOINT,
         READWRITE
 } MountMode;
 
@@ -126,7 +124,8 @@ static void drop_duplicates(BindMount *m, unsigned *n) {
                 if (previous && path_equal(f->path, previous->path))
                         continue;
 
-                *t = *f;
+                t->path = f->path;
+                t->mode = f->mode;
 
                 previous = t;
 
@@ -146,7 +145,7 @@ static int mount_dev(BindMount *m) {
                 "/dev/tty\0";
 
         char temporary_mount[] = "/tmp/namespace-dev-XXXXXX";
-        const char *d, *dev = NULL, *devpts = NULL, *devshm = NULL, *devhugepages = NULL, *devmqueue = NULL, *devlog = NULL, *devptmx = NULL;
+        const char *d, *dev = NULL, *devpts = NULL, *devshm = NULL, *devkdbus = NULL, *devhugepages = NULL, *devmqueue = NULL, *devlog = NULL, *devptmx = NULL;
         _cleanup_umask_ mode_t u;
         int r;
 
@@ -157,40 +156,44 @@ static int mount_dev(BindMount *m) {
         if (!mkdtemp(temporary_mount))
                 return -errno;
 
-        dev = strjoina(temporary_mount, "/dev");
-        (void)mkdir(dev, 0755);
+        dev = strappenda(temporary_mount, "/dev");
+        mkdir(dev, 0755);
         if (mount("tmpfs", dev, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=755") < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devpts = strjoina(temporary_mount, "/dev/pts");
-        (void)mkdir(devpts, 0755);
+        devpts = strappenda(temporary_mount, "/dev/pts");
+        mkdir(devpts, 0755);
         if (mount("/dev/pts", devpts, NULL, MS_BIND, NULL) < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devptmx = strjoina(temporary_mount, "/dev/ptmx");
+        devptmx = strappenda(temporary_mount, "/dev/ptmx");
         symlink("pts/ptmx", devptmx);
 
-        devshm = strjoina(temporary_mount, "/dev/shm");
-        (void)mkdir(devshm, 01777);
+        devshm = strappenda(temporary_mount, "/dev/shm");
+        mkdir(devshm, 01777);
         r = mount("/dev/shm", devshm, NULL, MS_BIND, NULL);
         if (r < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devmqueue = strjoina(temporary_mount, "/dev/mqueue");
-        (void)mkdir(devmqueue, 0755);
+        devmqueue = strappenda(temporary_mount, "/dev/mqueue");
+        mkdir(devmqueue, 0755);
         mount("/dev/mqueue", devmqueue, NULL, MS_BIND, NULL);
 
-        devhugepages = strjoina(temporary_mount, "/dev/hugepages");
-        (void)mkdir(devhugepages, 0755);
+        devkdbus = strappenda(temporary_mount, "/dev/kdbus");
+        mkdir(devkdbus, 0755);
+        mount("/dev/kdbus", devkdbus, NULL, MS_BIND, NULL);
+
+        devhugepages = strappenda(temporary_mount, "/dev/hugepages");
+        mkdir(devhugepages, 0755);
         mount("/dev/hugepages", devhugepages, NULL, MS_BIND, NULL);
 
-        devlog = strjoina(temporary_mount, "/dev/log");
+        devlog = strappenda(temporary_mount, "/dev/log");
         symlink("/run/systemd/journal/dev-log", devlog);
 
         NULSTR_FOREACH(d, devnodes) {
@@ -222,9 +225,9 @@ static int mount_dev(BindMount *m) {
                         goto fail;
                 }
 
-                mac_selinux_create_file_prepare(d, st.st_mode);
+                label_context_set(d, st.st_mode);
                 r = mknod(dn, st.st_mode, st.st_rdev);
-                mac_selinux_create_file_clear();
+                label_context_clear();
 
                 if (r < 0) {
                         r = -errno;
@@ -251,87 +254,20 @@ fail:
         if (devshm)
                 umount(devshm);
 
+        if (devkdbus)
+                umount(devkdbus);
+
         if (devhugepages)
                 umount(devhugepages);
 
         if (devmqueue)
                 umount(devmqueue);
 
-        umount(dev);
-        rmdir(dev);
-        rmdir(temporary_mount);
-
-        return r;
-}
-
-static int mount_kdbus(BindMount *m) {
-
-        char temporary_mount[] = "/tmp/kdbus-dev-XXXXXX";
-        _cleanup_free_ char *basepath = NULL;
-        _cleanup_umask_ mode_t u;
-        char *busnode = NULL, *root;
-        struct stat st;
-        int r;
-
-        assert(m);
-
-        u = umask(0000);
-
-        if (!mkdtemp(temporary_mount))
-                return log_error_errno(errno, "Failed create temp dir: %m");
-
-        root = strjoina(temporary_mount, "/kdbus");
-        (void)mkdir(root, 0755);
-        if (mount("tmpfs", root, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=777") < 0) {
-                r = -errno;
-                goto fail;
+        if (dev) {
+                umount(dev);
+                rmdir(dev);
         }
 
-        /* create a new /dev/null dev node copy so we have some fodder to
-         * bind-mount the custom endpoint over. */
-        if (stat("/dev/null", &st) < 0) {
-                log_error_errno(errno, "Failed to stat /dev/null: %m");
-                r = -errno;
-                goto fail;
-        }
-
-        busnode = strjoina(root, "/bus");
-        if (mknod(busnode, (st.st_mode & ~07777) | 0600, st.st_rdev) < 0) {
-                log_error_errno(errno, "mknod() for %s failed: %m", busnode);
-                r = -errno;
-                goto fail;
-        }
-
-        r = mount(m->path, busnode, "bind", MS_BIND, NULL);
-        if (r < 0) {
-                log_error_errno(errno, "bind mount of %s failed: %m", m->path);
-                r = -errno;
-                goto fail;
-        }
-
-        basepath = dirname_malloc(m->path);
-        if (!basepath) {
-                r = -ENOMEM;
-                goto fail;
-        }
-
-        if (mount(root, basepath, NULL, MS_MOVE, NULL) < 0) {
-                log_error_errno(errno, "bind mount of %s failed: %m", basepath);
-                r = -errno;
-                goto fail;
-        }
-
-        rmdir(temporary_mount);
-        return 0;
-
-fail:
-        if (busnode) {
-                umount(busnode);
-                unlink(busnode);
-        }
-
-        umount(root);
-        rmdir(root);
         rmdir(temporary_mount);
 
         return r;
@@ -376,9 +312,6 @@ static int apply_mount(
         case PRIVATE_DEV:
                 return mount_dev(m);
 
-        case PRIVATE_BUS_ENDPOINT:
-                return mount_kdbus(m);
-
         default:
                 assert_not_reached("Unknown mode");
         }
@@ -416,13 +349,12 @@ int setup_namespace(
                 char** read_write_dirs,
                 char** read_only_dirs,
                 char** inaccessible_dirs,
-                const char* tmp_dir,
-                const char* var_tmp_dir,
-                const char* bus_endpoint_path,
+                char* tmp_dir,
+                char* var_tmp_dir,
                 bool private_dev,
                 ProtectHome protect_home,
                 ProtectSystem protect_system,
-                unsigned long mount_flags) {
+                unsigned mount_flags) {
 
         BindMount *m, *mounts = NULL;
         unsigned n;
@@ -434,7 +366,7 @@ int setup_namespace(
         if (unshare(CLONE_NEWNS) < 0)
                 return -errno;
 
-        n = !!tmp_dir + !!var_tmp_dir + !!bus_endpoint_path +
+        n = !!tmp_dir + !!var_tmp_dir +
                 strv_length(read_write_dirs) +
                 strv_length(read_only_dirs) +
                 strv_length(inaccessible_dirs) +
@@ -472,12 +404,6 @@ int setup_namespace(
                 if (private_dev) {
                         m->path = "/dev";
                         m->mode = PRIVATE_DEV;
-                        m++;
-                }
-
-                if (bus_endpoint_path) {
-                        m->path = bus_endpoint_path;
-                        m->mode = PRIVATE_BUS_ENDPOINT;
                         m++;
                 }
 
@@ -566,7 +492,7 @@ static int setup_one_tmp_dir(const char *id, const char *prefix, char **path) {
         RUN_WITH_UMASK(0000) {
                 char *y;
 
-                y = strjoina(x, "/tmp");
+                y = strappenda(x, "/tmp");
 
                 if (mkdir(y, 0777 | S_ISVTX) < 0)
                         return -errno;
@@ -594,7 +520,7 @@ int setup_tmp_dirs(const char *id, char **tmp_dir, char **var_tmp_dir) {
         if (r < 0) {
                 char *t;
 
-                t = strjoina(a, "/tmp");
+                t = strappenda(a, "/tmp");
                 rmdir(t);
                 rmdir(a);
 

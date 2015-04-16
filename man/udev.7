@@ -1,5 +1,5 @@
 '\" t
-.TH "UDEV" "7" "" "systemd 219" "udev"
+.TH "UDEV" "7" "" "systemd 215" "udev"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -74,11 +74,6 @@ Assign a value to a key\&. Keys that represent a list are reset and only this si
 "+="
 .RS 4
 Add the value to a key that holds a list of entries\&.
-.RE
-.PP
-"\-="
-.RS 4
-Remove the value from a key that holds a list of entries\&.
 .RE
 .PP
 ":="
@@ -172,7 +167,7 @@ Test the existence of a file\&. An octal mode mask can be specified if needed\&.
 .PP
 \fIPROGRAM\fR
 .RS 4
-Execute a program to determine whether there is a match; the key is true if the program returns successfully\&. The device properties are made available to the executed program in the environment\&. The program\*(Aqs standard output is available in the
+Execute a program to determine whether there is a match; the key is true if the program returns successfully\&. The device properties are made available to the executed program in the environment\&. The program\*(Aqs standard ouput is available in the
 \fIRESULT\fR
 key\&.
 .sp
@@ -189,7 +184,7 @@ call\&. This key can be used in the same or in any later rule after a
 call\&.
 .RE
 .PP
-Most of the fields support shell glob pattern matching and alternate patterns\&. The following special characters are supported:
+Most of the fields support shell glob pattern matching\&. The following pattern characters are supported:
 .PP
 "*"
 .RS 4
@@ -216,16 +211,6 @@ could be used\&. If the first character following the
 "["
 is a
 "!", any characters not enclosed are matched\&.
-.RE
-.PP
-"|"
-.RS 4
-Separates alternative patterns\&. For example, the pattern string
-"abc|x*"
-would match either
-"abc"
-or
-"x*"\&.
 .RE
 .PP
 The following keys can get values assigned:
@@ -382,6 +367,11 @@ Rule and device options:
 Specify the priority of the created symlinks\&. Devices with higher priorities overwrite existing symlinks of other devices\&. The default is 0\&.
 .RE
 .PP
+\fBevent_timeout=\fR
+.RS 4
+Number of seconds an event waits for operations to finish before giving up and terminating itself\&.
+.RE
+.PP
 \fBstring_escape=\fR\fB\fInone|replace\fR\fR
 .RS 4
 Usually control and other possibly unsafe characters are replaced in strings used for device naming\&. The mode of replacement can be specified with this option\&.
@@ -533,8 +523,36 @@ The
 "$"
 character itself\&.
 .RE
+.SH "HARDWARE DATABASE FILES"
+.PP
+The hwdb files are read from the files located in the system hwdb directory
+/usr/lib/udev/hwdb\&.d, the volatile runtime directory
+/run/udev/hwdb\&.d
+and the local administration directory
+/etc/udev/hwdb\&.d\&. All hwdb files are collectively sorted and processed in lexical order, regardless of the directories in which they live\&. However, files with identical filenames replace each other\&. Files in
+/etc
+have the highest priority, files in
+/run
+take precedence over files with the same name in
+/usr/lib\&. This can be used to override a system\-supplied hwdb file with a local file if needed; a symlink in
+/etc
+with the same name as a hwdb file in
+/usr/lib, pointing to
+/dev/null, disables the hwdb file entirely\&. hwdb files must have the extension
+\&.hwdb; other extensions are ignored\&.
+.PP
+The hwdb file contains data records consisting of matches and associated key\-value pairs\&. Every record in the hwdb starts with one or more match string, specifying a shell glob to compare the database lookup string against\&. Multiple match lines are specified in additional consecutive lines\&. Every match line is compared indivdually, they are combined by OR\&. Every match line must start at the first character of the line\&.
+.PP
+The match lines are followed by one or more key\-value pair lines, which are recognized by a leading space character\&. The key name and value are separated by
+"="\&. An empty line signifies the end of a record\&. Lines beginning with
+"#"
+are ignored\&.
+.PP
+The content of all hwdb files is read by
+\fBudevadm\fR(8)
+and compiled to a binary database located at
+/etc/udev/hwdb\&.bin\&. During runtime only the binary database is used\&.
 .SH "SEE ALSO"
 .PP
 \fBsystemd-udevd.service\fR(8),
-\fBudevadm\fR(8),
-\fBsystemd.link\fR(5)
+\fBudevadm\fR(8)\fBsystemd.link\fR(5)

@@ -25,10 +25,9 @@
 #include "dbus-cgroup.h"
 #include "dbus-kill.h"
 #include "dbus-scope.h"
-#include "dbus.h"
 #include "bus-util.h"
 #include "bus-internal.h"
-#include "bus-common-errors.h"
+#include "bus-errors.h"
 
 static int bus_scope_abandon(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Scope *s = userdata;
@@ -37,12 +36,6 @@ static int bus_scope_abandon(sd_bus *bus, sd_bus_message *message, void *userdat
         assert(bus);
         assert(message);
         assert(s);
-
-        r = bus_verify_manage_unit_async(UNIT(s)->manager, message, error);
-        if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
         r = scope_abandon(s);
         if (sd_bus_error_is_set(error))

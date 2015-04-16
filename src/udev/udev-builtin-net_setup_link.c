@@ -27,7 +27,7 @@ static link_config_ctx *ctx = NULL;
 
 static int builtin_net_setup_link(struct udev_device *dev, int argc, char **argv, bool test) {
         _cleanup_free_ char *driver = NULL;
-        const char *name = NULL;
+        const char *name;
         link_config *link;
         int r;
 
@@ -46,18 +46,16 @@ static int builtin_net_setup_link(struct udev_device *dev, int argc, char **argv
                         log_debug("No matching link configuration found.");
                         return EXIT_SUCCESS;
                 } else {
-                        log_error_errno(r, "Could not get link config: %m");
+                        log_error("Could not get link config: %s", strerror(-r));
                         return EXIT_FAILURE;
                 }
         }
 
         r = link_config_apply(ctx, link, dev, &name);
         if (r < 0) {
-                log_error_errno(r, "Could not apply link config to %s: %m", udev_device_get_sysname(dev));
+                log_error("Could not apply link config to %s: %s", udev_device_get_sysname(dev), strerror(-r));
                 return EXIT_FAILURE;
         }
-
-        udev_builtin_add_property(dev, test, "ID_NET_LINK_FILE", link->filename);
 
         if (name)
                 udev_builtin_add_property(dev, test, "ID_NET_NAME", name);
@@ -103,6 +101,6 @@ const struct udev_builtin udev_builtin_net_setup_link = {
         .init = builtin_net_setup_link_init,
         .exit = builtin_net_setup_link_exit,
         .validate = builtin_net_setup_link_validate,
-        .help = "Configure network link",
+        .help = "configure network link",
         .run_once = false,
 };

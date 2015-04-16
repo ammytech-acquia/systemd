@@ -39,7 +39,6 @@
 #include "svg.h"
 #include "bootchart.h"
 #include "list.h"
-#include "utf8.h"
 
 #define time_to_graph(t) ((t) * arg_scale_x)
 #define ps_to_graph(n) ((n) * arg_scale_y)
@@ -163,7 +162,7 @@ static void svg_title(const char *build) {
         char *c;
         FILE *f;
         time_t t;
-        int fd, r;
+        int fd;
         struct utsname uts;
 
         /* grab /proc/cmdline */
@@ -197,8 +196,7 @@ static void svg_title(const char *build) {
 
         /* date */
         t = time(NULL);
-        r = strftime(date, sizeof(date), "%a, %d %b %Y %H:%M:%S %z", localtime(&t));
-        assert_se(r > 0);
+        strftime(date, sizeof(date), "%a, %d %b %Y %H:%M:%S %z", localtime(&t));
 
         /* CPU type */
         fd = openat(procfd, "cpuinfo", O_RDONLY);
@@ -749,14 +747,11 @@ static void svg_io_bo_bar(void) {
         }
 }
 
-static void svg_cpu_bar(int cpu_num) {
+static void svg_cpu_bar(void) {
 
         svg("<!-- CPU utilization graph -->\n");
 
-        if (cpu_num < 0)
-                svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU[overall] utilization</text>\n");
-        else
-                svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU[%d] utilization</text>\n", cpu_num);
+        svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU utilization</text>\n");
         /* surrounding box */
         svg_graph_box(5);
 
@@ -769,16 +764,12 @@ static void svg_cpu_bar(int cpu_num) {
 
                 ptrt = trt = 0.0;
 
-                if (cpu_num < 0)
-                        for (c = 0; c < cpus; c++)
-                                trt += sampledata->runtime[c] - prev_sampledata->runtime[c];
-                else
-                        trt = sampledata->runtime[cpu_num] - prev_sampledata->runtime[cpu_num];
+                for (c = 0; c < cpus; c++)
+                        trt += sampledata->runtime[c] - prev_sampledata->runtime[c];
 
                 trt = trt / 1000000000.0;
 
-                if (cpu_num < 0)
-                        trt = trt / (double)cpus;
+                trt = trt / (double)cpus;
 
                 if (trt > 0.0)
                         ptrt = trt / (sampledata->sampletime - prev_sampledata->sampletime);
@@ -797,14 +788,11 @@ static void svg_cpu_bar(int cpu_num) {
         }
 }
 
-static void svg_wait_bar(int cpu_num) {
+static void svg_wait_bar(void) {
 
         svg("<!-- Wait time aggregation box -->\n");
 
-        if (cpu_num < 0)
-                svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU[overall] wait</text>\n");
-        else
-                svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU[%d] wait</text>\n", cpu_num);
+        svg("<text class=\"t2\" x=\"5\" y=\"-15\">CPU wait</text>\n");
 
         /* surrounding box */
         svg_graph_box(5);
@@ -818,16 +806,12 @@ static void svg_wait_bar(int cpu_num) {
 
                 ptwt = twt = 0.0;
 
-                if (cpu_num < 0)
-                        for (c = 0; c < cpus; c++)
-                                twt += sampledata->waittime[c] - prev_sampledata->waittime[c];
-                else
-                        twt = sampledata->waittime[cpu_num] - prev_sampledata->waittime[cpu_num];
+                for (c = 0; c < cpus; c++)
+                        twt += sampledata->waittime[c] - prev_sampledata->waittime[c];
 
                 twt = twt / 1000000000.0;
 
-                if (cpu_num < 0)
-                        twt = twt / (double)cpus;
+                twt = twt / (double)cpus;
 
                 if (twt > 0.0)
                         ptwt = twt / (sampledata->sampletime - prev_sampledata->sampletime);
@@ -845,6 +829,7 @@ static void svg_wait_bar(int cpu_num) {
                 prev_sampledata = sampledata;
         }
 }
+
 
 static void svg_entropy_bar(void) {
 
@@ -896,21 +881,21 @@ static struct ps_struct *get_next_ps(struct ps_struct *ps) {
         return NULL;
 }
 
-static bool ps_filter(struct ps_struct *ps) {
+static int ps_filter(struct ps_struct *ps) {
         if (!arg_filter)
-                return false;
+                return 0;
 
         /* can't draw data when there is only 1 sample (need start + stop) */
         if (ps->first == ps->last)
-                return true;
+                return -1;
 
         /* don't filter kthreadd */
         if (ps->pid == 2)
-                return false;
+                return 0;
 
         /* drop stuff that doesn't use any real CPU time */
         if (ps->total <= 0.001)
-                return true;
+                return -1;
 
         return 0;
 }
@@ -1020,15 +1005,12 @@ static void svg_ps_bars(void) {
         /* pass 2 - ps boxes */
         ps = ps_first;
         while ((ps = get_next_ps(ps))) {
-                _cleanup_free_ char *enc_name = NULL, *escaped = NULL;
+                _cleanup_free_ char *enc_name = NULL;
                 double endtime;
                 double starttime;
                 int t;
 
-                if (!utf8_is_printable(ps->name, strlen(ps->name)))
-                        escaped = utf8_escape_non_printable(ps->name);
-
-                enc_name = xml_comment_encode(escaped ? escaped : ps->name);
+                enc_name = xml_comment_encode(ps->name);
                 if (!enc_name)
                         continue;
 
@@ -1117,7 +1099,7 @@ static void svg_ps_bars(void) {
                 svg("  <text x=\"%.03f\" y=\"%.03f\"><![CDATA[%s]]> [%i]<tspan class=\"run\">%.03fs</tspan> %s</text>\n",
                     time_to_graph(w - graph_start) + 5.0,
                     ps_to_graph(j) + 14.0,
-                    escaped ? escaped : ps->name,
+                    ps->name,
                     ps->pid,
                     (ps->last->runtime - ps->first->runtime) / 1000000000.0,
                     arg_show_cgroup ? ps->cgroup : "");
@@ -1269,8 +1251,6 @@ static void svg_top_ten_pss(void) {
 
 void svg_do(const char *build) {
         struct ps_struct *ps;
-        double offset = 7;
-        int c;
 
         memzero(&str, sizeof(str));
 
@@ -1299,31 +1279,25 @@ void svg_do(const char *build) {
         svg_io_bi_bar();
         svg("</g>\n\n");
 
-        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset));
+        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 7.0));
         svg_io_bo_bar();
         svg("</g>\n\n");
 
-        for (c = -1; c < (arg_percpu ? cpus : 0); c++) {
-                offset += 7;
-                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset));
-                svg_cpu_bar(c);
-                svg("</g>\n\n");
+        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 14.0));
+        svg_cpu_bar();
+        svg("</g>\n\n");
 
-                offset += 7;
-                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset));
-                svg_wait_bar(c);
-                svg("</g>\n\n");
-        }
+        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 21.0));
+        svg_wait_bar();
+        svg("</g>\n\n");
 
         if (kcount) {
-                offset += 7;
-                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset));
+                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 28.0));
                 svg_do_initcall(0);
                 svg("</g>\n\n");
         }
 
-        offset += 7;
-        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset) + ksize);
+        svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 28.0) + ksize);
         svg_ps_bars();
         svg("</g>\n\n");
 
@@ -1336,13 +1310,13 @@ void svg_do(const char *build) {
         svg("</g>\n\n");
 
         if (arg_entropy) {
-                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset) + ksize + psize);
+                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 28.0) + ksize + psize);
                 svg_entropy_bar();
                 svg("</g>\n\n");
         }
 
         if (arg_pss) {
-                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * offset) + ksize + psize + esize);
+                svg("<g transform=\"translate(10,%.03f)\">\n", 400.0 + (arg_scale_y * 28.0) + ksize + psize + esize);
                 svg_pss_graph();
                 svg("</g>\n\n");
 

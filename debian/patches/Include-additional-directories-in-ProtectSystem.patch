@@ -7,10 +7,10 @@ Subject: Include additional directories in ProtectSystem
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/namespace.c b/src/core/namespace.c
-index d4f1c86..86223d8 100644
+index 5466b7b..88f6448 100644
 --- a/src/core/namespace.c
 +++ b/src/core/namespace.c
-@@ -436,7 +436,7 @@ int setup_namespace(
+@@ -372,7 +372,7 @@ int setup_namespace(
                  strv_length(inaccessible_dirs) +
                  private_dev +
                  (protect_home != PROTECT_HOME_NO ? 3 : 0) +
@@ -19,7 +19,7 @@ index d4f1c86..86223d8 100644
                  (protect_system == PROTECT_SYSTEM_FULL ? 1 : 0);
  
          if (n > 0) {
-@@ -484,7 +484,7 @@ int setup_namespace(
+@@ -414,7 +414,7 @@ int setup_namespace(
                  }
  
                  if (protect_system != PROTECT_SYSTEM_NO) {

@@ -113,7 +113,7 @@ static int slice_verify(Slice *s) {
                         a = (char*) SPECIAL_ROOT_SLICE;
 
                 if (!unit_has_name(UNIT_DEREF(UNIT(s)->slice), a)) {
-                        log_unit_error(UNIT(s)->id,
+                        log_error_unit(UNIT(s)->id,
                                        "%s located outside its parent slice. Refusing.", UNIT(s)->id);
                         return -EINVAL;
                 }
@@ -187,7 +187,7 @@ static int slice_start(Unit *u) {
         unit_realize_cgroup(u);
 
         slice_set_state(t, SLICE_ACTIVE);
-        return 1;
+        return 0;
 }
 
 static int slice_stop(Unit *u) {
@@ -200,7 +200,7 @@ static int slice_stop(Unit *u) {
          * unit_notify() will do that for us anyway. */
 
         slice_set_state(t, SLICE_DEAD);
-        return 1;
+        return 0;
 }
 
 static int slice_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {

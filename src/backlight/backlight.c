@@ -211,7 +211,7 @@ static unsigned get_max_brightness(struct udev_device *device) {
 
         r = safe_atou(max_brightness_str, &max_brightness);
         if (r < 0) {
-                log_warning_errno(r, "Failed to parse 'max_brightness' \"%s\": %m", max_brightness_str);
+                log_warning("Failed to parse 'max_brightness' \"%s\": %s", max_brightness_str, strerror(-r));
                 return 0;
         }
 
@@ -235,7 +235,7 @@ static void clamp_brightness(struct udev_device *device, char **value, unsigned 
 
         r = safe_atou(*value, &brightness);
         if (r < 0) {
-                log_warning_errno(r, "Failed to parse brightness \"%s\": %m", *value);
+                log_warning("Failed to parse brightness \"%s\": %s", *value, strerror(-r));
                 return;
         }
 
@@ -285,7 +285,8 @@ int main(int argc, char *argv[]) {
 
         r = mkdir_p("/var/lib/systemd/backlight", 0755);
         if (r < 0) {
-                log_error_errno(r, "Failed to create backlight directory /var/lib/systemd/backlight: %m");
+                log_error("Failed to create backlight directory /var/lib/systemd/backlight: %s",
+                          strerror(-r));
                 return EXIT_FAILURE;
         }
 
@@ -318,7 +319,7 @@ int main(int argc, char *argv[]) {
         device = udev_device_new_from_subsystem_sysname(udev, ss, sysname);
         if (!device) {
                 if (errno != 0)
-                        log_error_errno(errno, "Failed to get backlight or LED device '%s:%s': %m", ss, sysname);
+                        log_error("Failed to get backlight or LED device '%s:%s': %m", ss, sysname);
                 else
                         log_oom();
 
@@ -371,12 +372,8 @@ int main(int argc, char *argv[]) {
          * device probing should be complete), so that the validity
          * check at boot time doesn't have to be reliable. */
 
-        if (streq(argv[1], "load")) {
+        if (streq(argv[1], "load") && shall_restore_state()) {
                 _cleanup_free_ char *value = NULL;
-                const char *clamp;
-
-                if (!shall_restore_state())
-                        return EXIT_SUCCESS;
 
                 if (!validate_device(udev, device))
                         return EXIT_SUCCESS;
@@ -387,17 +384,16 @@ int main(int argc, char *argv[]) {
                         if (r == -ENOENT)
                                 return EXIT_SUCCESS;
 
-                        log_error_errno(r, "Failed to read %s: %m", saved);
+                        log_error("Failed to read %s: %s", saved, strerror(-r));
                         return EXIT_FAILURE;
                 }
 
-                clamp = udev_device_get_property_value(device, "ID_BACKLIGHT_CLAMP");
-                if (!clamp || parse_boolean(clamp) != 0) /* default to clamping */
-                        clamp_brightness(device, &value, max_brightness);
+                clamp_brightness(device, &value, max_brightness);
 
                 r = udev_device_set_sysattr_value(device, "brightness", value);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to write system 'brightness' attribute: %m");
+                        log_error("Failed to write system 'brightness' attribute: %s",
+                                  strerror(-r));
                         return EXIT_FAILURE;
                 }
 
@@ -417,7 +413,7 @@ int main(int argc, char *argv[]) {
 
                 r = write_string_file(saved, value);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to write %s: %m", saved);
+                        log_error("Failed to write %s: %s", saved, strerror(-r));
                         return EXIT_FAILURE;
                 }
 

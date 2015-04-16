@@ -48,7 +48,6 @@ static void bloom_add_data(
         uint8_t h[8];
         uint64_t m;
         unsigned w, i, c = 0;
-        unsigned hash_index;
 
         assert(size > 0);
         assert(k > 0);
@@ -66,13 +65,13 @@ static void bloom_add_data(
          * hash value for each 128 bits of hash key. */
         assert(k * w <= ELEMENTSOF(hash_keys) * 8);
 
-        for (i = 0, hash_index = 0; i < k; i++) {
+        for (i = 0; i < k; i++) {
                 uint64_t p = 0;
                 unsigned d;
 
                 for (d = 0; d < w; d++) {
                         if (c <= 0) {
-                                siphash24(h, data, n, hash_keys[hash_index++].bytes);
+                                siphash24(h, data, n, hash_keys[i++].bytes);
                                 c += 8;
                         }
 

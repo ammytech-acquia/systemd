@@ -22,20 +22,19 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "systemd/sd-journal.h"
+#include <systemd/sd-journal.h>
 
 #include "journal-file.h"
 #include "journal-internal.h"
 #include "util.h"
 #include "log.h"
-#include "macro.h"
 
 #define N_ENTRIES 200
 
 static void verify_contents(sd_journal *j, unsigned skip) {
         unsigned i;
 
-        assert_se(j);
+        assert(j);
 
         i = 0;
         SD_JOURNAL_FOREACH(j) {

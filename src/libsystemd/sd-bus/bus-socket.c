@@ -23,7 +23,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/poll.h>
 #include <byteswap.h>
 
 #include "util.h"
@@ -359,7 +359,8 @@ static int bus_socket_auth_write_ok(sd_bus *b) {
 
         assert(b);
 
-        xsprintf(t, "OK " SD_ID128_FORMAT_STR "\r\n", SD_ID128_FORMAT_VAL(b->server_id));
+        snprintf(t, sizeof(t), "OK " SD_ID128_FORMAT_STR "\r\n", SD_ID128_FORMAT_VAL(b->server_id));
+        char_array_0(t);
 
         return bus_socket_auth_write(b, t);
 }
@@ -609,10 +610,10 @@ void bus_socket_setup(sd_bus *b) {
         /* Enable SO_PASSCRED + SO_PASSEC. We try this on any
          * socket, just in case. */
         enable = !b->bus_client;
-        (void)setsockopt(b->input_fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable));
+        setsockopt(b->input_fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable));
 
         enable = !b->bus_client && (b->attach_flags & KDBUS_ATTACH_SECLABEL);
-        (void)setsockopt(b->input_fd, SOL_SOCKET, SO_PASSSEC, &enable, sizeof(enable));
+        setsockopt(b->input_fd, SOL_SOCKET, SO_PASSSEC, &enable, sizeof(enable));
 
         /* Increase the buffers to 8 MB */
         fd_inc_rcvbuf(b->input_fd, SNDBUF_SIZE);
@@ -643,11 +644,12 @@ static int bus_socket_start_auth_client(sd_bus *b) {
                 l = 9;
                 b->auth_buffer = hexmem("anonymous", l);
         } else {
-                char text[DECIMAL_STR_MAX(uid_t) + 1];
+                char text[20 + 1]; /* enough space for a 64bit integer plus NUL */
 
                 auth_prefix = "\0AUTH EXTERNAL ";
 
-                xsprintf(text, UID_FMT, geteuid());
+                snprintf(text, sizeof(text), UID_FMT, geteuid());
+                char_array_0(text);
 
                 l = strlen(text);
                 b->auth_buffer = hexmem(text, l);

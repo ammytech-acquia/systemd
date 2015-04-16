@@ -9,7 +9,7 @@ Closes: #726466
  1 file changed, 6 insertions(+)
 
 diff --git a/src/login/logind-core.c b/src/login/logind-core.c
-index a6ff5ad..d4a0107 100644
+index 053d2ed..695ca03 100644
 --- a/src/login/logind-core.c
 +++ b/src/login/logind-core.c
 @@ -34,6 +34,7 @@

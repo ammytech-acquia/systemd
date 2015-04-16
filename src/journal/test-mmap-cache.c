@@ -38,37 +38,37 @@ int main(int argc, char *argv[]) {
         assert_se(m = mmap_cache_new());
 
         x = mkostemp_safe(px, O_RDWR|O_CLOEXEC);
-        assert_se(x >= 0);
+        assert(x >= 0);
         unlink(px);
 
         y = mkostemp_safe(py, O_RDWR|O_CLOEXEC);
-        assert_se(y >= 0);
+        assert(y >= 0);
         unlink(py);
 
         z = mkostemp_safe(pz, O_RDWR|O_CLOEXEC);
-        assert_se(z >= 0);
+        assert(z >= 0);
         unlink(pz);
 
         r = mmap_cache_get(m, x, PROT_READ, 0, false, 1, 2, NULL, &p);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         r = mmap_cache_get(m, x, PROT_READ, 0, false, 2, 2, NULL, &q);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
-        assert_se((uint8_t*) p + 1 == (uint8_t*) q);
+        assert((uint8_t*) p + 1 == (uint8_t*) q);
 
         r = mmap_cache_get(m, x, PROT_READ, 1, false, 3, 2, NULL, &q);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
-        assert_se((uint8_t*) p + 2 == (uint8_t*) q);
+        assert((uint8_t*) p + 2 == (uint8_t*) q);
 
         r = mmap_cache_get(m, x, PROT_READ, 0, false, 16ULL*1024ULL*1024ULL, 2, NULL, &p);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         r = mmap_cache_get(m, x, PROT_READ, 1, false, 16ULL*1024ULL*1024ULL+1, 2, NULL, &q);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
-        assert_se((uint8_t*) p + 1 == (uint8_t*) q);
+        assert((uint8_t*) p + 1 == (uint8_t*) q);
 
         mmap_cache_unref(m);
 

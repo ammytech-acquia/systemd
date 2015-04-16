@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <termios.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/poll.h>
 #include <sys/inotify.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -52,7 +52,6 @@ static void backspace_chars(int ttyfd, size_t p) {
 int ask_password_tty(
                 const char *message,
                 usec_t until,
-                bool echo,
                 const char *flag_file,
                 char **_passphrase) {
 
@@ -219,7 +218,7 @@ int ask_password_tty(
                         passphrase[p++] = c;
 
                         if (!silent_mode && ttyfd >= 0)
-                                loop_write(ttyfd, echo ? &c : "*", 1, false);
+                                loop_write(ttyfd, "*", 1, false);
 
                         dirty = true;
                 }
@@ -258,8 +257,10 @@ static int create_socket(char **name) {
         assert(name);
 
         fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-        if (fd < 0)
-                return log_error_errno(errno, "socket() failed: %m");
+        if (fd < 0) {
+                log_error("socket() failed: %m");
+                return -errno;
+        }
 
         snprintf(sa.un.sun_path, sizeof(sa.un.sun_path)-1, "/run/systemd/ask-password/sck.%" PRIx64, random_u64());
 
@@ -269,13 +270,13 @@ static int create_socket(char **name) {
 
         if (r < 0) {
                 r = -errno;
-                log_error_errno(errno, "bind(%s) failed: %m", sa.un.sun_path);
+                log_error("bind() failed: %m");
                 goto fail;
         }
 
         if (setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one)) < 0) {
                 r = -errno;
-                log_error_errno(errno, "SO_PASSCRED failed: %m");
+                log_error("SO_PASSCRED failed: %m");
                 goto fail;
         }
 
@@ -299,7 +300,6 @@ int ask_password_agent(
                 const char *icon,
                 const char *id,
                 usec_t until,
-                bool echo,
                 bool accept_cached,
                 char ***_passphrases) {
 
@@ -328,7 +328,7 @@ int ask_password_agent(
 
         fd = mkostemp_safe(temp, O_WRONLY|O_CLOEXEC);
         if (fd < 0) {
-                log_error_errno(errno, "Failed to create password file: %m");
+                log_error("Failed to create password file: %m");
                 r = -errno;
                 goto finish;
         }
@@ -337,7 +337,7 @@ int ask_password_agent(
 
         f = fdopen(fd, "w");
         if (!f) {
-                log_error_errno(errno, "Failed to allocate FILE: %m");
+                log_error("Failed to allocate FILE: %m");
                 r = -errno;
                 goto finish;
         }
@@ -346,7 +346,7 @@ int ask_password_agent(
 
         signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
         if (signal_fd < 0) {
-                log_error_errno(errno, "signalfd(): %m");
+                log_error("signalfd(): %m");
                 r = -errno;
                 goto finish;
         }
@@ -362,12 +362,10 @@ int ask_password_agent(
                 "PID="PID_FMT"\n"
                 "Socket=%s\n"
                 "AcceptCached=%i\n"
-                "Echo=%i\n"
                 "NotAfter="USEC_FMT"\n",
                 getpid(),
                 socket_name,
                 accept_cached ? 1 : 0,
-                echo ? 1 : 0,
                 until);
 
         if (message)
@@ -382,7 +380,7 @@ int ask_password_agent(
         fflush(f);
 
         if (ferror(f)) {
-                log_error_errno(errno, "Failed to write query file: %m");
+                log_error("Failed to write query file: %m");
                 r = -errno;
                 goto finish;
         }
@@ -394,7 +392,7 @@ int ask_password_agent(
         final[sizeof(final)-9] = 'k';
 
         if (rename(temp, final) < 0) {
-                log_error_errno(errno, "Failed to rename query file: %m");
+                log_error("Failed to rename query file: %m");
                 r = -errno;
                 goto finish;
         }
@@ -431,7 +429,7 @@ int ask_password_agent(
                         if (errno == EINTR)
                                 continue;
 
-                        log_error_errno(errno, "poll() failed: %m");
+                        log_error("poll() failed: %m");
                         r = -errno;
                         goto finish;
                 }
@@ -470,7 +468,7 @@ int ask_password_agent(
                             errno == EINTR)
                                 continue;
 
-                        log_error_errno(errno, "recvmsg() failed: %m");
+                        log_error("recvmsg() failed: %m");
                         r = -errno;
                         goto finish;
                 }
@@ -552,7 +550,7 @@ int ask_password_auto(const char *message, const char *icon, const char *id,
                 int r;
                 char *s = NULL, **l = NULL;
 
-                r = ask_password_tty(message, until, false, NULL, &s);
+                r = ask_password_tty(message, until, NULL, &s);
                 if (r < 0)
                         return r;
 
@@ -563,5 +561,5 @@ int ask_password_auto(const char *message, const char *icon, const char *id,
                 *_passphrases = l;
                 return r;
         } else
-                return ask_password_agent(message, icon, id, until, false, accept_cached, _passphrases);
+                return ask_password_agent(message, icon, id, until, accept_cached, _passphrases);
 }

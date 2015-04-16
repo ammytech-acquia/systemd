@@ -40,7 +40,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/prctl.h>
-#include <poll.h>
+#include <sys/poll.h>
 
 #include "util.h"
 #include "list.h"
@@ -85,9 +85,9 @@ struct sd_resolve {
         pthread_t workers[WORKERS_MAX];
         unsigned n_valid_workers;
 
-        unsigned current_id;
+        unsigned current_id, current_index;
         sd_resolve_query* query_array[QUERIES_MAX];
-        unsigned n_queries, n_done, n_outstanding;
+        unsigned n_queries, n_done;
 
         sd_event_source *event_source;
         sd_event *event;
@@ -526,7 +526,7 @@ static int start_threads(sd_resolve *resolve, unsigned extra) {
         unsigned n;
         int r;
 
-        n = resolve->n_outstanding + extra;
+        n = resolve->n_queries + extra - resolve->n_done;
         n = CLAMP(n, WORKERS_MIN, WORKERS_MAX);
 
         while (resolve->n_valid_workers < n) {
@@ -772,14 +772,12 @@ static int complete_query(sd_resolve *resolve, sd_resolve_query *q) {
                 assert_not_reached("Cannot complete unknown query type");
         }
 
-        resolve->current = NULL;
+        resolve->current = sd_resolve_query_unref(q);
 
         if (q->floating) {
                 resolve_query_disconnect(q);
                 sd_resolve_query_unref(q);
         }
-
-        sd_resolve_query_unref(q);
 
         return r;
 }
@@ -853,9 +851,6 @@ static int handle_response(sd_resolve *resolve, const Packet *packet, size_t len
                 resolve->dead = true;
                 return 0;
         }
-
-        assert(resolve->n_outstanding > 0);
-        resolve->n_outstanding--;
 
         q = lookup_query(resolve, resp->id);
         if (!q)
@@ -1027,17 +1022,21 @@ static int alloc_query(sd_resolve *resolve, bool floating, sd_resolve_query **_q
         if (r < 0)
                 return r;
 
-        while (resolve->query_array[resolve->current_id % QUERIES_MAX])
+        while (resolve->query_array[resolve->current_index]) {
+                resolve->current_index++;
                 resolve->current_id++;
 
-        q = resolve->query_array[resolve->current_id % QUERIES_MAX] = new0(sd_resolve_query, 1);
+                resolve->current_index %= QUERIES_MAX;
+        }
+
+        q = resolve->query_array[resolve->current_index] = new0(sd_resolve_query, 1);
         if (!q)
                 return -ENOMEM;
 
         q->n_ref = 1;
         q->resolve = resolve;
         q->floating = floating;
-        q->id = resolve->current_id++;
+        q->id = resolve->current_id;
 
         if (!floating)
                 sd_resolve_ref(resolve);
@@ -1101,8 +1100,6 @@ _public_ int sd_resolve_getaddrinfo(
                 sd_resolve_query_unref(q);
                 return -errno;
         }
-
-        resolve->n_outstanding++;
 
         if (_q)
                 *_q = q;
@@ -1172,8 +1169,6 @@ _public_ int sd_resolve_getnameinfo(
                 return -errno;
         }
 
-        resolve->n_outstanding++;
-
         if (_q)
                 *_q = q;
 
@@ -1237,8 +1232,6 @@ static int resolve_res(
                 sd_resolve_query_unref(q);
                 return -errno;
         }
-
-        resolve->n_outstanding++;
 
         if (_q)
                 *_q = q;

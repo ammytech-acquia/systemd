@@ -54,16 +54,15 @@ static int disable_utf8(int fd) {
         if (ioctl(fd, KDSKBMODE, K_XLATE) < 0)
                 r = -errno;
 
-        k = loop_write(fd, "\033%@", 3, false);
-        if (k < 0)
-                r = k;
+        if (loop_write(fd, "\033%@", 3, false) < 0)
+                r = -errno;
 
         k = write_string_file("/sys/module/vt/parameters/default_utf8", "0");
         if (k < 0)
                 r = k;
 
         if (r < 0)
-                log_warning_errno(r, "Failed to disable UTF-8: %m");
+                log_warning("Failed to disable UTF-8: %s", strerror(-r));
 
         return r;
 }
@@ -87,16 +86,15 @@ static int enable_utf8(int fd) {
                         r = -errno;
         }
 
-        k = loop_write(fd, "\033%G", 3, false);
-        if (k < 0)
-                r = k;
+        if (loop_write(fd, "\033%G", 3, false) < 0)
+                r = -errno;
 
         k = write_string_file("/sys/module/vt/parameters/default_utf8", "1");
         if (k < 0)
                 r = k;
 
         if (r < 0)
-                log_warning_errno(r, "Failed to enable UTF-8: %m");
+                log_warning("Failed to enable UTF-8: %s", strerror(-r));
 
         return r;
 }
@@ -124,9 +122,10 @@ static int keymap_load(const char *vc, const char *map, const char *map_toggle, 
         args[i++] = NULL;
 
         pid = fork();
-        if (pid < 0)
-                return log_error_errno(errno, "Failed to fork: %m");
-        else if (pid == 0) {
+        if (pid < 0) {
+                log_error("Failed to fork: %m");
+                return -errno;
+        } else if (pid == 0) {
                 execv(args[0], (char **) args);
                 _exit(EXIT_FAILURE);
         }
@@ -161,9 +160,10 @@ static int font_load(const char *vc, const char *font, const char *map, const ch
         args[i++] = NULL;
 
         pid = fork();
-        if (pid < 0)
-                return log_error_errno(errno, "Failed to fork: %m");
-        else if (pid == 0) {
+        if (pid < 0) {
+                log_error("Failed to fork: %m");
+                return -errno;
+        } else if (pid == 0) {
                 execv(args[0], (char **) args);
                 _exit(EXIT_FAILURE);
         }
@@ -212,15 +212,15 @@ static void font_copy_to_all_vcs(int fd) {
                 /* copy font from active VT, where the font was uploaded to */
                 cfo.op = KD_FONT_OP_COPY;
                 cfo.height = vcs.v_active-1; /* tty1 == index 0 */
-                (void) ioctl(vcfd, KDFONTOP, &cfo);
+                ioctl(vcfd, KDFONTOP, &cfo);
 
                 /* copy map of 8bit chars */
                 if (ioctl(fd, GIO_SCRNMAP, map8) >= 0)
-                    (void) ioctl(vcfd, PIO_SCRNMAP, map8);
+                    ioctl(vcfd, PIO_SCRNMAP, map8);
 
                 /* copy map of 8bit chars -> 16bit Unicode values */
                 if (ioctl(fd, GIO_UNISCRNMAP, map16) >= 0)
-                    (void) ioctl(vcfd, PIO_UNISCRNMAP, map16);
+                    ioctl(vcfd, PIO_UNISCRNMAP, map16);
 
                 /* copy unicode translation table */
                 /* unimapd is a ushort count and a pointer to an
@@ -230,18 +230,20 @@ static void font_copy_to_all_vcs(int fd) {
                 if (ioctl(fd, GIO_UNIMAP, &unimapd) >= 0) {
                         struct unimapinit adv = { 0, 0, 0 };
 
-                        (void) ioctl(vcfd, PIO_UNIMAPCLR, &adv);
-                        (void) ioctl(vcfd, PIO_UNIMAP, &unimapd);
+                        ioctl(vcfd, PIO_UNIMAPCLR, &adv);
+                        ioctl(vcfd, PIO_UNIMAP, &unimapd);
                 }
         }
 }
 
 int main(int argc, char **argv) {
         const char *vc;
-        _cleanup_free_ char
-                *vc_keymap = NULL, *vc_keymap_toggle = NULL,
-                *vc_font = NULL, *vc_font_map = NULL, *vc_font_unimap = NULL;
-        _cleanup_close_ int fd = -1;
+        char *vc_keymap = NULL;
+        char *vc_keymap_toggle = NULL;
+        char *vc_font = NULL;
+        char *vc_font_map = NULL;
+        char *vc_font_unimap = NULL;
+        int fd = -1;
         bool utf8;
         pid_t font_pid = 0, keymap_pid = 0;
         bool font_copy = false;
@@ -262,13 +264,13 @@ int main(int argc, char **argv) {
 
         fd = open_terminal(vc, O_RDWR|O_CLOEXEC);
         if (fd < 0) {
-                log_error_errno(errno, "Failed to open %s: %m", vc);
-                return EXIT_FAILURE;
+                log_error("Failed to open %s: %m", vc);
+                goto finish;
         }
 
         if (!is_vconsole(fd)) {
                 log_error("Device %s is not a virtual console.", vc);
-                return EXIT_FAILURE;
+                goto finish;
         }
 
         utf8 = is_locale_utf8();
@@ -282,7 +284,7 @@ int main(int argc, char **argv) {
                            NULL);
 
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to read /etc/vconsole.conf: %m");
+                log_warning("Failed to read /etc/vconsole.conf: %s", strerror(-r));
 
         /* Let the kernel command line override /etc/vconsole.conf */
         if (detect_container(NULL) <= 0) {
@@ -295,7 +297,7 @@ int main(int argc, char **argv) {
                                    NULL);
 
                 if (r < 0 && r != -ENOENT)
-                        log_warning_errno(r, "Failed to read /proc/cmdline: %m");
+                        log_warning("Failed to read /proc/cmdline: %s", strerror(-r));
         }
 
         if (utf8)
@@ -303,27 +305,27 @@ int main(int argc, char **argv) {
         else
                 disable_utf8(fd);
 
-        r = font_load(vc, vc_font, vc_font_map, vc_font_unimap, &font_pid);
-        if (r < 0) {
-                log_error_errno(r, "Failed to start " KBD_SETFONT ": %m");
-                return EXIT_FAILURE;
-        }
+        r = EXIT_FAILURE;
+        if (keymap_load(vc, vc_keymap, vc_keymap_toggle, utf8, &keymap_pid) >= 0 &&
+            font_load(vc, vc_font, vc_font_map, vc_font_unimap, &font_pid) >= 0)
+                r = EXIT_SUCCESS;
 
-        if (font_pid > 0)
-                wait_for_terminate_and_warn(KBD_SETFONT, font_pid, true);
-
-        r = keymap_load(vc, vc_keymap, vc_keymap_toggle, utf8, &keymap_pid);
-        if (r < 0) {
-                log_error_errno(r, "Failed to start " KBD_LOADKEYS ": %m");
-                return EXIT_FAILURE;
-        }
-
+finish:
         if (keymap_pid > 0)
-                wait_for_terminate_and_warn(KBD_LOADKEYS, keymap_pid, true);
+                wait_for_terminate_and_warn(KBD_LOADKEYS, keymap_pid);
 
-        /* Only copy the font when we started setfont successfully */
-        if (font_copy && font_pid > 0)
-                font_copy_to_all_vcs(fd);
+        if (font_pid > 0) {
+                wait_for_terminate_and_warn(KBD_SETFONT, font_pid);
+                if (font_copy)
+                        font_copy_to_all_vcs(fd);
+        }
 
-        return EXIT_SUCCESS;
+        free(vc_keymap);
+        free(vc_font);
+        free(vc_font_map);
+        free(vc_font_unimap);
+
+        safe_close(fd);
+
+        return r;
 }

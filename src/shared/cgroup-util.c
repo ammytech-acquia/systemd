@@ -161,7 +161,7 @@ int cg_kill(const char *controller, const char *path, int sig, bool sigcont, boo
          * tasks list, to properly handle forking processes */
 
         if (!s) {
-                s = allocated_set = set_new(NULL);
+                s = allocated_set = set_new(trivial_hash_func, trivial_compare_func);
                 if (!s)
                         return -ENOMEM;
         }
@@ -195,7 +195,7 @@ int cg_kill(const char *controller, const char *path, int sig, bool sigcont, boo
                                 if (ret >= 0 && errno != ESRCH)
                                         ret = -errno;
                         } else {
-                                if (sigcont && sig != SIGKILL)
+                                if (sigcont)
                                         kill(pid, SIGCONT);
 
                                 if (ret == 0)
@@ -239,7 +239,7 @@ int cg_kill_recursive(const char *controller, const char *path, int sig, bool si
         assert(sig >= 0);
 
         if (!s) {
-                s = allocated_set = set_new(NULL);
+                s = allocated_set = set_new(trivial_hash_func, trivial_compare_func);
                 if (!s)
                         return -ENOMEM;
         }
@@ -290,7 +290,7 @@ int cg_migrate(const char *cfrom, const char *pfrom, const char *cto, const char
         assert(cto);
         assert(pto);
 
-        s = set_new(NULL);
+        s = set_new(trivial_hash_func, trivial_compare_func);
         if (!s)
                 return -ENOMEM;
 
@@ -502,16 +502,14 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
 }
 
 static int check_hierarchy(const char *p) {
-        const char *cc;
+        char *cc;
 
         assert(p);
 
-        if (!filename_is_valid(p))
-                return 0;
-
         /* Check if this controller actually really exists */
-        cc = strjoina("/sys/fs/cgroup/", p);
-        if (laccess(cc, F_OK) < 0)
+        cc = alloca(strlen("/sys/fs/cgroup/") + strlen(p) + 1);
+        strcpy(stpcpy(cc, "/sys/fs/cgroup/"), p);
+        if (access(cc, F_OK) < 0)
                 return -errno;
 
         return 0;
@@ -645,7 +643,7 @@ int cg_attach(const char *controller, const char *path, pid_t pid) {
 
         snprintf(c, sizeof(c), PID_FMT"\n", pid);
 
-        return write_string_file_no_create(fs, c);
+        return write_string_file(fs, c);
 }
 
 int cg_attach_fallback(const char *controller, const char *path, pid_t pid) {
@@ -684,7 +682,7 @@ int cg_set_group_access(
 
         assert(path);
 
-        if (mode != MODE_INVALID)
+        if (mode != (mode_t) -1)
                 mode &= 0777;
 
         r = cg_get_path(controller, path, NULL, &fs);
@@ -706,10 +704,10 @@ int cg_set_task_access(
 
         assert(path);
 
-        if (mode == MODE_INVALID && uid == UID_INVALID && gid == GID_INVALID)
+        if (mode == (mode_t) -1 && uid == (uid_t) -1 && gid == (gid_t) -1)
                 return 0;
 
-        if (mode != MODE_INVALID)
+        if (mode != (mode_t) -1)
                 mode &= 0666;
 
         r = cg_get_path(controller, path, "cgroup.procs", &fs);
@@ -755,9 +753,9 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
         cs = strlen(controller);
 
         FOREACH_LINE(line, f, return -errno) {
-                char *l, *p, *e;
+                char *l, *p, *w, *e;
                 size_t k;
-                const char *word, *state;
+                char *state;
                 bool found = false;
 
                 truncate_nl(line);
@@ -773,16 +771,16 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
 
                 *e = 0;
 
-                FOREACH_WORD_SEPARATOR(word, k, l, ",", state) {
+                FOREACH_WORD_SEPARATOR(w, k, l, ",", state) {
 
-                        if (k == cs && memcmp(word, controller, cs) == 0) {
+                        if (k == cs && memcmp(w, controller, cs) == 0) {
                                 found = true;
                                 break;
                         }
 
                         if (k == 5 + cs &&
-                            memcmp(word, "name=", 5) == 0 &&
-                            memcmp(word+5, controller, cs) == 0) {
+                            memcmp(w, "name=", 5) == 0 &&
+                            memcmp(w+5, controller, cs) == 0) {
                                 found = true;
                                 break;
                         }
@@ -819,7 +817,7 @@ int cg_install_release_agent(const char *controller, const char *agent) {
 
         sc = strstrip(contents);
         if (sc[0] == 0) {
-                r = write_string_file_no_create(fs, agent);
+                r = write_string_file(fs, agent);
                 if (r < 0)
                         return r;
         } else if (!streq(sc, agent))
@@ -839,7 +837,7 @@ int cg_install_release_agent(const char *controller, const char *agent) {
 
         sc = strstrip(contents);
         if (streq(sc, "0")) {
-                r = write_string_file_no_create(fs, "1");
+                r = write_string_file(fs, "1");
                 if (r < 0)
                         return r;
 
@@ -860,7 +858,7 @@ int cg_uninstall_release_agent(const char *controller) {
         if (r < 0)
                 return r;
 
-        r = write_string_file_no_create(fs, "0");
+        r = write_string_file(fs, "0");
         if (r < 0)
                 return r;
 
@@ -871,7 +869,7 @@ int cg_uninstall_release_agent(const char *controller) {
         if (r < 0)
                 return r;
 
-        r = write_string_file_no_create(fs, "");
+        r = write_string_file(fs, "");
         if (r < 0)
                 return r;
 
@@ -1251,15 +1249,17 @@ int cg_path_get_user_unit(const char *path, char **unit) {
         /* Skip slices, if there are any */
         e = skip_slices(path);
 
-        /* Skip the session scope or user manager... */
+        /* Skip the session scope... */
         t = skip_session(e);
-        if (!t)
-                t = skip_user_manager(e);
-        if (!t)
-                return -ENOENT;
-
-        /* ... and skip more slices if there are any */
-        e = skip_slices(t);
+        if (t)
+                /* ... and skip more slices if there's one */
+                e = skip_slices(t);
+        else {
+                /* ... or require a user manager unit to be there */
+                e = skip_user_manager(e);
+                if (!e)
+                        return -ENOENT;
+        }
 
         return cg_path_decode_unit(e, unit);
 }
@@ -1306,8 +1306,9 @@ int cg_pid_get_machine_name(pid_t pid, char **machine) {
 }
 
 int cg_path_get_session(const char *path, char **session) {
-        const char *e, *n, *x, *y;
+        const char *e, *n, *x;
         char *s;
+        size_t l;
 
         assert(path);
 
@@ -1324,14 +1325,17 @@ int cg_path_get_session(const char *path, char **session) {
         x = startswith(s, "session-");
         if (!x)
                 return -ENOENT;
-        y = endswith(x, ".scope");
-        if (!y || x == y)
+        if (!endswith(x, ".scope"))
+                return -ENOENT;
+
+        l = strlen(x);
+        if (l <= 6)
                 return -ENOENT;
 
         if (session) {
                 char *r;
 
-                r = strndup(x, y - x);
+                r = strndup(x, l - 6);
                 if (!r)
                         return -ENOMEM;
 
@@ -1587,18 +1591,7 @@ int cg_set_attribute(const char *controller, const char *path, const char *attri
         if (r < 0)
                 return r;
 
-        return write_string_file_no_create(p, value);
-}
-
-int cg_get_attribute(const char *controller, const char *path, const char *attribute, char **ret) {
-        _cleanup_free_ char *p = NULL;
-        int r;
-
-        r = cg_get_path(controller, path, attribute, &p);
-        if (r < 0)
-                return r;
-
-        return read_one_line_file(p, ret);
+        return write_string_file(p, value);
 }
 
 static const char mask_names[] =
@@ -1635,7 +1628,7 @@ int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask ma
         return 0;
 }
 
-int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t pid, cg_migrate_callback_t path_callback, void *userdata) {
+int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t pid) {
         CGroupControllerMask bit = 1;
         const char *n;
         int r;
@@ -1645,18 +1638,8 @@ int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t
                 return r;
 
         NULSTR_FOREACH(n, mask_names) {
-
-                if (supported & bit) {
-                        const char *p = NULL;
-
-                        if (path_callback)
-                                p = path_callback(bit, userdata);
-
-                        if (!p)
-                                p = path;
-
+                if (supported & bit)
                         cg_attach_fallback(n, path, pid);
-                }
 
                 bit <<= 1;
         }
@@ -1664,7 +1647,7 @@ int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t
         return 0;
 }
 
-int cg_attach_many_everywhere(CGroupControllerMask supported, const char *path, Set* pids, cg_migrate_callback_t path_callback, void *userdata) {
+int cg_attach_many_everywhere(CGroupControllerMask supported, const char *path, Set* pids) {
         Iterator i;
         void *pidp;
         int r = 0;
@@ -1673,7 +1656,7 @@ int cg_attach_many_everywhere(CGroupControllerMask supported, const char *path, 
                 pid_t pid = PTR_TO_LONG(pidp);
                 int q;
 
-                q = cg_attach_everywhere(supported, path, pid, path_callback, userdata);
+                q = cg_attach_everywhere(supported, path, pid);
                 if (q < 0)
                         r = q;
         }
@@ -1742,55 +1725,4 @@ CGroupControllerMask cg_mask_supported(void) {
         }
 
         return mask;
-}
-
-int cg_kernel_controllers(Set *controllers) {
-        _cleanup_fclose_ FILE *f = NULL;
-        char buf[LINE_MAX];
-        int r;
-
-        assert(controllers);
-
-        f = fopen("/proc/cgroups", "re");
-        if (!f) {
-                if (errno == ENOENT)
-                        return 0;
-                return -errno;
-        }
-
-        /* Ignore the header line */
-        (void) fgets(buf, sizeof(buf), f);
-
-        for (;;) {
-                char *controller;
-                int enabled = 0;
-
-                errno = 0;
-                if (fscanf(f, "%ms %*i %*i %i", &controller, &enabled) != 2) {
-
-                        if (feof(f))
-                                break;
-
-                        if (ferror(f) && errno)
-                                return -errno;
-
-                        return -EBADMSG;
-                }
-
-                if (!enabled) {
-                        free(controller);
-                        continue;
-                }
-
-                if (!filename_is_valid(controller)) {
-                        free(controller);
-                        return -EBADMSG;
-                }
-
-                r = set_consume(controllers, controller);
-                if (r < 0)
-                        return r;
-        }
-
-        return 0;
 }

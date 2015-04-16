@@ -28,17 +28,17 @@
 
 #include "udev.h"
 
-static const struct key *keyboard_lookup_key(const char *str, unsigned len);
+static const struct key *keyboard_lookup_key(const char *str, unsigned int len);
 #include "keyboard-keys-from-name.h"
 #include "keyboard-keys-to-name.h"
 
-static int install_force_release(struct udev_device *dev, const unsigned *release, unsigned release_count) {
+static int install_force_release(struct udev_device *dev, const unsigned int *release, unsigned int release_count) {
         struct udev_device *atkbd;
         const char *cur;
         char codes[4096];
         char *s;
         size_t l;
-        unsigned i;
+        unsigned int i;
         int ret;
 
         atkbd = udev_device_get_parent_with_subsystem_devtype(dev, "serio", NULL);
@@ -57,28 +57,28 @@ static int install_force_release(struct udev_device *dev, const unsigned *releas
 
         /* append new codes */
         for (i = 0; i < release_count; i++)
-                l = strpcpyf(&s, l, ",%u", release[i]);
+                l = strpcpyf(&s, l, ",%d", release[i]);
 
         log_debug("keyboard: updating force-release list with '%s'", codes);
         ret = udev_device_set_sysattr_value(atkbd, "force_release", codes);
         if (ret < 0)
-                log_error_errno(ret, "Error writing force-release attribute: %m");
+                log_error("Error writing force-release attribute: %s", strerror(-ret));
         return ret;
 }
 
 static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], bool test) {
         struct udev_list_entry *entry;
         struct {
-                unsigned scan;
-                unsigned key;
+                unsigned int scan;
+                unsigned int key;
         } map[1024];
-        unsigned map_count = 0;
-        unsigned release[1024];
-        unsigned release_count = 0;
+        unsigned int map_count = 0;
+        unsigned int release[1024];
+        unsigned int release_count = 0;
 
         udev_list_entry_foreach(entry, udev_device_get_properties_list_entry(dev)) {
                 const char *key;
-                unsigned scancode, keycode_num;
+                unsigned int scancode;
                 char *endptr;
                 const char *keycode;
                 const struct key *k;
@@ -110,19 +110,13 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
 
                 /* translate identifier to key code */
                 k = keyboard_lookup_key(keycode, strlen(keycode));
-                if (k) {
-                        keycode_num = k->id;
-                } else {
-                        /* check if it's a numeric code already */
-                        keycode_num = strtoul(keycode, &endptr, 0);
-                        if (endptr[0] !='\0') {
-                                log_error("Error, unknown key identifier '%s'", keycode);
-                                continue;
-                        }
+                if (!k) {
+                        log_error("Error, unknown key identifier '%s'", keycode);
+                        continue;
                 }
 
                 map[map_count].scan = scancode;
-                map[map_count].key = keycode_num;
+                map[map_count].key = k->id;
                 if (map_count < ELEMENTSOF(map)-1)
                         map_count++;
         }
@@ -130,7 +124,7 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
         if (map_count > 0 || release_count > 0) {
                 const char *node;
                 int fd;
-                unsigned i;
+                unsigned int i;
 
                 node = udev_device_get_devnode(dev);
                 if (!node) {
@@ -140,7 +134,7 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
 
                 fd = open(udev_device_get_devnode(dev), O_RDWR|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
                 if (fd < 0) {
-                        log_error_errno(errno, "Error, opening device '%s': %m", node);
+                        log_error("Error, opening device '%s': %m", node);
                         return EXIT_FAILURE;
                 }
 
@@ -149,7 +143,7 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
                         log_debug("keyboard: mapping scan code %d (0x%x) to key code %d (0x%x)",
                                   map[i].scan, map[i].scan, map[i].key, map[i].key);
                         if (ioctl(fd, EVIOCSKEYCODE, &map[i]) < 0)
-                                log_error_errno(errno, "Error calling EVIOCSKEYCODE on device node '%s' (scan code 0x%x, key code %d): %m", node, map[i].scan, map[i].key);
+                                log_error("Error calling EVIOCSKEYCODE on device node '%s' (scan code 0x%x, key code %d): %m", node, map[i].scan, map[i].key);
                 }
 
                 /* install list of force-release codes */
@@ -165,5 +159,5 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
 const struct udev_builtin udev_builtin_keyboard = {
         .name = "keyboard",
         .cmd = builtin_keyboard,
-        .help = "Keyboard scan code to key mapping",
+        .help = "keyboard scan code to key mapping",
 };

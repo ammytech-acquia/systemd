@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <locale.h>
+#include <libgen.h>
 
 #include "util.h"
 #include "log.h"
@@ -63,7 +64,7 @@ typedef struct CatalogItem {
         le64_t offset;
 } CatalogItem;
 
-static unsigned long catalog_hash_func(const void *p, const uint8_t hash_key[HASH_KEY_SIZE]) {
+unsigned long catalog_hash_func(const void *p, const uint8_t hash_key[HASH_KEY_SIZE]) {
         const CatalogItem *i = p;
         uint64_t u;
         size_t l, sz;
@@ -80,7 +81,7 @@ static unsigned long catalog_hash_func(const void *p, const uint8_t hash_key[HAS
         return (unsigned long) u;
 }
 
-static int catalog_compare_func(const void *a, const void *b) {
+int catalog_compare_func(const void *a, const void *b) {
         const CatalogItem *i = a, *j = b;
         unsigned k;
 
@@ -93,11 +94,6 @@ static int catalog_compare_func(const void *a, const void *b) {
 
         return strcmp(i->language, j->language);
 }
-
-const struct hash_ops catalog_hash_ops = {
-        .hash = catalog_hash_func,
-        .compare = catalog_compare_func
-};
 
 static int finish_item(
                 Hashmap *h,
@@ -208,12 +204,14 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
         assert(path);
 
         f = fopen(path, "re");
-        if (!f)
-                return log_error_errno(errno, "Failed to open file %s: %m", path);
+        if (!f) {
+                log_error("Failed to open file %s: %m", path);
+                return -errno;
+        }
 
         r = catalog_file_lang(path, &deflang);
         if (r < 0)
-                log_error_errno(errno, "Failed to determine language for file %s: %m", path);
+                log_error("Failed to determine language for file %s: %m", path);
         if (r == 1)
                 log_debug("File %s has language %s.", path, deflang);
 
@@ -226,7 +224,7 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
                         if (feof(f))
                                 break;
 
-                        log_error_errno(errno, "Failed to read file %s: %m", path);
+                        log_error("Failed to read file %s: %m", path);
                         return -errno;
                 }
 
@@ -338,13 +336,17 @@ static long write_catalog(const char *database, Hashmap *h, struct strbuf *sb,
                 return log_oom();
 
         r = mkdir_p(d, 0775);
-        if (r < 0)
-                return log_error_errno(r, "Recursive mkdir %s: %m", d);
+        if (r < 0) {
+                log_error("Recursive mkdir %s: %s", d, strerror(-r));
+                return r;
+        }
 
         r = fopen_temporary(database, &w, &p);
-        if (r < 0)
-                return log_error_errno(r, "Failed to open database for writing: %s: %m",
-                                       database);
+        if (r < 0) {
+                log_error("Failed to open database for writing: %s: %s",
+                          database, strerror(-r));
+                return r;
+        }
 
         zero(header);
         memcpy(header.signature, CATALOG_SIGNATURE, sizeof(header.signature));
@@ -382,7 +384,7 @@ static long write_catalog(const char *database, Hashmap *h, struct strbuf *sb,
         fchmod(fileno(w), 0644);
 
         if (rename(p, database) < 0) {
-                log_error_errno(errno, "rename (%s -> %s) failed: %m", p, database);
+                log_error("rename (%s -> %s) failed: %m", p, database);
                 r = -errno;
                 goto error;
         }
@@ -405,7 +407,7 @@ int catalog_update(const char* database, const char* root, const char* const* di
         unsigned n;
         long r;
 
-        h = hashmap_new(&catalog_hash_ops);
+        h = hashmap_new(catalog_hash_func, catalog_compare_func);
         sb = strbuf_new();
 
         if (!h || !sb) {
@@ -415,7 +417,7 @@ int catalog_update(const char* database, const char* root, const char* const* di
 
         r = conf_files_list_strv(&files, ".catalog", root, dirs);
         if (r < 0) {
-                log_error_errno(r, "Failed to get catalog files: %m");
+                log_error("Failed to get catalog files: %s", strerror(-r));
                 goto finish;
         }
 
@@ -456,7 +458,7 @@ int catalog_update(const char* database, const char* root, const char* const* di
 
         r = write_catalog(database, h, sb, items, n);
         if (r < 0)
-                log_error_errno(r, "Failed to write %s: %m", database);
+                log_error("Failed to write %s: %s", database, strerror(-r));
         else
                 log_debug("%s: wrote %u items, with %zu bytes of strings, %ld total size.",
                           database, n, sb->len, r);
@@ -680,8 +682,8 @@ int catalog_list_items(FILE *f, const char *database, bool oneline, char **items
 
                 k = sd_id128_from_string(*item, &id);
                 if (k < 0) {
-                        log_error_errno(k, "Failed to parse id128 '%s': %m",
-                                        *item);
+                        log_error("Failed to parse id128 '%s': %s",
+                                  *item, strerror(-k));
                         if (r == 0)
                                 r = k;
                         continue;

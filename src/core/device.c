@@ -98,7 +98,7 @@ static void device_set_state(Device *d, DeviceState state) {
         d->state = state;
 
         if (state != old_state)
-                log_unit_debug(UNIT(d)->id,
+                log_debug_unit(UNIT(d)->id,
                                "%s changed %s -> %s", UNIT(d)->id,
                                device_state_to_string(old_state),
                                device_state_to_string(state));
@@ -220,24 +220,25 @@ static int device_make_description(Unit *u, struct udev_device *dev, const char 
 
 static int device_add_udev_wants(Unit *u, struct udev_device *dev) {
         const char *wants;
-        const char *word, *state;
+        char *state, *w;
         size_t l;
         int r;
-        const char *property;
 
         assert(u);
         assert(dev);
 
-        property = u->manager->running_as == SYSTEMD_USER ? "SYSTEMD_USER_WANTS" : "SYSTEMD_WANTS";
-        wants = udev_device_get_property_value(dev, property);
+        wants = udev_device_get_property_value(
+                        dev,
+                        u->manager->running_as == SYSTEMD_USER ? "SYSTEMD_USER_WANTS" : "SYSTEMD_WANTS");
+
         if (!wants)
                 return 0;
 
-        FOREACH_WORD_QUOTED(word, l, wants, state) {
+        FOREACH_WORD_QUOTED(w, l, wants, state) {
                 _cleanup_free_ char *n = NULL;
                 char e[l+1];
 
-                memcpy(e, word, l);
+                memcpy(e, w, l);
                 e[l] = 0;
 
                 n = unit_name_mangle(e, MANGLE_NOGLOB);
@@ -248,9 +249,6 @@ static int device_add_udev_wants(Unit *u, struct udev_device *dev) {
                 if (r < 0)
                         return r;
         }
-        if (!isempty(state))
-                log_unit_warning(u->id, "Property %s on %s has trailing garbage, ignoring.",
-                                 property, strna(udev_device_get_syspath(dev)));
 
         return 0;
 }
@@ -304,7 +302,7 @@ static int device_update_unit(Manager *m, struct udev_device *dev, const char *p
                         goto fail;
                 }
 
-                r = hashmap_ensure_allocated(&m->devices_by_sysfs, &string_hash_ops);
+                r = hashmap_ensure_allocated(&m->devices_by_sysfs, string_hash_func, string_compare_func);
                 if (r < 0)
                         goto fail;
 
@@ -334,7 +332,7 @@ static int device_update_unit(Manager *m, struct udev_device *dev, const char *p
         return 0;
 
 fail:
-        log_warning_errno(r, "Failed to load device unit: %m");
+        log_warning("Failed to load device unit: %s", strerror(-r));
 
         if (delete && u)
                 unit_free(u);
@@ -382,7 +380,7 @@ static int device_process_new_device(Manager *m, struct udev_device *dev) {
                  * same /dev/disk/by-label/xxx link because they have
                  * the same label. We want to make sure that the same
                  * device that won the symlink wins in systemd, so we
-                 * check the device node major/minor */
+                 * check the device node major/minor*/
                 if (stat(p, &st) >= 0)
                         if ((!S_ISBLK(st.st_mode) && !S_ISCHR(st.st_mode)) ||
                             st.st_rdev != udev_device_get_devnum(dev))
@@ -395,13 +393,13 @@ static int device_process_new_device(Manager *m, struct udev_device *dev) {
          * aliases */
         alias = udev_device_get_property_value(dev, "SYSTEMD_ALIAS");
         if (alias) {
-                const char *word, *state;
+                char *state, *w;
                 size_t l;
 
-                FOREACH_WORD_QUOTED(word, l, alias, state) {
+                FOREACH_WORD_QUOTED(w, l, alias, state) {
                         char e[l+1];
 
-                        memcpy(e, word, l);
+                        memcpy(e, w, l);
                         e[l] = 0;
 
                         if (path_is_absolute(e))
@@ -409,8 +407,6 @@ static int device_process_new_device(Manager *m, struct udev_device *dev) {
                         else
                                 log_warning("SYSTEMD_ALIAS for %s is not an absolute path, ignoring: %s", sysfs, e);
                 }
-                if (!isempty(state))
-                        log_warning("SYSTEMD_ALIAS for %s has trailing garbage, ignoring.", sysfs);
         }
 
         return 0;
@@ -517,7 +513,7 @@ static int device_following_set(Unit *u, Set **_set) {
                 return 0;
         }
 
-        set = set_new(NULL);
+        set = set_new(NULL, NULL);
         if (!set)
                 return -ENOMEM;
 
@@ -628,7 +624,7 @@ static int device_dispatch_io(sd_event_source *source, int fd, uint32_t revents,
                 static RATELIMIT_DEFINE(limit, 10*USEC_PER_SEC, 5);
 
                 if (!ratelimit_test(&limit))
-                        log_error_errno(errno, "Failed to get udev event: %m");
+                        log_error("Failed to get udev event: %m");
                 if (!(revents & EPOLLIN))
                         return 0;
         }
@@ -650,20 +646,20 @@ static int device_dispatch_io(sd_event_source *source, int fd, uint32_t revents,
         if (streq(action, "remove") || !device_is_ready(dev))  {
                 r = device_process_removed_device(m, dev);
                 if (r < 0)
-                        log_error_errno(r, "Failed to process device remove event: %m");
+                        log_error("Failed to process device remove event: %s", strerror(-r));
 
                 r = swap_process_removed_device(m, dev);
                 if (r < 0)
-                        log_error_errno(r, "Failed to process swap device remove event: %m");
+                        log_error("Failed to process swap device remove event: %s", strerror(-r));
 
         } else {
                 r = device_process_new_device(m, dev);
                 if (r < 0)
-                        log_error_errno(r, "Failed to process device new event: %m");
+                        log_error("Failed to process device new event: %s", strerror(-r));
 
                 r = swap_process_new_device(m, dev);
                 if (r < 0)
-                        log_error_errno(r, "Failed to process swap device new event: %m");
+                        log_error("Failed to process swap device new event: %s", strerror(-r));
 
                 manager_dispatch_load_queue(m);
 
@@ -671,19 +667,6 @@ static int device_dispatch_io(sd_event_source *source, int fd, uint32_t revents,
         }
 
         return 0;
-}
-
-static bool device_supported(Manager *m) {
-        static int read_only = -1;
-        assert(m);
-
-        /* If /sys is read-only we don't support device units, and any
-         * attempts to start one should fail immediately. */
-
-        if (read_only < 0)
-                read_only = path_is_read_only_fs("/sys");
-
-        return read_only <= 0;
 }
 
 static const char* const device_state_table[_DEVICE_STATE_MAX] = {
@@ -721,7 +704,6 @@ const UnitVTable device_vtable = {
 
         .enumerate = device_enumerate,
         .shutdown = device_shutdown,
-        .supported = device_supported,
 
         .status_message_formats = {
                 .starting_stopping = {

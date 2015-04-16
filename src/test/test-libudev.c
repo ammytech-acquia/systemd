@@ -1,4 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 /***
   This file is part of systemd.
 
@@ -25,6 +24,7 @@
 #include <errno.h>
 #include <string.h>
 #include <getopt.h>
+#include <syslog.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
 
@@ -33,6 +33,14 @@
 #include "util.h"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+_printf_(6,0)
+static void log_fn(struct udev *udev,
+                   int priority, const char *file, int line, const char *fn,
+                   const char *format, va_list args) {
+        printf("test-libudev: %s %s:%d ", fn, file, line);
+        vprintf(format, args);
+}
 
 static void print_device(struct udev_device *device) {
         const char *str;
@@ -399,7 +407,7 @@ static void test_hwdb(struct udev *udev, const char *modalias) {
         printf("\n");
 
         hwdb = udev_hwdb_unref(hwdb);
-        assert_se(hwdb == NULL);
+        assert(hwdb == NULL);
 }
 
 int main(int argc, char *argv[]) {
@@ -415,7 +423,6 @@ int main(int argc, char *argv[]) {
         const char *syspath = "/devices/virtual/mem/null";
         const char *subsystem = NULL;
         char path[1024];
-        int c;
 
         udev = udev_new();
         printf("context: %p\n", udev);
@@ -423,38 +430,37 @@ int main(int argc, char *argv[]) {
                 printf("no context\n");
                 return 1;
         }
+        udev_set_log_fn(udev, log_fn);
+        printf("set log: %p\n", log_fn);
 
-        while ((c = getopt_long(argc, argv, "p:s:dhV", options, NULL)) >= 0)
-                switch (c) {
+        for (;;) {
+                int option;
 
+                option = getopt_long(argc, argv, "+p:s:dhV", options, NULL);
+                if (option == -1)
+                        break;
+
+                switch (option) {
                 case 'p':
                         syspath = optarg;
                         break;
-
                 case 's':
                         subsystem = optarg;
                         break;
-
                 case 'd':
-                        if (log_get_max_level() < LOG_INFO)
-                                log_set_max_level(LOG_INFO);
+                        if (udev_get_log_priority(udev) < LOG_INFO)
+                                udev_set_log_priority(udev, LOG_INFO);
                         break;
-
                 case 'h':
                         printf("--debug --syspath= --subsystem= --help\n");
                         goto out;
-
                 case 'V':
                         printf("%s\n", VERSION);
                         goto out;
-
-                case '?':
-                        goto out;
-
                 default:
-                        assert_not_reached("Unhandled option code.");
+                        goto out;
                 }
-
+        }
 
         /* add sys path if needed */
         if (!startswith(syspath, "/sys")) {

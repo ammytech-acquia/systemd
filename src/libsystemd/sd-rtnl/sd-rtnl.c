@@ -67,31 +67,6 @@ static int sd_rtnl_new(sd_rtnl **ret) {
         return 0;
 }
 
-int sd_rtnl_new_from_netlink(sd_rtnl **ret, int fd) {
-        _cleanup_rtnl_unref_ sd_rtnl *rtnl = NULL;
-        socklen_t addrlen;
-        int r;
-
-        assert_return(ret, -EINVAL);
-
-        r = sd_rtnl_new(&rtnl);
-        if (r < 0)
-                return r;
-
-        addrlen = sizeof(rtnl->sockaddr);
-
-        r = getsockname(fd, &rtnl->sockaddr.sa, &addrlen);
-        if (r < 0)
-                return -errno;
-
-        rtnl->fd = fd;
-
-        *ret = rtnl;
-        rtnl = NULL;
-
-        return 0;
-}
-
 static bool rtnl_pid_changed(sd_rtnl *rtnl) {
         assert(rtnl);
 
@@ -119,82 +94,50 @@ static int rtnl_compute_groups_ap(uint32_t *_groups, unsigned n_groups, va_list 
         return 0;
 }
 
-static int rtnl_open_fd_ap(sd_rtnl **ret, int fd, unsigned n_groups, va_list ap) {
+int sd_rtnl_open(sd_rtnl **ret, unsigned n_groups, ...) {
         _cleanup_rtnl_unref_ sd_rtnl *rtnl = NULL;
+        va_list ap;
         socklen_t addrlen;
         int r, one = 1;
 
         assert_return(ret, -EINVAL);
-        assert_return(fd >= 0, -EINVAL);
 
         r = sd_rtnl_new(&rtnl);
         if (r < 0)
                 return r;
 
-        r = setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one));
+        rtnl->fd = socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK, NETLINK_ROUTE);
+        if (rtnl->fd < 0)
+                return -errno;
+
+        r = setsockopt(rtnl->fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one));
         if (r < 0)
                 return -errno;
 
-        r = setsockopt(fd, SOL_NETLINK, NETLINK_PKTINFO, &one, sizeof(one));
+        r = setsockopt(rtnl->fd, SOL_NETLINK, NETLINK_PKTINFO, &one, sizeof(one));
         if (r < 0)
                 return -errno;
 
+        va_start(ap, n_groups);
         r = rtnl_compute_groups_ap(&rtnl->sockaddr.nl.nl_groups, n_groups, ap);
+        va_end(ap);
         if (r < 0)
                 return r;
 
         addrlen = sizeof(rtnl->sockaddr);
 
-        r = bind(fd, &rtnl->sockaddr.sa, addrlen);
-        /* ignore EINVAL to allow opening an already bound socket */
-        if (r < 0 && errno != EINVAL)
-                return -errno;
-
-        r = getsockname(fd, &rtnl->sockaddr.sa, &addrlen);
+        r = bind(rtnl->fd, &rtnl->sockaddr.sa, addrlen);
         if (r < 0)
                 return -errno;
 
-        rtnl->fd = fd;
+        r = getsockname(rtnl->fd, &rtnl->sockaddr.sa, &addrlen);
+        if (r < 0)
+                return r;
 
         *ret = rtnl;
         rtnl = NULL;
 
         return 0;
-}
-
-int sd_rtnl_open_fd(sd_rtnl **ret, int fd, unsigned n_groups, ...) {
-        va_list ap;
-        int r;
-
-        va_start(ap, n_groups);
-        r = rtnl_open_fd_ap(ret, fd, n_groups, ap);
-        va_end(ap);
-
-        return r;
-}
-
-int sd_rtnl_open(sd_rtnl **ret, unsigned n_groups, ...) {
-        va_list ap;
-        int fd, r;
-
-        fd = socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK, NETLINK_ROUTE);
-        if (fd < 0)
-                return -errno;
-
-        va_start(ap, n_groups);
-        r = rtnl_open_fd_ap(ret, fd, n_groups, ap);
-        va_end(ap);
-
-        if (r < 0) {
-                safe_close(fd);
-                return r;
-        }
-
-        return 0;
-}
-
-int sd_rtnl_inc_rcvbuf(const sd_rtnl *const rtnl, const int size) {
-        return fd_inc_rcvbuf(rtnl->fd, size);
 }
 
 sd_rtnl *sd_rtnl_ref(sd_rtnl *rtnl) {
@@ -213,7 +156,7 @@ sd_rtnl *sd_rtnl_unref(sd_rtnl *rtnl) {
 
         assert_return(!rtnl_pid_changed(rtnl), NULL);
 
-        if (REFCNT_DEC(rtnl->n_ref) == 0) {
+        if (REFCNT_DEC(rtnl->n_ref) <= 0) {
                 struct match_callback *f;
                 unsigned i;
 
@@ -405,12 +348,9 @@ static int process_timeout(sd_rtnl *rtnl) {
         hashmap_remove(rtnl->reply_callbacks, &c->serial);
 
         r = c->callback(rtnl, m, c->userdata);
-        if (r < 0)
-                log_debug_errno(r, "sd-rtnl: timedout callback failed: %m");
-
         free(c);
 
-        return 1;
+        return r < 0 ? r : 1;
 }
 
 static int process_reply(sd_rtnl *rtnl, sd_rtnl_message *m) {
@@ -433,12 +373,9 @@ static int process_reply(sd_rtnl *rtnl, sd_rtnl_message *m) {
                 prioq_remove(rtnl->reply_callbacks_prioq, c, &c->prioq_idx);
 
         r = c->callback(rtnl, m, c->userdata);
-        if (r < 0)
-                log_debug_errno(r, "sd-rtnl: callback failed: %m");
-
         free(c);
 
-        return 1;
+        return r;
 }
 
 static int process_match(sd_rtnl *rtnl, sd_rtnl_message *m) {
@@ -456,16 +393,12 @@ static int process_match(sd_rtnl *rtnl, sd_rtnl_message *m) {
         LIST_FOREACH(match_callbacks, c, rtnl->match_callbacks) {
                 if (type == c->type) {
                         r = c->callback(rtnl, m, c->userdata);
-                        if (r != 0) {
-                                if (r < 0)
-                                        log_debug_errno(r, "sd-rtnl: match callback failed: %m");
-
-                                break;
-                        }
+                        if (r != 0)
+                                return r;
                 }
         }
 
-        return 1;
+        return 0;
 }
 
 static int process_running(sd_rtnl *rtnl, sd_rtnl_message **ret) {
@@ -540,7 +473,7 @@ static usec_t calc_elapse(uint64_t usec) {
 static int rtnl_poll(sd_rtnl *rtnl, bool need_more, uint64_t timeout_usec) {
         struct pollfd p[1] = {};
         struct timespec ts;
-        usec_t m = USEC_INFINITY;
+        usec_t m = (usec_t) -1;
         int r, e;
 
         assert(rtnl);
@@ -552,7 +485,7 @@ static int rtnl_poll(sd_rtnl *rtnl, bool need_more, uint64_t timeout_usec) {
         if (need_more)
                 /* Caller wants more data, and doesn't care about
                  * what's been read or any other timeouts. */
-                e |= POLLIN;
+                return e |= POLLIN;
         else {
                 usec_t until;
                 /* Caller wants to process if there is something to
@@ -624,7 +557,7 @@ int sd_rtnl_call_async(sd_rtnl *nl,
         assert_return(callback, -EINVAL);
         assert_return(!rtnl_pid_changed(nl), -ECHILD);
 
-        r = hashmap_ensure_allocated(&nl->reply_callbacks, &uint64_hash_ops);
+        r = hashmap_ensure_allocated(&nl->reply_callbacks, uint64_hash_func, uint64_compare_func);
         if (r < 0)
                 return r;
 
@@ -747,7 +680,7 @@ int sd_rtnl_call(sd_rtnl *rtnl,
                 if (r < 0)
                         return r;
                 if (r > 0)
-                        /* received message, so try to process straight away */
+                        /* receieved message, so try to process straight away */
                         continue;
 
                 if (timeout > 0) {
@@ -764,8 +697,6 @@ int sd_rtnl_call(sd_rtnl *rtnl,
                 r = rtnl_poll(rtnl, true, left);
                 if (r < 0)
                         return r;
-                else if (r == 0)
-                        return -ETIMEDOUT;
 
                 r = dispatch_wqueue(rtnl);
                 if (r < 0)
@@ -928,10 +859,6 @@ int sd_rtnl_attach_event(sd_rtnl *rtnl, sd_event *event, int priority) {
         if (r < 0)
                 goto fail;
 
-        r = sd_event_source_set_description(rtnl->io_event_source, "rtnl-receive-message");
-        if (r < 0)
-                goto fail;
-
         r = sd_event_source_set_prepare(rtnl->io_event_source, prepare_callback);
         if (r < 0)
                 goto fail;
@@ -944,15 +871,7 @@ int sd_rtnl_attach_event(sd_rtnl *rtnl, sd_event *event, int priority) {
         if (r < 0)
                 goto fail;
 
-        r = sd_event_source_set_description(rtnl->time_event_source, "rtnl-timer");
-        if (r < 0)
-                goto fail;
-
         r = sd_event_add_exit(rtnl->event, &rtnl->exit_event_source, exit_callback, rtnl);
-        if (r < 0)
-                goto fail;
-
-        r = sd_event_source_set_description(rtnl->exit_event_source, "rtnl-exit");
         if (r < 0)
                 goto fail;
 

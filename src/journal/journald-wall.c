@@ -28,7 +28,7 @@ void server_forward_wall(
                 int priority,
                 const char *identifier,
                 const char *message,
-                const struct ucred *ucred) {
+                struct ucred *ucred) {
 
         _cleanup_free_ char *ident_buf = NULL, *l_buf = NULL;
         const char *l;
@@ -65,5 +65,5 @@ void server_forward_wall(
 
         r = utmp_wall(l, "systemd-journald", NULL);
         if (r < 0)
-                log_debug_errno(r, "Failed to send wall message: %m");
+                log_debug("Failed to send wall message: %s", strerror(-r));
 }

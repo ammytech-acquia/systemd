@@ -27,7 +27,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/poll.h>
 #include <sys/epoll.h>
 #include <sys/un.h>
 #include <fcntl.h>
@@ -162,7 +162,7 @@ static void request_process(Server *s, const struct init_request *req) {
                         case 'u':
                         case 'U':
                                 if (kill(1, SIGTERM) < 0)
-                                        log_error_errno(errno, "kill() failed: %m");
+                                        log_error("kill() failed: %m");
 
                                 /* The bus connection will be
                                  * terminated if PID 1 is reexecuted,
@@ -175,7 +175,7 @@ static void request_process(Server *s, const struct init_request *req) {
                         case 'q':
                         case 'Q':
                                 if (kill(1, SIGHUP) < 0)
-                                        log_error_errno(errno, "kill() failed: %m");
+                                        log_error("kill() failed: %m");
                                 break;
 
                         default:
@@ -217,8 +217,8 @@ static int fifo_process(Fifo *f) {
                 if (errno == EAGAIN)
                         return 0;
 
-                log_warning_errno(errno, "Failed to read from fifo: %m");
-                return -errno;
+                log_warning("Failed to read from fifo: %m");
+                return -1;
         }
 
         f->bytes_read += l;
@@ -277,7 +277,7 @@ static int server_init(Server *s, unsigned n_sockets) {
         s->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (s->epoll_fd < 0) {
                 r = -errno;
-                log_error_errno(errno, "Failed to create epoll object: %m");
+                log_error("Failed to create epoll object: %m");
                 goto fail;
         }
 
@@ -290,7 +290,8 @@ static int server_init(Server *s, unsigned n_sockets) {
 
                 r = sd_is_fifo(fd, NULL);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to determine file descriptor type: %m");
+                        log_error("Failed to determine file descriptor type: %s",
+                                  strerror(-r));
                         goto fail;
                 }
 
@@ -303,7 +304,7 @@ static int server_init(Server *s, unsigned n_sockets) {
                 f = new0(Fifo, 1);
                 if (!f) {
                         r = -ENOMEM;
-                        log_error_errno(errno, "Failed to create fifo object: %m");
+                        log_error("Failed to create fifo object: %m");
                         goto fail;
                 }
 
@@ -315,7 +316,7 @@ static int server_init(Server *s, unsigned n_sockets) {
                 if (epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
                         r = -errno;
                         fifo_free(f);
-                        log_error_errno(errno, "Failed to add fifo fd to epoll object: %m");
+                        log_error("Failed to add fifo fd to epoll object: %m");
                         goto fail;
                 }
 
@@ -327,7 +328,7 @@ static int server_init(Server *s, unsigned n_sockets) {
 
         r = bus_open_system_systemd(&s->bus);
         if (r < 0) {
-                log_error_errno(r, "Failed to get D-Bus connection: %m");
+                log_error("Failed to get D-Bus connection: %s", strerror(-r));
                 r = -EIO;
                 goto fail;
         }
@@ -354,7 +355,7 @@ static int process_event(Server *s, struct epoll_event *ev) {
         f = (Fifo*) ev->data.ptr;
         r = fifo_process(f);
         if (r < 0) {
-                log_info_errno(r, "Got error on fifo: %m");
+                log_info("Got error on fifo: %s", strerror(-r));
                 fifo_free(f);
                 return r;
         }
@@ -384,7 +385,7 @@ int main(int argc, char *argv[]) {
 
         n = sd_listen_fds(true);
         if (n < 0) {
-                log_error_errno(r, "Failed to read listening file descriptors from environment: %m");
+                log_error("Failed to read listening file descriptors from environment: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
 
@@ -413,7 +414,7 @@ int main(int argc, char *argv[]) {
                         if (errno == EINTR)
                                 continue;
 
-                        log_error_errno(errno, "epoll_wait() failed: %m");
+                        log_error("epoll_wait() failed: %m");
                         goto fail;
                 }
 
@@ -430,7 +431,6 @@ int main(int argc, char *argv[]) {
 
 fail:
         sd_notify(false,
-                  "STOPPING=1\n"
                   "STATUS=Shutting down...");
 
         server_done(&server);

@@ -49,11 +49,9 @@ enum JobType {
         _JOB_TYPE_MAX_MERGING,
 
         /* JOB_NOP can enter into a transaction, but as it won't pull in
-         * any dependencies and it uses the special 'nop_job' slot in Unit,
-         * it won't have to merge with anything (except possibly into another
-         * JOB_NOP, previously installed). JOB_NOP is special-cased in
-         * job_type_is_*() functions so that the transaction can be
-         * activated. */
+         * any dependencies, it won't have to merge with anything.
+         * job_install() avoids the problem of merging JOB_NOP too (it's
+         * special-cased, only merges with other JOB_NOPs). */
         JOB_NOP = _JOB_TYPE_MAX_MERGING, /* do nothing */
 
         _JOB_TYPE_MAX_IN_TRANSACTION,
@@ -96,13 +94,11 @@ enum JobMode {
 enum JobResult {
         JOB_DONE,                /* Job completed successfully */
         JOB_CANCELED,            /* Job canceled by a conflicting job installation or by explicit cancel request */
-        JOB_TIMEOUT,             /* Job timeout elapsed */
+        JOB_TIMEOUT,             /* JobTimeout elapsed */
         JOB_FAILED,              /* Job failed */
         JOB_DEPENDENCY,          /* A required dependency job did not result in JOB_DONE */
         JOB_SKIPPED,             /* Negative result of JOB_VERIFY_ACTIVE */
         JOB_INVALID,             /* JOB_RELOAD of inactive unit */
-        JOB_ASSERT,              /* Couldn't start a unit, because an assert didn't hold */
-        JOB_UNSUPPORTED,         /* Couldn't start a unit, because the unit type is not supported on the system */
         _JOB_RESULT_MAX,
         _JOB_RESULT_INVALID = -1
 };
@@ -149,15 +145,9 @@ struct Job {
         sd_event_source *timer_event_source;
         usec_t begin_usec;
 
-        /*
-         * This tracks where to send signals, and also which clients
-         * are allowed to call DBus methods on the job (other than
-         * root).
-         *
-         * There can be more than one client, because of job merging.
-         */
-        sd_bus_track *clients;
-        char **deserialized_clients;
+        /* There can be more than one client, because of job merging. */
+        sd_bus_track *subscribed;
+        char **deserialized_subscribed;
 
         JobResult result;
 
@@ -194,15 +184,11 @@ _pure_ static inline bool job_type_is_mergeable(JobType a, JobType b) {
 }
 
 _pure_ static inline bool job_type_is_conflicting(JobType a, JobType b) {
-        return a != JOB_NOP && b != JOB_NOP && !job_type_is_mergeable(a, b);
+        return !job_type_is_mergeable(a, b);
 }
 
 _pure_ static inline bool job_type_is_superset(JobType a, JobType b) {
         /* Checks whether operation a is a "superset" of b in its actions */
-        if (b == JOB_NOP)
-                return true;
-        if (a == JOB_NOP)
-                return false;
         return a == job_type_lookup_merge(a, b);
 }
 

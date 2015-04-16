@@ -21,10 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
-
 #include "list.h"
-#include "time-util.h"
 
 typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
@@ -86,8 +83,6 @@ struct CGroupContext {
 
         CGroupDevicePolicy device_policy;
         LIST_HEAD(CGroupDeviceAllow, device_allow);
-
-        bool delegate;
 };
 
 #include "unit.h"
@@ -112,8 +107,7 @@ CGroupControllerMask unit_get_target_mask(Unit *u);
 
 void unit_update_cgroup_members_masks(Unit *u);
 int unit_realize_cgroup(Unit *u);
-void unit_destroy_cgroup_if_empty(Unit *u);
-int unit_attach_pids_to_cgroup(Unit *u);
+void unit_destroy_cgroup(Unit *u);
 
 int manager_setup_cgroup(Manager *m);
 void manager_shutdown_cgroup(Manager *m, bool delete);

@@ -22,7 +22,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <byteswap.h>
-#include <math.h>
 
 #ifdef HAVE_GLIB
 #include <gio/gio.h>
@@ -95,8 +94,6 @@ int main(int argc, char *argv[]) {
         _cleanup_fclose_ FILE *ms = NULL;
         size_t first_size = 0, second_size = 0, third_size = 0;
         _cleanup_bus_unref_ sd_bus *bus = NULL;
-        double dbl;
-        uint64_t u64;
 
         r = sd_bus_default_system(&bus);
         if (r < 0)
@@ -148,16 +145,13 @@ int main(int argc, char *argv[]) {
         r = sd_bus_message_append_array(m, 'u', NULL, 0);
         assert_se(r >= 0);
 
-        r = sd_bus_message_append(m, "a(stdo)", 1, "foo", 815ULL, 47.0, "/");
-        assert_se(r >= 0);
-
         r = bus_message_seal(m, 4711, 0);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+        bus_message_dump(m, stdout, true);
 
         ms = open_memstream(&first, &first_size);
-        bus_message_dump(m, ms, 0);
+        bus_message_dump(m, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
 
@@ -207,11 +201,11 @@ int main(int argc, char *argv[]) {
         r = bus_message_from_malloc(bus, buffer, sz, NULL, 0, NULL, NULL, &m);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+        bus_message_dump(m, stdout, true);
 
         fclose(ms);
         ms = open_memstream(&second, &second_size);
-        bus_message_dump(m, ms, 0);
+        bus_message_dump(m, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
         assert_se(first_size == second_size);
@@ -274,13 +268,6 @@ int main(int argc, char *argv[]) {
         assert_se(r > 0);
         assert_se(sz == 0);
 
-        r = sd_bus_message_read(m, "a(stdo)", 1, &x, &u64, &dbl, &y);
-        assert_se(r > 0);
-        assert_se(streq(x, "foo"));
-        assert_se(u64 == 815ULL);
-        assert_se(fabs(dbl - 47.0) < 0.1);
-        assert_se(streq(y, "/"));
-
         r = sd_bus_message_peek_type(m, NULL, NULL);
         assert_se(r == 0);
 
@@ -298,7 +285,7 @@ int main(int argc, char *argv[]) {
 
         fclose(ms);
         ms = open_memstream(&third, &third_size);
-        bus_message_dump(copy, ms, 0);
+        bus_message_dump(copy, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
 

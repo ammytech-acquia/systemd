@@ -23,7 +23,7 @@
 
 #include "sparse-endian.h"
 
-#include "systemd/sd-id128.h"
+#include <systemd/sd-id128.h>
 
 #include "macro.h"
 
@@ -52,8 +52,8 @@ typedef struct HashItem HashItem;
 typedef struct FSSHeader FSSHeader;
 
 /* Object types */
-typedef enum ObjectType {
-        OBJECT_UNUSED, /* also serves as "any type" or "additional context" */
+enum {
+        OBJECT_UNUSED,
         OBJECT_DATA,
         OBJECT_FIELD,
         OBJECT_ENTRY,
@@ -62,16 +62,12 @@ typedef enum ObjectType {
         OBJECT_ENTRY_ARRAY,
         OBJECT_TAG,
         _OBJECT_TYPE_MAX
-} ObjectType;
+};
 
 /* Object flags */
 enum {
-        OBJECT_COMPRESSED_XZ = 1 << 0,
-        OBJECT_COMPRESSED_LZ4 = 1 << 1,
-        _OBJECT_COMPRESSED_MAX
+        OBJECT_COMPRESSED = 1
 };
-
-#define OBJECT_COMPRESSION_MASK (OBJECT_COMPRESSED_XZ | OBJECT_COMPRESSED_LZ4)
 
 struct ObjectHeader {
         uint8_t type;
@@ -159,32 +155,12 @@ enum {
 
 /* Header flags */
 enum {
-        HEADER_INCOMPATIBLE_COMPRESSED_XZ = 1 << 0,
-        HEADER_INCOMPATIBLE_COMPRESSED_LZ4 = 1 << 1,
+        HEADER_INCOMPATIBLE_COMPRESSED = 1
 };
-
-#define HEADER_INCOMPATIBLE_ANY (HEADER_INCOMPATIBLE_COMPRESSED_XZ|HEADER_INCOMPATIBLE_COMPRESSED_LZ4)
-
-#if defined(HAVE_XZ) && defined(HAVE_LZ4)
-#  define HEADER_INCOMPATIBLE_SUPPORTED HEADER_INCOMPATIBLE_ANY
-#elif defined(HAVE_XZ)
-#  define HEADER_INCOMPATIBLE_SUPPORTED HEADER_INCOMPATIBLE_COMPRESSED_XZ
-#elif defined(HAVE_LZ4)
-#  define HEADER_INCOMPATIBLE_SUPPORTED HEADER_INCOMPATIBLE_COMPRESSED_LZ4
-#else
-#  define HEADER_INCOMPATIBLE_SUPPORTED 0
-#endif
 
 enum {
         HEADER_COMPATIBLE_SEALED = 1
 };
-
-#define HEADER_COMPATIBLE_ANY HEADER_COMPATIBLE_SEALED
-#ifdef HAVE_GCRYPT
-#  define HEADER_COMPATIBLE_SUPPORTED HEADER_COMPATIBLE_SEALED
-#else
-#  define HEADER_COMPATIBLE_SUPPORTED 0
-#endif
 
 #define HEADER_SIGNATURE ((char[]) { 'L', 'P', 'K', 'S', 'H', 'H', 'R', 'H' })
 

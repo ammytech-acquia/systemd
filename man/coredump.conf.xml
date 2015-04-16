@@ -1,4 +1,5 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?> <!--*-nxml-*-->
+<?xml-stylesheet type="text/xsl" href="http://docbook.sourceforge.net/release/xsl/current/xhtml/docbook.xsl"?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
         "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
@@ -21,8 +22,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
-<refentry id="coredump.conf" conditional="ENABLE_COREDUMP"
-          xmlns:xi="http://www.w3.org/2001/XInclude">
+<refentry id="coredump.conf" conditional="ENABLE_COREDUMP">
   <refentryinfo>
     <title>coredump.conf</title>
     <productname>systemd</productname>
@@ -44,27 +44,19 @@
 
   <refnamediv>
     <refname>coredump.conf</refname>
-    <refname>coredump.conf.d</refname>
-    <refpurpose>Coredump storage configuration files</refpurpose>
+    <refpurpose>Coredump storage configuration file</refpurpose>
   </refnamediv>
 
   <refsynopsisdiv>
     <para><filename>/etc/systemd/coredump.conf</filename></para>
-    <para><filename>/etc/systemd/coredump.conf.d/*.conf</filename></para>
-    <para><filename>/run/systemd/coredump.conf.d/*.conf</filename></para>
-    <para><filename>/usr/lib/systemd/coredump.conf.d/*.conf</filename></para>
   </refsynopsisdiv>
 
   <refsect1>
     <title>Description</title>
 
-    <para>These files configure the behaviour of
-    <citerefentry><refentrytitle>systemd-coredump</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+    <para>This file configures the behaviour of <command>systemd-coredump</command>,
     a handler for core dumps invoked by the kernel.</para>
   </refsect1>
-
-  <xi:include href="standard-conf.xml" xpointer="confd" />
-  <xi:include href="standard-conf.xml" xpointer="conf" />
 
   <refsect1>
     <title>Options</title>
@@ -98,7 +90,7 @@
       <varlistentry>
         <term><varname>Compress=</varname></term>
 
-        <listitem><para>Controls compression for external
+        <listitem><para>Controls the type of compression for external
         storage. Takes a boolean argument, defaults to
         <literal>yes</literal>.</para>
         </listitem>
@@ -134,7 +126,7 @@
         to 15% of the total disk size). Note that the disk space used
         by coredumps might temporarily exceed these limits while
         coredumps are processed. Note that old coredumps are also
-        removed based on time via
+        removed based on on time via
         <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para></listitem>
       </varlistentry>
     </variablelist>

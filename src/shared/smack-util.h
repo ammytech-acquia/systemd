@@ -25,12 +25,12 @@
 
 #include <stdbool.h>
 
-bool mac_smack_use(void);
+#define SMACK_FLOOR_LABEL "_"
+#define SMACK_STAR_LABEL  "*"
 
-int mac_smack_fix(const char *path, bool ignore_enoent, bool ignore_erofs);
+bool use_smack(void);
 
-int mac_smack_apply(const char *path, const char *label);
-int mac_smack_apply_fd(int fd, const char *label);
-int mac_smack_apply_pid(pid_t pid, const char *label);
-int mac_smack_apply_ip_in_fd(int fd, const char *label);
-int mac_smack_apply_ip_out_fd(int fd, const char *label);
+int smack_label_path(const char *path, const char *label);
+int smack_label_fd(int fd, const char *label);
+int smack_label_ip_in_fd(int fd, const char *label);
+int smack_label_ip_out_fd(int fd, const char *label);

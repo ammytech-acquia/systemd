@@ -37,12 +37,14 @@
 
 static bool udev_exit;
 
-static void sig_handler(int signum) {
+static void sig_handler(int signum)
+{
         if (signum == SIGINT || signum == SIGTERM)
                 udev_exit = true;
 }
 
-static void print_device(struct udev_device *device, const char *source, int prop) {
+static void print_device(struct udev_device *device, const char *source, int prop)
+{
         struct timespec ts;
 
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -64,19 +66,17 @@ static void print_device(struct udev_device *device, const char *source, int pro
 }
 
 static void help(void) {
-        printf("%s monitor [--property] [--kernel] [--udev] [--help]\n\n"
-               "Listen to kernel and udev events.\n\n"
-               "  -h --help                                Show this help\n"
-               "     --version                             Show package version\n"
-               "  -p --property                            Print the event properties\n"
-               "  -k --kernel                              Print kernel uevents\n"
-               "  -u --udev                                Print udev events\n"
-               "  -s --subsystem-match=SUBSYSTEM[/DEVTYPE] Filter events by subsystem\n"
-               "  -t --tag-match=TAG                       Filter events by tag\n"
-               , program_invocation_short_name);
+        printf("Usage: udevadm monitor [--property] [--kernel] [--udev] [--help]\n"
+               "  -p,--property                            print the event properties\n"
+               "  -k,--kernel                              print kernel uevents\n"
+               "  -u,--udev                                print udev events\n"
+               "  -s,--subsystem-match=SUBSYSTEM[/DEVTYPE] filter events by subsystem\n"
+               "  -t,--tag-match=TAG                       filter events by tag\n"
+               "  -h,--help\n\n");
 }
 
-static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
+static int adm_monitor(struct udev *udev, int argc, char *argv[])
+{
         struct sigaction act = {};
         sigset_t mask;
         bool prop = false;
@@ -158,7 +158,7 @@ static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
 
         fd_ep = epoll_create1(EPOLL_CLOEXEC);
         if (fd_ep < 0) {
-                log_error_errno(errno, "error creating epoll fd: %m");
+                log_error("error creating epoll fd: %m");
                 return 1;
         }
 
@@ -198,7 +198,7 @@ static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
                 ep_udev.events = EPOLLIN;
                 ep_udev.data.fd = fd_udev;
                 if (epoll_ctl(fd_ep, EPOLL_CTL_ADD, fd_udev, &ep_udev) < 0) {
-                        log_error_errno(errno, "fail to add fd to epoll: %m");
+                        log_error("fail to add fd to epoll: %m");
                         return 2;
                 }
 
@@ -232,7 +232,7 @@ static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
                 ep_kernel.events = EPOLLIN;
                 ep_kernel.data.fd = fd_kernel;
                 if (epoll_ctl(fd_ep, EPOLL_CTL_ADD, fd_kernel, &ep_kernel) < 0) {
-                        log_error_errno(errno, "fail to add fd to epoll: %m");
+                        log_error("fail to add fd to epoll: %m");
                         return 5;
                 }
 
@@ -279,5 +279,5 @@ static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
 const struct udevadm_cmd udevadm_monitor = {
         .name = "monitor",
         .cmd = adm_monitor,
-        .help = "Listen to kernel and udev events",
+        .help = "listen to kernel and udev events",
 };

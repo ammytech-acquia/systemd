@@ -22,7 +22,6 @@
 #include <unistd.h>
 #include <stddef.h>
 #include <sys/epoll.h>
-#include <sys/mman.h>
 
 #include "socket-util.h"
 #include "path-util.h"
@@ -33,7 +32,6 @@
 #include "journald-console.h"
 #include "journald-syslog.h"
 #include "journald-wall.h"
-#include "memfd-util.h"
 
 bool valid_user_field(const char *p, size_t l, bool allow_protected) {
         const char *a;
@@ -70,21 +68,21 @@ bool valid_user_field(const char *p, size_t l, bool allow_protected) {
         return true;
 }
 
-static bool allow_object_pid(const struct ucred *ucred) {
+static bool allow_object_pid(struct ucred *ucred) {
         return ucred && ucred->uid == 0;
 }
 
 void server_process_native_message(
                 Server *s,
                 const void *buffer, size_t buffer_size,
-                const struct ucred *ucred,
-                const struct timeval *tv,
+                struct ucred *ucred,
+                struct timeval *tv,
                 const char *label, size_t label_len) {
 
         struct iovec *iovec = NULL;
         unsigned n = 0, j, tn = (unsigned) -1;
         const char *p;
-        size_t remaining, m = 0, entry_size = 0;
+        size_t remaining, m = 0;
         int priority = LOG_INFO;
         char *identifier = NULL, *message = NULL;
         pid_t object_pid = 0;
@@ -108,16 +106,9 @@ void server_process_native_message(
 
                 if (e == p) {
                         /* Entry separator */
-
-                        if (entry_size + n + 1 > ENTRY_SIZE_MAX) { /* data + separators + trailer */
-                                log_debug("Entry is too big with %u properties and %zu bytes, ignoring.", n, entry_size);
-                                continue;
-                        }
-
                         server_dispatch_message(s, iovec, n, m, ucred, tv, label, label_len, NULL, priority, object_pid);
                         n = 0;
                         priority = LOG_INFO;
-                        entry_size = 0;
 
                         p++;
                         remaining--;
@@ -134,8 +125,9 @@ void server_process_native_message(
 
                 /* A property follows */
 
-                /* n existing properties, 1 new, +1 for _TRANSPORT */
-                if (!GREEDY_REALLOC(iovec, m, n + 2 + N_IOVEC_META_FIELDS + N_IOVEC_OBJECT_FIELDS)) {
+                /* n received properties, +1 for _TRANSPORT */
+                if (!GREEDY_REALLOC(iovec, m, n + 1 + N_IOVEC_META_FIELDS +
+                                              !!object_pid * N_IOVEC_OBJECT_FIELDS)) {
                         log_oom();
                         break;
                 }
@@ -153,7 +145,6 @@ void server_process_native_message(
                                  * field */
                                 iovec[n].iov_base = (char*) p;
                                 iovec[n].iov_len = l;
-                                entry_size += iovec[n].iov_len;
                                 n++;
 
                                 /* We need to determine the priority
@@ -223,7 +214,7 @@ void server_process_native_message(
                         l = le64toh(l_le);
 
                         if (l > DATA_SIZE_MAX) {
-                                log_debug("Received binary data block of %"PRIu64" bytes is too large, ignoring.", l);
+                                log_debug("Received binary data block too large, ignoring.");
                                 break;
                         }
 
@@ -246,7 +237,6 @@ void server_process_native_message(
                         if (valid_user_field(p, e - p, false)) {
                                 iovec[n].iov_base = k;
                                 iovec[n].iov_len = (e - p) + 1 + l;
-                                entry_size += iovec[n].iov_len;
                                 n++;
                         } else
                                 free(k);
@@ -261,13 +251,6 @@ void server_process_native_message(
 
         tn = n++;
         IOVEC_SET_STRING(iovec[tn], "_TRANSPORT=journal");
-        entry_size += strlen("_TRANSPORT=journal");
-
-        if (entry_size + n + 1 > ENTRY_SIZE_MAX) { /* data + separators + trailer */
-                log_debug("Entry is too big with %u properties and %zu bytes, ignoring.",
-                          n, entry_size);
-                goto finish;
-        }
 
         if (message) {
                 if (s->forward_to_syslog)
@@ -303,31 +286,21 @@ finish:
 void server_process_native_file(
                 Server *s,
                 int fd,
-                const struct ucred *ucred,
-                const struct timeval *tv,
+                struct ucred *ucred,
+                struct timeval *tv,
                 const char *label, size_t label_len) {
 
         struct stat st;
-        bool sealed;
+        _cleanup_free_ void *p = NULL;
+        ssize_t n;
         int r;
-
-        /* Data is in the passed fd, since it didn't fit in a
-         * datagram. */
 
         assert(s);
         assert(fd >= 0);
 
-        /* If it's a memfd, check if it is sealed. If so, we can just
-         * use map it and use it, and do not need to copy the data
-         * out. */
-        sealed = memfd_get_sealed(fd) > 0;
-
-        if (!sealed && (!ucred || ucred->uid != 0)) {
+        if (!ucred || ucred->uid != 0) {
                 _cleanup_free_ char *sl = NULL, *k = NULL;
                 const char *e;
-
-                /* If this is not a sealed memfd, and the peer is unknown or
-                 * unprivileged, then verify the path. */
 
                 if (asprintf(&sl, "/proc/self/fd/%i", fd) < 0) {
                         log_oom();
@@ -336,7 +309,7 @@ void server_process_native_file(
 
                 r = readlink_malloc(sl, &k);
                 if (r < 0) {
-                        log_error_errno(errno, "readlink(%s) failed: %m", sl);
+                        log_error("readlink(%s) failed: %m", sl);
                         return;
                 }
 
@@ -350,14 +323,19 @@ void server_process_native_file(
                         return;
                 }
 
-                if (!filename_is_valid(e)) {
+                if (!filename_is_safe(e)) {
                         log_error("Received file in subdirectory of allowed directories. Refusing.");
                         return;
                 }
         }
 
+        /* Data is in the passed file, since it didn't fit in a
+         * datagram. We can't map the file here, since clients might
+         * then truncate it and trigger a SIGBUS for us. So let's
+         * stupidly read it */
+
         if (fstat(fd, &st) < 0) {
-                log_error_errno(errno, "Failed to stat passed file, ignoring: %m");
+                log_error("Failed to stat passed file, ignoring: %m");
                 return;
         }
 
@@ -374,88 +352,77 @@ void server_process_native_file(
                 return;
         }
 
-        if (sealed) {
-                void *p;
-                size_t ps;
-
-                /* The file is sealed, we can just map it and use it. */
-
-                ps = PAGE_ALIGN(st.st_size);
-                p = mmap(NULL, ps, PROT_READ, MAP_PRIVATE, fd, 0);
-                if (p == MAP_FAILED) {
-                        log_error_errno(errno, "Failed to map memfd, ignoring: %m");
-                        return;
-                }
-
-                server_process_native_message(s, p, st.st_size, ucred, tv, label, label_len);
-                assert_se(munmap(p, ps) >= 0);
-        } else {
-                _cleanup_free_ void *p = NULL;
-                ssize_t n;
-
-                /* The file is not sealed, we can't map the file here, since
-                 * clients might then truncate it and trigger a SIGBUS for
-                 * us. So let's stupidly read it */
-
-                p = malloc(st.st_size);
-                if (!p) {
-                        log_oom();
-                        return;
-                }
-
-                n = pread(fd, p, st.st_size, 0);
-                if (n < 0)
-                        log_error_errno(n, "Failed to read file, ignoring: %m");
-                else if (n > 0)
-                        server_process_native_message(s, p, n, ucred, tv, label, label_len);
+        p = malloc(st.st_size);
+        if (!p) {
+                log_oom();
+                return;
         }
+
+        n = pread(fd, p, st.st_size, 0);
+        if (n < 0)
+                log_error("Failed to read file, ignoring: %s", strerror(-n));
+        else if (n > 0)
+                server_process_native_message(s, p, n, ucred, tv, label, label_len);
 }
 
 int server_open_native_socket(Server*s) {
-        static const int one = 1;
-        int r;
+        union sockaddr_union sa;
+        int one, r;
 
         assert(s);
 
         if (s->native_fd < 0) {
-                union sockaddr_union sa = {
-                        .un.sun_family = AF_UNIX,
-                        .un.sun_path = "/run/systemd/journal/socket",
-                };
 
                 s->native_fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-                if (s->native_fd < 0)
-                        return log_error_errno(errno, "socket() failed: %m");
+                if (s->native_fd < 0) {
+                        log_error("socket() failed: %m");
+                        return -errno;
+                }
+
+                zero(sa);
+                sa.un.sun_family = AF_UNIX;
+                strncpy(sa.un.sun_path, "/run/systemd/journal/socket", sizeof(sa.un.sun_path));
 
                 unlink(sa.un.sun_path);
 
                 r = bind(s->native_fd, &sa.sa, offsetof(union sockaddr_union, un.sun_path) + strlen(sa.un.sun_path));
-                if (r < 0)
-                        return log_error_errno(errno, "bind(%s) failed: %m", sa.un.sun_path);
+                if (r < 0) {
+                        log_error("bind() failed: %m");
+                        return -errno;
+                }
 
                 chmod(sa.un.sun_path, 0666);
         } else
                 fd_nonblock(s->native_fd, 1);
 
+        one = 1;
         r = setsockopt(s->native_fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one));
-        if (r < 0)
-                return log_error_errno(errno, "SO_PASSCRED failed: %m");
+        if (r < 0) {
+                log_error("SO_PASSCRED failed: %m");
+                return -errno;
+        }
 
 #ifdef HAVE_SELINUX
-        if (mac_selinux_use()) {
+        if (use_selinux()) {
+                one = 1;
                 r = setsockopt(s->native_fd, SOL_SOCKET, SO_PASSSEC, &one, sizeof(one));
                 if (r < 0)
-                        log_warning_errno(errno, "SO_PASSSEC failed: %m");
+                        log_warning("SO_PASSSEC failed: %m");
         }
 #endif
 
+        one = 1;
         r = setsockopt(s->native_fd, SOL_SOCKET, SO_TIMESTAMP, &one, sizeof(one));
-        if (r < 0)
-                return log_error_errno(errno, "SO_TIMESTAMP failed: %m");
+        if (r < 0) {
+                log_error("SO_TIMESTAMP failed: %m");
+                return -errno;
+        }
 
-        r = sd_event_add_io(s->event, &s->native_event_source, s->native_fd, EPOLLIN, server_process_datagram, s);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add native server fd to event loop: %m");
+        r = sd_event_add_io(s->event, &s->native_event_source, s->native_fd, EPOLLIN, process_datagram, s);
+        if (r < 0) {
+                log_error("Failed to add native server fd to event loop: %s", strerror(-r));
+                return r;
+        }
 
         return 0;
 }

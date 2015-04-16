@@ -1,11 +1,9 @@
 /*
- * expose input properties via udev
+ * compose persistent device path
  *
  * Copyright (C) 2009 Martin Pitt <martin.pitt@ubuntu.com>
  * Portions Copyright (C) 2004 David Zeuthen, <david@fubar.dk>
  * Copyright (C) 2011 Kay Sievers <kay@vrfy.org>
- * Copyright (C) 2014 Carlos Garnacho <carlosg@gnome.org>
- * Copyright (C) 2014 David Herrmann <dh.herrmann@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,7 +29,6 @@
 #include <linux/input.h>
 
 #include "udev.h"
-#include "util.h"
 
 /* we must use this kernel-compatible implementation */
 #define BITS_PER_LONG (sizeof(unsigned long) * 8)
@@ -40,34 +37,6 @@
 #define BIT(x)  (1UL<<OFF(x))
 #define LONG(x) ((x)/BITS_PER_LONG)
 #define test_bit(bit, array)    ((array[LONG(bit)] >> OFF(bit)) & 1)
-
-static inline int abs_size_mm(const struct input_absinfo *absinfo) {
-        /* Resolution is defined to be in units/mm for ABS_X/Y */
-        return (absinfo->maximum - absinfo->minimum) / absinfo->resolution;
-}
-
-static void extract_info(struct udev_device *dev, const char *devpath, bool test) {
-        char width[DECIMAL_STR_MAX(int)], height[DECIMAL_STR_MAX(int)];
-        struct input_absinfo xabsinfo = {}, yabsinfo = {};
-        _cleanup_close_ int fd = -1;
-
-        fd = open(devpath, O_RDONLY|O_CLOEXEC);
-        if (fd < 0)
-                return;
-
-        if (ioctl(fd, EVIOCGABS(ABS_X), &xabsinfo) < 0 ||
-            ioctl(fd, EVIOCGABS(ABS_Y), &yabsinfo) < 0)
-                return;
-
-        if (xabsinfo.resolution <= 0 || yabsinfo.resolution <= 0)
-                return;
-
-        snprintf(width, sizeof(width), "%d", abs_size_mm(&xabsinfo));
-        snprintf(height, sizeof(height), "%d", abs_size_mm(&yabsinfo));
-
-        udev_builtin_add_property(dev, test, "ID_INPUT_WIDTH_MM", width);
-        udev_builtin_add_property(dev, test, "ID_INPUT_HEIGHT_MM", height);
-}
 
 /*
  * Read a capability attribute and return bitmask.
@@ -78,18 +47,14 @@ static void extract_info(struct udev_device *dev, const char *devpath, bool test
 static void get_cap_mask(struct udev_device *dev,
                          struct udev_device *pdev, const char* attr,
                          unsigned long *bitmask, size_t bitmask_size,
-                         bool test) {
-        const char *v;
+                         bool test)
+{
         char text[4096];
         unsigned i;
         char* word;
         unsigned long val;
 
-        v = udev_device_get_sysattr_value(pdev, attr);
-        if (!v)
-                v = "";
-
-        snprintf(text, sizeof(text), "%s", v);
+        snprintf(text, sizeof(text), "%s", udev_device_get_sysattr_value(pdev, attr));
         log_debug("%s raw kernel attribute: %s", attr, text);
 
         memzero(bitmask, bitmask_size);
@@ -111,7 +76,7 @@ static void get_cap_mask(struct udev_device *dev,
 
         if (test) {
                 /* printf pattern with the right unsigned long number of hex chars */
-                snprintf(text, sizeof(text), "  bit %%4u: %%0%zulX\n", 2 * sizeof(unsigned long));
+                snprintf(text, sizeof(text), "  bit %%4u: %%0%zilX\n", 2 * sizeof(unsigned long));
                 log_debug("%s decoded bit map:", attr);
                 val = bitmask_size / sizeof (unsigned long);
                 /* skip over leading zeros */
@@ -131,7 +96,8 @@ static void test_pointers (struct udev_device *dev,
                            const unsigned long* bitmask_abs,
                            const unsigned long* bitmask_key,
                            const unsigned long* bitmask_rel,
-                           bool test) {
+                           bool test)
+{
         int is_mouse = 0;
         int is_touchpad = 0;
 
@@ -188,7 +154,8 @@ static void test_pointers (struct udev_device *dev,
 static void test_key (struct udev_device *dev,
                       const unsigned long* bitmask_ev,
                       const unsigned long* bitmask_key,
-                      bool test) {
+                      bool test)
+{
         unsigned i;
         unsigned long found;
         unsigned long mask;
@@ -226,13 +193,13 @@ static void test_key (struct udev_device *dev,
                 udev_builtin_add_property(dev, test, "ID_INPUT_KEYBOARD", "1");
 }
 
-static int builtin_input_id(struct udev_device *dev, int argc, char *argv[], bool test) {
+static int builtin_input_id(struct udev_device *dev, int argc, char *argv[], bool test)
+{
         struct udev_device *pdev;
         unsigned long bitmask_ev[NBITS(EV_MAX)];
         unsigned long bitmask_abs[NBITS(ABS_MAX)];
         unsigned long bitmask_key[NBITS(KEY_MAX)];
         unsigned long bitmask_rel[NBITS(REL_MAX)];
-        const char *sysname, *devnode;
 
         /* walk up the parental chain until we find the real input device; the
          * argument is very likely a subdevice of this, like eventN */
@@ -240,28 +207,24 @@ static int builtin_input_id(struct udev_device *dev, int argc, char *argv[], boo
         while (pdev != NULL && udev_device_get_sysattr_value(pdev, "capabilities/ev") == NULL)
                 pdev = udev_device_get_parent_with_subsystem_devtype(pdev, "input", NULL);
 
-        if (pdev) {
-                /* Use this as a flag that input devices were detected, so that this
-                 * program doesn't need to be called more than once per device */
-                udev_builtin_add_property(dev, test, "ID_INPUT", "1");
-                get_cap_mask(dev, pdev, "capabilities/ev", bitmask_ev, sizeof(bitmask_ev), test);
-                get_cap_mask(dev, pdev, "capabilities/abs", bitmask_abs, sizeof(bitmask_abs), test);
-                get_cap_mask(dev, pdev, "capabilities/rel", bitmask_rel, sizeof(bitmask_rel), test);
-                get_cap_mask(dev, pdev, "capabilities/key", bitmask_key, sizeof(bitmask_key), test);
-                test_pointers(dev, bitmask_ev, bitmask_abs, bitmask_key, bitmask_rel, test);
-                test_key(dev, bitmask_ev, bitmask_key, test);
-        }
+        /* not an "input" class device */
+        if (pdev == NULL)
+                return EXIT_SUCCESS;
 
-        devnode = udev_device_get_devnode(dev);
-        sysname = udev_device_get_sysname(dev);
-        if (devnode && sysname && startswith(sysname, "event"))
-                extract_info(dev, devnode, test);
-
+        /* Use this as a flag that input devices were detected, so that this
+         * program doesn't need to be called more than once per device */
+        udev_builtin_add_property(dev, test, "ID_INPUT", "1");
+        get_cap_mask(dev, pdev, "capabilities/ev", bitmask_ev, sizeof(bitmask_ev), test);
+        get_cap_mask(dev, pdev, "capabilities/abs", bitmask_abs, sizeof(bitmask_abs), test);
+        get_cap_mask(dev, pdev, "capabilities/rel", bitmask_rel, sizeof(bitmask_rel), test);
+        get_cap_mask(dev, pdev, "capabilities/key", bitmask_key, sizeof(bitmask_key), test);
+        test_pointers(dev, bitmask_ev, bitmask_abs, bitmask_key, bitmask_rel, test);
+        test_key(dev, bitmask_ev, bitmask_key, test);
         return EXIT_SUCCESS;
 }
 
 const struct udev_builtin udev_builtin_input_id = {
         .name = "input_id",
         .cmd = builtin_input_id,
-        .help = "Input device properties",
+        .help = "input device properties",
 };

@@ -24,7 +24,7 @@
 #include <errno.h>
 #include <string.h>
 #include <dirent.h>
-#include <poll.h>
+#include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -109,7 +109,10 @@ static struct udev_monitor *udev_monitor_new(struct udev *udev)
 /* we consider udev running when /dev is on devtmpfs */
 static bool udev_has_devtmpfs(struct udev *udev) {
 
-        union file_handle_union h = FILE_HANDLE_INIT;
+        union file_handle_union h = {
+                .handle.handle_bytes = MAX_HANDLE_SZ
+        };
+
         _cleanup_fclose_ FILE *f = NULL;
         char line[LINE_MAX], *e;
         int mount_id;
@@ -118,7 +121,7 @@ static bool udev_has_devtmpfs(struct udev *udev) {
         r = name_to_handle_at(AT_FDCWD, "/dev", &h.handle, &mount_id, 0);
         if (r < 0) {
                 if (errno != EOPNOTSUPP)
-                        log_debug_errno(errno, "name_to_handle_at on /dev: %m");
+                        udev_err(udev, "name_to_handle_at on /dev: %m\n");
                 return false;
         }
 
@@ -171,7 +174,7 @@ struct udev_monitor *udev_monitor_new_from_netlink_fd(struct udev *udev, const c
                  * will not receive any messages.
                  */
                 if (access("/run/udev/control", F_OK) < 0 && !udev_has_devtmpfs(udev)) {
-                        log_debug("the udev service seems not to be active, disable the monitor");
+                        udev_dbg(udev, "the udev service seems not to be active, disable the monitor\n");
                         group = UDEV_MONITOR_NONE;
                 } else
                         group = UDEV_MONITOR_UDEV;
@@ -187,7 +190,7 @@ struct udev_monitor *udev_monitor_new_from_netlink_fd(struct udev *udev, const c
         if (fd < 0) {
                 udev_monitor->sock = socket(PF_NETLINK, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK, NETLINK_KOBJECT_UEVENT);
                 if (udev_monitor->sock == -1) {
-                        log_debug_errno(errno, "error getting socket: %m");
+                        udev_err(udev, "error getting socket: %m\n");
                         free(udev_monitor);
                         return NULL;
                 }
@@ -404,15 +407,12 @@ _public_ int udev_monitor_enable_receiving(struct udev_monitor *udev_monitor)
                 if (err == 0)
                         udev_monitor->snl.nl.nl_pid = snl.nl.nl_pid;
         } else {
-                log_debug_errno(errno, "bind failed: %m");
+                udev_err(udev_monitor->udev, "bind failed: %m\n");
                 return -errno;
         }
 
         /* enable receiving of sender credentials */
-        err = setsockopt(udev_monitor->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
-        if (err < 0)
-                log_debug_errno(errno, "setting SO_PASSCRED failed: %m");
-
+        setsockopt(udev_monitor->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
         return 0;
 }
 
@@ -579,13 +579,9 @@ _public_ struct udev_device *udev_monitor_receive_device(struct udev_monitor *ud
         struct cmsghdr *cmsg;
         union sockaddr_union snl;
         struct ucred *cred;
-        union {
-                struct udev_monitor_netlink_header nlh;
-                char raw[8192];
-        } buf;
+        char buf[8192];
         ssize_t buflen;
         ssize_t bufpos;
-        bool is_initialized = false;
 
 retry:
         if (udev_monitor == NULL)
@@ -603,12 +599,12 @@ retry:
         buflen = recvmsg(udev_monitor->sock, &smsg, 0);
         if (buflen < 0) {
                 if (errno != EINTR)
-                        log_debug("unable to receive message");
+                        udev_dbg(udev_monitor->udev, "unable to receive message\n");
                 return NULL;
         }
 
-        if (buflen < 32 || (smsg.msg_flags & MSG_TRUNC)) {
-                log_debug("invalid message length");
+        if (buflen < 32 || (size_t)buflen >= sizeof(buf)) {
+                udev_dbg(udev_monitor->udev, "invalid message length\n");
                 return NULL;
         }
 
@@ -616,65 +612,89 @@ retry:
                 /* unicast message, check if we trust the sender */
                 if (udev_monitor->snl_trusted_sender.nl.nl_pid == 0 ||
                     snl.nl.nl_pid != udev_monitor->snl_trusted_sender.nl.nl_pid) {
-                        log_debug("unicast netlink message ignored");
+                        udev_dbg(udev_monitor->udev, "unicast netlink message ignored\n");
                         return NULL;
                 }
         } else if (snl.nl.nl_groups == UDEV_MONITOR_KERNEL) {
                 if (snl.nl.nl_pid > 0) {
-                        log_debug("multicast kernel netlink message from PID %"PRIu32" ignored",
-                                  snl.nl.nl_pid);
+                        udev_dbg(udev_monitor->udev, "multicast kernel netlink message from pid %d ignored\n",
+                             snl.nl.nl_pid);
                         return NULL;
                 }
         }
 
         cmsg = CMSG_FIRSTHDR(&smsg);
         if (cmsg == NULL || cmsg->cmsg_type != SCM_CREDENTIALS) {
-                log_debug("no sender credentials received, message ignored");
+                udev_dbg(udev_monitor->udev, "no sender credentials received, message ignored\n");
                 return NULL;
         }
 
         cred = (struct ucred *)CMSG_DATA(cmsg);
         if (cred->uid != 0) {
-                log_debug("sender uid="UID_FMT", message ignored", cred->uid);
+                udev_dbg(udev_monitor->udev, "sender uid=%d, message ignored\n", cred->uid);
                 return NULL;
         }
 
-        if (memcmp(buf.raw, "libudev", 8) == 0) {
+        udev_device = udev_device_new(udev_monitor->udev);
+        if (udev_device == NULL)
+                return NULL;
+
+        if (memcmp(buf, "libudev", 8) == 0) {
+                struct udev_monitor_netlink_header *nlh;
+
                 /* udev message needs proper version magic */
-                if (buf.nlh.magic != htonl(UDEV_MONITOR_MAGIC)) {
-                        log_debug("unrecognized message signature (%x != %x)",
-                                 buf.nlh.magic, htonl(UDEV_MONITOR_MAGIC));
+                nlh = (struct udev_monitor_netlink_header *) buf;
+                if (nlh->magic != htonl(UDEV_MONITOR_MAGIC)) {
+                        udev_err(udev_monitor->udev, "unrecognized message signature (%x != %x)\n",
+                                 nlh->magic, htonl(UDEV_MONITOR_MAGIC));
+                        udev_device_unref(udev_device);
                         return NULL;
                 }
-                if (buf.nlh.properties_off+32 > (size_t)buflen) {
+                if (nlh->properties_off+32 > (size_t)buflen) {
+                        udev_device_unref(udev_device);
                         return NULL;
                 }
 
-                bufpos = buf.nlh.properties_off;
+                bufpos = nlh->properties_off;
 
                 /* devices received from udev are always initialized */
-                is_initialized = true;
+                udev_device_set_is_initialized(udev_device);
         } else {
                 /* kernel message with header */
-                bufpos = strlen(buf.raw) + 1;
+                bufpos = strlen(buf) + 1;
                 if ((size_t)bufpos < sizeof("a@/d") || bufpos >= buflen) {
-                        log_debug("invalid message length");
+                        udev_dbg(udev_monitor->udev, "invalid message length\n");
+                        udev_device_unref(udev_device);
                         return NULL;
                 }
 
                 /* check message header */
-                if (strstr(buf.raw, "@/") == NULL) {
-                        log_debug("unrecognized message header");
+                if (strstr(buf, "@/") == NULL) {
+                        udev_dbg(udev_monitor->udev, "unrecognized message header\n");
+                        udev_device_unref(udev_device);
                         return NULL;
                 }
         }
 
-        udev_device = udev_device_new_from_nulstr(udev_monitor->udev, &buf.raw[bufpos], buflen - bufpos);
-        if (!udev_device)
-                return NULL;
+        udev_device_set_info_loaded(udev_device);
 
-        if (is_initialized)
-                udev_device_set_is_initialized(udev_device);
+        while (bufpos < buflen) {
+                char *key;
+                size_t keylen;
+
+                key = &buf[bufpos];
+                keylen = strlen(key);
+                if (keylen == 0)
+                        break;
+                bufpos += keylen + 1;
+                udev_device_add_property_from_string_parse(udev_device, key);
+        }
+
+        if (udev_device_add_property_from_string_parse_finish(udev_device) < 0) {
+                udev_dbg(udev_monitor->udev, "missing values, invalid device\n");
+                udev_device_unref(udev_device);
+                return NULL;
+        }
 
         /* skip device, if it does not pass the current filter */
         if (!passes_filter(udev_monitor, udev_device)) {
@@ -755,7 +775,7 @@ int udev_monitor_send_device(struct udev_monitor *udev_monitor,
                 smsg.msg_name = &udev_monitor->snl_destination;
         smsg.msg_namelen = sizeof(struct sockaddr_nl);
         count = sendmsg(udev_monitor->sock, &smsg, 0);
-        log_debug("passed %zi bytes to netlink monitor %p", count, udev_monitor);
+        udev_dbg(udev_monitor->udev, "passed %zi bytes to netlink monitor %p\n", count, udev_monitor);
         return count;
 }
 

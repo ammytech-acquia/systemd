@@ -1,5 +1,5 @@
 '\" t
-.TH "SYSTEMD\-NSPAWN" "1" "" "systemd 219" "systemd-nspawn"
+.TH "SYSTEMD\-NSPAWN" "1" "" "systemd 215" "systemd-nspawn"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -48,7 +48,6 @@ In contrast to
 may be used to boot full Linux\-based operating systems in a container\&.
 .PP
 Use a tool like
-\fBdnf\fR(8),
 \fByum\fR(8),
 \fBdebootstrap\fR(8), or
 \fBpacman\fR(8)
@@ -97,100 +96,19 @@ The following options are understood:
 .PP
 \fB\-D\fR, \fB\-\-directory=\fR
 .RS 4
-Directory to use as file system root for the container\&.
-.sp
-If neither
-\fB\-\-directory=\fR, nor
+Directory to use as file system root for the container\&. If neither
+\fB\-\-directory=\fR
+nor
 \fB\-\-image=\fR
-is specified the directory is determined as
-/var/lib/machines/
-suffixed by the machine name as specified with
-\fB\-\-machine=\fR\&. If neither
-\fB\-\-directory=\fR,
-\fB\-\-image=\fR, nor
-\fB\-\-machine=\fR
 are specified, the current directory will be used\&. May not be specified together with
 \fB\-\-image=\fR\&.
 .RE
 .PP
-\fB\-\-template=\fR
-.RS 4
-Directory or
-"btrfs"
-subvolume to use as template for the container\*(Aqs root directory\&. If this is specified and the container\*(Aqs root directory (as configured by
-\fB\-\-directory=\fR) does not yet exist it is created as
-"btrfs"
-subvolume and populated from this template tree\&. Ideally, the specified template path refers to the root of a
-"btrfs"
-subvolume, in which case a simple copy\-on\-write snapshot is taken, and populating the root directory is instant\&. If the specified template path does not refer to the root of a
-"btrfs"
-subvolume (or not even to a
-"btrfs"
-file system at all), the tree is copied, which can be substantially more time\-consuming\&. Note that if this option is used the container\*(Aqs root directory (in contrast to the template directory!) must be located on a
-"btrfs"
-file system, so that the
-"btrfs"
-subvolume may be created\&. May not be specified together with
-\fB\-\-image=\fR
-or
-\fB\-\-ephemeral\fR\&.
-.RE
-.PP
-\fB\-x\fR, \fB\-\-ephemeral\fR
-.RS 4
-If specified, the container is run with a temporary
-"btrfs"
-snapshot of its root directory (as configured with
-\fB\-\-directory=\fR), that is removed immediately when the container terminates\&. This option is only supported if the root file system is
-"btrfs"\&. May not be specified together with
-\fB\-\-image=\fR
-or
-\fB\-\-template=\fR\&.
-.RE
-.PP
 \fB\-i\fR, \fB\-\-image=\fR
 .RS 4
-Disk image to mount the root directory for the container from\&. Takes a path to a regular file or to a block device node\&. The file or block device must contain either:
-.sp
-.RS 4
-.ie n \{\
-\h'-04'\(bu\h'+03'\c
-.\}
-.el \{\
-.sp -1
-.IP \(bu 2.3
-.\}
-An MBR partition table with a single partition of type 0x83 that is marked bootable\&.
-.RE
-.sp
-.RS 4
-.ie n \{\
-\h'-04'\(bu\h'+03'\c
-.\}
-.el \{\
-.sp -1
-.IP \(bu 2.3
-.\}
-A GUID partition table (GPT) with a single partition of type 0fc63daf\-8483\-4772\-8e79\-3d69d8477de4\&.
-.RE
-.sp
-.RS 4
-.ie n \{\
-\h'-04'\(bu\h'+03'\c
-.\}
-.el \{\
-.sp -1
-.IP \(bu 2.3
-.\}
-A GUID partition table (GPT) with a marked root partition which is mounted as the root directory of the container\&. Optionally, GPT images may contain a home and/or a server data partition which are mounted to the appropriate places in the container\&. All these partitions must be identified by the partition types defined by the
-\m[blue]\fBDiscoverable Partitions Specification\fR\m[]\&\s-2\u[2]\d\s+2\&.
-.RE
-.sp
-Any other partitions, such as foreign partitions, swap partitions or EFI system partitions are not mounted\&. May not be specified together with
-\fB\-\-directory=\fR,
-\fB\-\-template=\fR
-or
-\fB\-\-ephemeral\fR\&.
+Disk image to mount the root directory for the container from\&. Takes a path to a regular file or to a block device node\&. The file or block device must contain a GUID Partition Table with a root partition which is mounted as the root directory of the container\&. Optionally, it may contain a home and/or a server data partition which are mounted to the appropriate places in the container\&. All these partitions must be identified by the partition types defined by the
+\m[blue]\fBDiscoverable Partitions Specification\fR\m[]\&\s-2\u[2]\d\s+2\&. Any other partitions, such as foreign partitions, swap partitions or EFI system partitions are not mounted\&. May not be specified together with
+\fB\-\-directory=\fR\&.
 .RE
 .PP
 \fB\-b\fR, \fB\-\-boot\fR
@@ -206,11 +124,7 @@ After transitioning into the container, change to the specified user\-defined in
 .PP
 \fB\-M\fR, \fB\-\-machine=\fR
 .RS 4
-Sets the machine name for this container\&. This name may be used to identify this container during its runtime (for example in tools like
-\fBmachinectl\fR(1)
-and similar), and is used to initialize the container\*(Aqs hostname (which the container can choose to override, however)\&. If not specified, the last component of the root directory path of the container is used, possibly suffixed with a random identifier in case
-\fB\-\-ephemeral\fR
-mode is selected\&. If the root directory selected is the host\*(Aqs root directory the host\*(Aqs hostname is used as default instead\&.
+Sets the machine name for this container\&. This name may be used to identify this container on the host, and is used to initialize the container\*(Aqs hostname (which the container can choose to override, however)\&. If not specified, the last component of the root directory of the container is used\&.
 .RE
 .PP
 \fB\-\-uuid=\fR
@@ -256,22 +170,7 @@ implies
 \fB\-\-private\-network\fR\&. This option may be used more than once to add multiple network interfaces to the container\&.
 .RE
 .PP
-\fB\-\-network\-ipvlan=\fR
-.RS 4
-Create an
-"ipvlan"
-interface of the specified Ethernet network interface and add it to the container\&. An
-"ipvlan"
-interface is a virtual interface, similar to a
-"macvlan"
-interface, which uses the same MAC address as the underlying interface\&. The interface in the container will be named after the interface on the host, prefixed with
-"iv\-"\&. Note that
-\fB\-\-network\-ipvlan=\fR
-implies
-\fB\-\-private\-network\fR\&. This option may be used more than once to add multiple network interfaces to the container\&.
-.RE
-.PP
-\fB\-n\fR, \fB\-\-network\-veth\fR
+\fB\-\-network\-veth\fR
 .RS 4
 Create a virtual Ethernet link ("veth") between host and container\&. The host side of the Ethernet link will be available as a network interface named after the container\*(Aqs name (as specified with
 \fB\-\-machine=\fR), prefixed with
@@ -293,19 +192,6 @@ implies
 "vb\-"
 prefix instead of
 "ve\-"\&.
-.RE
-.PP
-\fB\-p\fR, \fB\-\-port=\fR
-.RS 4
-If private networking is enabled, maps an IP port on the host onto an IP port on the container\&. Takes a protocol specifier (either
-"tcp"
-or
-"udp"), separated by a colon from a host port number in the range 1 to 65535, separated by a colon from a container port number in the range from 1 to 65535\&. The protocol specifier and its separating colon may be omitted, in which case
-"tcp"
-is assumed\&. The container port number and its colon may be ommitted, in which case the same port as the host port is implied\&. This option is only supported if private networking is used, such as
-\fB\-\-network\-veth\fR
-or
-\fB\-\-network\-bridge=\fR\&.
 .RE
 .PP
 \fB\-Z\fR, \fB\-\-selinux\-context=\fR
@@ -339,19 +225,13 @@ Specify one or more additional capabilities to drop for the container\&. This al
 Control whether the container\*(Aqs journal shall be made visible to the host system\&. If enabled, allows viewing the container\*(Aqs journal files from the host (but not vice versa)\&. Takes one of
 "no",
 "host",
-"try\-host",
 "guest",
-"try\-guest",
 "auto"\&. If
 "no", the journal is not linked\&. If
 "host", the journal files are stored on the host file system (beneath
 /var/log/journal/\fImachine\-id\fR) and the subdirectory is bind\-mounted into the container at the same location\&. If
 "guest", the journal files are stored on the guest file system (beneath
-/var/log/journal/\fImachine\-id\fR) and the subdirectory is symlinked into the host at the same location\&.
-"try\-host"
-and
-"try\-guest"
-do the same but do not fail if the host does not have persistent journalling enabled\&. If
+/var/log/journal/\fImachine\-id\fR) and the subdirectory is symlinked into the host at the same location\&. If
 "auto"
 (the default), and the right subdirectory of
 /var/log/journal
@@ -367,7 +247,7 @@ is used\&.
 \fB\-j\fR
 .RS 4
 Equivalent to
-\fB\-\-link\-journal=try\-guest\fR\&.
+\fB\-\-link\-journal=guest\fR\&.
 .RE
 .PP
 \fB\-\-read\-only\fR
@@ -447,35 +327,6 @@ are supported\&. This is useful when running a 32\-bit container on a 64\-bit ho
 Turns off any status output by the tool itself\&. When this switch is used, the only output from nspawn will be the console output of the container OS itself\&.
 .RE
 .PP
-\fB\-\-volatile\fR\fI=MODE\fR
-.RS 4
-Boots the container in volatile mode\&. When no mode parameter is passed or when mode is specified as
-"yes"
-full volatile mode is enabled\&. This means the root directory is mounted as mostly unpopulated
-"tmpfs"
-instance, and
-/usr
-from the OS tree is mounted into it, read\-only (the system thus starts up with read\-only OS resources, but pristine state and configuration, any changes to the either are lost on shutdown)\&. When the mode parameter is specified as
-"state"
-the OS tree is mounted read\-only, but
-/var
-is mounted as
-"tmpfs"
-instance into it (the system thus starts up with read\-only OS resources and configuration, but pristine state, any changes to the latter are lost on shutdown)\&. When the mode parameter is specified as
-"no"
-(the default) the whole OS tree is made available writable\&.
-.sp
-Note that setting this to
-"yes"
-or
-"state"
-will only work correctly with operating systems in the container that can boot up with only
-/usr
-mounted, and are able to populate
-/var
-automatically, as needed\&.
-.RE
-.PP
 \fB\-h\fR, \fB\-\-help\fR
 .RS 4
 Print a short help text and exit\&.
@@ -485,32 +336,13 @@ Print a short help text and exit\&.
 .RS 4
 Print a short version string and exit\&.
 .RE
-.SH "EXAMPLES"
-.PP
-\fBExample\ \&1.\ \&Download a Fedora image and start a shell in it\fR
+.SH "EXAMPLE 1"
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-# machinectl pull\-raw \-\-verify=no http://ftp\&.halifax\&.rwth\-aachen\&.de/fedora/linux/releases/21/Cloud/Images/x86_64/Fedora\-Cloud\-Base\-20141203\-21\&.x86_64\&.raw\&.xz
-# systemd\-nspawn \-M Fedora\-Cloud\-Base\-20141203\-21
-.fi
-.if n \{\
-.RE
-.\}
-.PP
-This downloads an image using
-\fBmachinectl\fR(1)
-and opens a shell in it\&.
-.PP
-\fBExample\ \&2.\ \&Build and boot a minimal Fedora distribution in a container\fR
-.sp
-.if n \{\
-.RS 4
-.\}
-.nf
-# dnf \-y \-\-releasever=21 \-\-nogpg \-\-installroot=/srv/mycontainer \-\-disablerepo=\*(Aq*\*(Aq \-\-enablerepo=fedora install systemd passwd dnf fedora\-release vim\-minimal
+# yum \-y \-\-releasever=19 \-\-nogpg \-\-installroot=/srv/mycontainer \-\-disablerepo=\*(Aq*\*(Aq \-\-enablerepo=fedora install systemd passwd yum fedora\-release vim\-minimal
 # systemd\-nspawn \-bD /srv/mycontainer
 .fi
 .if n \{\
@@ -520,8 +352,7 @@ and opens a shell in it\&.
 This installs a minimal Fedora distribution into the directory
 /srv/mycontainer/
 and then boots an OS in a namespace container in it\&.
-.PP
-\fBExample\ \&3.\ \&Spawn a shell in a container of a minimal Debian unstable distribution\fR
+.SH "EXAMPLE 2"
 .sp
 .if n \{\
 .RS 4
@@ -537,8 +368,7 @@ and then boots an OS in a namespace container in it\&.
 This installs a minimal Debian unstable distribution into the directory
 ~/debian\-tree/
 and then spawns a shell in a namespace container in it\&.
-.PP
-\fBExample\ \&4.\ \&Boot a minimal Arch Linux distribution in a container\fR
+.SH "EXAMPLE 3"
 .sp
 .if n \{\
 .RS 4
@@ -554,24 +384,38 @@ and then spawns a shell in a namespace container in it\&.
 This installs a mimimal Arch Linux distribution into the directory
 ~/arch\-tree/
 and then boots an OS in a namespace container in it\&.
-.PP
-\fBExample\ \&5.\ \&Boot into an ephemeral "btrfs" snapshot of the host system\fR
+.SH "EXAMPLE 4"
 .sp
 .if n \{\
 .RS 4
 .\}
 .nf
-# systemd\-nspawn \-D / \-xb
+# mv ~/arch\-tree /var/lib/container/arch
+# systemctl enable systemd\-nspawn@arch\&.service
+# systemctl start systemd\-nspawn@arch\&.service
 .fi
 .if n \{\
 .RE
 .\}
 .PP
-This runs a copy of the host system in a
-"btrfs"
-snapshot which is removed immediately when the container exits\&. All file system changes made during runtime will be lost on shutdown, hence\&.
+This makes the Arch Linux container part of the
+multi\-user\&.target
+on the host\&.
+.SH "EXAMPLE 5"
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+# btrfs subvolume snapshot / /\&.tmp
+# systemd\-nspawn \-\-private\-network \-D /\&.tmp \-b
+.fi
+.if n \{\
+.RE
+.\}
 .PP
-\fBExample\ \&6.\ \&Run a container with SELinux sandbox security contexts\fR
+This runs a copy of the host system in a btrfs snapshot\&.
+.SH "EXAMPLE 6"
 .sp
 .if n \{\
 .RS 4
@@ -583,6 +427,8 @@ snapshot which is removed immediately when the container exits\&. All file syste
 .if n \{\
 .RE
 .\}
+.PP
+This runs a container with SELinux sandbox security contexts\&.
 .SH "EXIT STATUS"
 .PP
 The exit code of the program executed in the container is returned\&.
@@ -590,13 +436,11 @@ The exit code of the program executed in the container is returned\&.
 .PP
 \fBsystemd\fR(1),
 \fBchroot\fR(1),
-\fBdnf\fR(8),
 \fByum\fR(8),
 \fBdebootstrap\fR(8),
 \fBpacman\fR(8),
 \fBsystemd.slice\fR(5),
-\fBmachinectl\fR(1),
-\fBbtrfs\fR(8)
+\fBmachinectl\fR(1)
 .SH "NOTES"
 .IP " 1." 4
 Container Interface

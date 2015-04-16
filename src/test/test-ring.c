@@ -31,12 +31,12 @@
 
 static void test_ring(void) {
         static const char buf[8192];
-        Ring r;
+        struct ring r;
         size_t l;
         struct iovec vec[2];
         int s;
 
-        zero(r);
+        memset(&r, 0, sizeof(r));
 
         l = ring_peek(&r, vec);
         assert_se(l == 0);

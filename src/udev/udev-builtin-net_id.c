@@ -149,22 +149,25 @@ static int dev_pci_onboard(struct udev_device *dev, struct netnames *names) {
 
 /* read the 256 bytes PCI configuration space to check the multi-function bit */
 static bool is_pci_multifunction(struct udev_device *dev) {
-        _cleanup_fclose_ FILE *f = NULL;
-        const char *filename;
-        uint8_t config[64];
+        char filename[256];
+        FILE *f = NULL;
+        char config[64];
+        bool multi = false;
 
-        filename = strjoina(udev_device_get_syspath(dev), "/config");
+        snprintf(filename, sizeof(filename), "%s/config", udev_device_get_syspath(dev));
         f = fopen(filename, "re");
         if (!f)
-                return false;
+                goto out;
         if (fread(&config, sizeof(config), 1, f) != 1)
-                return false;
+                goto out;
 
         /* bit 0-6 header type, bit 7 multi/single function device */
         if ((config[PCI_HEADER_TYPE] & 0x80) != 0)
-                return true;
-
-        return false;
+                multi = true;
+out:
+        if (f)
+                fclose(f);
+        return multi;
 }
 
 static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
@@ -191,12 +194,12 @@ static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
         s = names->pci_path;
         l = sizeof(names->pci_path);
         if (domain > 0)
-                l = strpcpyf(&s, l, "P%u", domain);
-        l = strpcpyf(&s, l, "p%us%u", bus, slot);
+                l = strpcpyf(&s, l, "P%d", domain);
+        l = strpcpyf(&s, l, "p%ds%d", bus, slot);
         if (func > 0 || is_pci_multifunction(names->pcidev))
-                l = strpcpyf(&s, l, "f%u", func);
+                l = strpcpyf(&s, l, "f%d", func);
         if (dev_port > 0)
-                l = strpcpyf(&s, l, "d%u", dev_port);
+                l = strpcpyf(&s, l, "d%d", dev_port);
         if (l == 0)
                 names->pci_path[0] = '\0';
 
@@ -307,7 +310,7 @@ static int names_usb(struct udev_device *dev, struct netnames *names) {
         s[0] = '\0';
         interf = s+1;
 
-        /* prefix every port number in the chain with "u" */
+        /* prefix every port number in the chain with "u"*/
         s = ports;
         while ((s = strchr(s, '.')))
                 s[0] = 'u';
@@ -562,5 +565,5 @@ out:
 const struct udev_builtin udev_builtin_net_id = {
         .name = "net_id",
         .cmd = builtin_net_id,
-        .help = "Network device properties",
+        .help = "network device properties",
 };

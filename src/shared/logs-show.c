@@ -22,7 +22,7 @@
 #include <time.h>
 #include <assert.h>
 #include <errno.h>
-#include <poll.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <string.h>
 #include <fcntl.h>
@@ -295,8 +295,10 @@ static int output_short(
                 if (r < 0)
                         r = sd_journal_get_monotonic_usec(j, &t, &boot_id);
 
-                if (r < 0)
-                        return log_error_errno(r, "Failed to get monotonic timestamp: %m");
+                if (r < 0) {
+                        log_error("Failed to get monotonic timestamp: %s", strerror(-r));
+                        return r;
+                }
 
                 fprintf(f, "[%5llu.%06llu]",
                         (unsigned long long) (t / USEC_PER_SEC),
@@ -309,10 +311,8 @@ static int output_short(
                 uint64_t x;
                 time_t t;
                 struct tm tm;
-                struct tm *(*gettime_r)(const time_t *, struct tm *);
 
                 r = -ENOENT;
-                gettime_r = (flags & OUTPUT_UTC) ? gmtime_r : localtime_r;
 
                 if (realtime)
                         r = safe_atou64(realtime, &x);
@@ -320,24 +320,26 @@ static int output_short(
                 if (r < 0)
                         r = sd_journal_get_realtime_usec(j, &x);
 
-                if (r < 0)
-                        return log_error_errno(r, "Failed to get realtime timestamp: %m");
+                if (r < 0) {
+                        log_error("Failed to get realtime timestamp: %s", strerror(-r));
+                        return r;
+                }
 
                 t = (time_t) (x / USEC_PER_SEC);
 
                 switch(mode) {
                 case OUTPUT_SHORT_ISO:
-                        r = strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", gettime_r(&t, &tm));
+                        r = strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", localtime_r(&t, &tm));
                         break;
                 case OUTPUT_SHORT_PRECISE:
-                        r = strftime(buf, sizeof(buf), "%b %d %H:%M:%S", gettime_r(&t, &tm));
+                        r = strftime(buf, sizeof(buf), "%b %d %H:%M:%S", localtime_r(&t, &tm));
                         if (r > 0) {
                                 snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
                                          ".%06llu", (unsigned long long) (x % USEC_PER_SEC));
                         }
                         break;
                 default:
-                        r = strftime(buf, sizeof(buf), "%b %d %H:%M:%S", gettime_r(&t, &tm));
+                        r = strftime(buf, sizeof(buf), "%b %d %H:%M:%S", localtime_r(&t, &tm));
                 }
 
                 if (r <= 0) {
@@ -361,7 +363,7 @@ static int output_short(
                 fprintf(f, " %.*s", (int) comm_len, comm);
                 n += comm_len + 1;
         } else
-                fputs(" unknown", f);
+                fputc(' ', f);
 
         if (pid && shall_print(pid, pid_len, flags)) {
                 fprintf(f, "[%.*s]", (int) pid_len, pid);
@@ -418,11 +420,12 @@ static int output_verbose(
 
                 r = parse_field(data, length, "_SOURCE_REALTIME_TIMESTAMP=", &value, &size);
                 if (r < 0)
-                        log_debug_errno(r, "_SOURCE_REALTIME_TIMESTAMP invalid: %m");
+                        log_debug("_SOURCE_REALTIME_TIMESTAMP invalid: %s", strerror(-r));
                 else {
                         r = safe_atou64(value, &realtime);
                         if (r < 0)
-                                log_debug_errno(r, "Failed to parse realtime timestamp: %m");
+                                log_debug("Failed to parse realtime timestamp: %s",
+                                          strerror(-r));
                 }
         }
 
@@ -436,12 +439,12 @@ static int output_verbose(
         }
 
         r = sd_journal_get_cursor(j, &cursor);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get cursor: %m");
+        if (r < 0) {
+                log_error("Failed to get cursor: %s", strerror(-r));
+                return r;
+        }
 
         fprintf(f, "%s [%s]\n",
-                flags & OUTPUT_UTC ?
-                format_timestamp_us_utc(ts, sizeof(ts), realtime) :
                 format_timestamp_us(ts, sizeof(ts), realtime),
                 cursor);
 
@@ -509,16 +512,22 @@ static int output_export(
         sd_journal_set_data_threshold(j, 0);
 
         r = sd_journal_get_realtime_usec(j, &realtime);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get realtime timestamp: %m");
+        if (r < 0) {
+                log_error("Failed to get realtime timestamp: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_get_monotonic_usec(j, &monotonic, &boot_id);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get monotonic timestamp: %m");
+        if (r < 0) {
+                log_error("Failed to get monotonic timestamp: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_get_cursor(j, &cursor);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get cursor: %m");
+        if (r < 0) {
+                log_error("Failed to get cursor: %s", strerror(-r));
+                return r;
+        }
 
         fprintf(f,
                 "__CURSOR=%s\n"
@@ -643,16 +652,22 @@ static int output_json(
         sd_journal_set_data_threshold(j, flags & OUTPUT_SHOW_ALL ? 0 : JSON_THRESHOLD);
 
         r = sd_journal_get_realtime_usec(j, &realtime);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get realtime timestamp: %m");
+        if (r < 0) {
+                log_error("Failed to get realtime timestamp: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_get_monotonic_usec(j, &monotonic, &boot_id);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get monotonic timestamp: %m");
+        if (r < 0) {
+                log_error("Failed to get monotonic timestamp: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_get_cursor(j, &cursor);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get cursor: %m");
+        if (r < 0) {
+                log_error("Failed to get cursor: %s", strerror(-r));
+                return r;
+        }
 
         if (mode == OUTPUT_JSON_PRETTY)
                 fprintf(f,
@@ -680,7 +695,7 @@ static int output_json(
                         sd_id128_to_string(boot_id, sid));
         }
 
-        h = hashmap_new(&string_hash_ops);
+        h = hashmap_new(string_hash_func, string_compare_func);
         if (!h)
                 return -ENOMEM;
 
@@ -858,7 +873,8 @@ static int output_cat(
                 if (r == -ENOENT)
                         return 0;
 
-                return log_error_errno(r, "Failed to get data: %m");
+                log_error("Failed to get data: %s", strerror(-r));
+                return r;
         }
 
         assert(l >= 8);
@@ -1016,7 +1032,7 @@ static int show_journal(FILE *f,
                 if (!(flags & OUTPUT_FOLLOW))
                         break;
 
-                r = sd_journal_wait(j, USEC_INFINITY);
+                r = sd_journal_wait(j, (usec_t) -1);
                 if (r < 0)
                         goto finish;
 
@@ -1033,10 +1049,10 @@ int add_matches_for_unit(sd_journal *j, const char *unit) {
         assert(j);
         assert(unit);
 
-        m1 = strjoina("_SYSTEMD_UNIT=", unit);
-        m2 = strjoina("COREDUMP_UNIT=", unit);
-        m3 = strjoina("UNIT=", unit);
-        m4 = strjoina("OBJECT_SYSTEMD_UNIT=", unit);
+        m1 = strappenda("_SYSTEMD_UNIT=", unit);
+        m2 = strappenda("COREDUMP_UNIT=", unit);
+        m3 = strappenda("UNIT=", unit);
+        m4 = strappenda("OBJECT_SYSTEMD_UNIT=", unit);
 
         (void)(
             /* Look for messages from the service itself */
@@ -1080,10 +1096,10 @@ int add_matches_for_user_unit(sd_journal *j, const char *unit, uid_t uid) {
         assert(j);
         assert(unit);
 
-        m1 = strjoina("_SYSTEMD_USER_UNIT=", unit);
-        m2 = strjoina("USER_UNIT=", unit);
-        m3 = strjoina("COREDUMP_USER_UNIT=", unit);
-        m4 = strjoina("OBJECT_SYSTEMD_USER_UNIT=", unit);
+        m1 = strappenda("_SYSTEMD_USER_UNIT=", unit);
+        m2 = strappenda("USER_UNIT=", unit);
+        m3 = strappenda("COREDUMP_USER_UNIT=", unit);
+        m4 = strappenda("OBJECT_SYSTEMD_USER_UNIT=", unit);
         sprintf(muid, "_UID="UID_FMT, uid);
 
         (void) (
@@ -1135,7 +1151,7 @@ static int get_boot_id_for_machine(const char *machine, sd_id128_t *boot_id) {
         assert(machine);
         assert(boot_id);
 
-        if (!machine_name_is_valid(machine))
+        if (!filename_is_safe(machine))
                 return -EINVAL;
 
         r = container_get_leader(machine, &pid);
@@ -1205,18 +1221,24 @@ int add_match_this_boot(sd_journal *j, const char *machine) {
 
         if (machine) {
                 r = get_boot_id_for_machine(machine, &boot_id);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to get boot id of container %s: %m", machine);
+                if (r < 0) {
+                        log_error("Failed to get boot id of container %s: %s", machine, strerror(-r));
+                        return r;
+                }
         } else {
                 r = sd_id128_get_boot(&boot_id);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to get boot id: %m");
+                if (r < 0) {
+                        log_error("Failed to get boot id: %s", strerror(-r));
+                        return r;
+                }
         }
 
         sd_id128_to_string(boot_id, match + 9);
         r = sd_journal_add_match(j, match, strlen(match));
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match: %m");
+        if (r < 0) {
+                log_error("Failed to add match: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_add_conjunction(j);
         if (r < 0)
@@ -1234,12 +1256,12 @@ int show_journal_by_unit(
                 unsigned how_many,
                 uid_t uid,
                 OutputFlags flags,
-                int journal_open_flags,
-                bool system_unit,
+                bool system,
                 bool *ellipsized) {
 
         _cleanup_journal_close_ sd_journal*j = NULL;
         int r;
+        int jflags = SD_JOURNAL_LOCAL_ONLY | system * SD_JOURNAL_SYSTEM;
 
         assert(mode >= 0);
         assert(mode < _OUTPUT_MODE_MAX);
@@ -1248,7 +1270,7 @@ int show_journal_by_unit(
         if (how_many <= 0)
                 return 0;
 
-        r = sd_journal_open(&j, journal_open_flags);
+        r = sd_journal_open(&j, jflags);
         if (r < 0)
                 return r;
 
@@ -1256,14 +1278,14 @@ int show_journal_by_unit(
         if (r < 0)
                 return r;
 
-        if (system_unit)
+        if (system)
                 r = add_matches_for_unit(j, unit);
         else
                 r = add_matches_for_user_unit(j, unit, uid);
         if (r < 0)
                 return r;
 
-        if (_unlikely_(log_get_max_level() >= LOG_DEBUG)) {
+        if (_unlikely_(log_get_max_level() >= LOG_PRI(LOG_DEBUG))) {
                 _cleanup_free_ char *filter;
 
                 filter = journal_make_match_string(j);

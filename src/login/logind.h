@@ -114,7 +114,6 @@ struct Manager {
         HandleAction handle_suspend_key;
         HandleAction handle_hibernate_key;
         HandleAction handle_lid_switch;
-        HandleAction handle_lid_switch_docked;
 
         bool power_key_ignore_inhibited;
         bool suspend_key_ignore_inhibited;
@@ -160,7 +159,6 @@ int manager_get_session_by_pid(Manager *m, pid_t pid, Session **session);
 
 bool manager_is_docked(Manager *m);
 int manager_count_displays(Manager *m);
-bool manager_is_docked_or_multiple_displays(Manager *m);
 
 extern const sd_bus_vtable manager_vtable[];
 
@@ -193,7 +191,3 @@ void manager_drop_busname(Manager *manager, const char *name);
 int manager_set_lid_switch_ignore(Manager *m, usec_t until);
 
 int config_parse_tmpfs_size(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
-
-int manager_get_session_from_creds(Manager *m, sd_bus_message *message, const char *name, sd_bus_error *error, Session **ret);
-int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid, sd_bus_error *error, User **ret);
-int manager_get_seat_from_creds(Manager *m, sd_bus_message *message, const char *name, sd_bus_error *error, Seat **ret);

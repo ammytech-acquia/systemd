@@ -129,7 +129,7 @@ char *path_make_absolute_cwd(const char *p) {
         if (!cwd)
                 return NULL;
 
-        return strjoin(cwd, "/", p, NULL);
+        return path_make_absolute(p, cwd);
 }
 
 int path_make_relative(const char *from_dir, const char *to_path, char **_r) {
@@ -306,7 +306,6 @@ char **path_strv_resolve(char **l, const char *prefix) {
                         } else {
                                 /* canonicalized path goes outside of
                                  * prefix, keep the original path instead */
-                                free(u);
                                 u = orig;
                                 orig = NULL;
                         }
@@ -436,30 +435,16 @@ bool path_equal(const char *a, const char *b) {
         }
 }
 
-char* path_join(const char *root, const char *path, const char *rest) {
-        assert(path);
-
-        if (!isempty(root))
-                return strjoin(root, endswith(root, "/") ? "" : "/",
-                               path[0] == '/' ? path+1 : path,
-                               rest ? (endswith(path, "/") ? "" : "/") : NULL,
-                               rest && rest[0] == '/' ? rest+1 : rest,
-                               NULL);
-        else
-                return strjoin(path,
-                               rest ? (endswith(path, "/") ? "" : "/") : NULL,
-                               rest && rest[0] == '/' ? rest+1 : rest,
-                               NULL);
-}
-
 int path_is_mount_point(const char *t, bool allow_symlink) {
 
-        union file_handle_union h = FILE_HANDLE_INIT;
-        int mount_id = -1, mount_id_parent = -1;
+        union file_handle_union h = {
+                .handle.handle_bytes = MAX_HANDLE_SZ
+        };
+
+        int mount_id, mount_id_parent;
         _cleanup_free_ char *parent = NULL;
         struct stat a, b;
         int r;
-        bool nosupp = false;
 
         /* We are not actually interested in the file handles, but
          * name_to_handle_at() also passes us the mount ID, hence use
@@ -470,19 +455,16 @@ int path_is_mount_point(const char *t, bool allow_symlink) {
 
         r = name_to_handle_at(AT_FDCWD, t, &h.handle, &mount_id, allow_symlink ? AT_SYMLINK_FOLLOW : 0);
         if (r < 0) {
-                if (errno == ENOSYS)
-                        /* This kernel does not support name_to_handle_at()
-                         * fall back to the traditional stat() logic. */
-                        goto fallback;
-                else if (errno == EOPNOTSUPP)
+                if (IN_SET(errno, ENOSYS, EOPNOTSUPP))
                         /* This kernel or file system does not support
                          * name_to_handle_at(), hence fallback to the
                          * traditional stat() logic */
-                        nosupp = true;
-                else if (errno == ENOENT)
+                        goto fallback;
+
+                if (errno == ENOENT)
                         return 0;
-                else
-                        return -errno;
+
+                return -errno;
         }
 
         r = path_get_parent(t, &parent);
@@ -490,23 +472,18 @@ int path_is_mount_point(const char *t, bool allow_symlink) {
                 return r;
 
         h.handle.handle_bytes = MAX_HANDLE_SZ;
-        r = name_to_handle_at(AT_FDCWD, parent, &h.handle, &mount_id_parent, AT_SYMLINK_FOLLOW);
-        if (r < 0)
+        r = name_to_handle_at(AT_FDCWD, parent, &h.handle, &mount_id_parent, 0);
+        if (r < 0) {
+                /* The parent can't do name_to_handle_at() but the
+                 * directory we are interested in can? If so, it must
+                 * be a mount point */
                 if (errno == EOPNOTSUPP)
-                        if (nosupp)
-                                /* Neither parent nor child do name_to_handle_at()?
-                                   We have no choice but to fall back. */
-                                goto fallback;
-                        else
-                                /* The parent can't do name_to_handle_at() but
-                                 * the directory we are interested in can?
-                                 * Or the other way around?
-                                 * If so, it must be a mount point. */
-                                return 1;
-                else
-                        return -errno;
-        else
-                return mount_id != mount_id_parent;
+                        return 1;
+
+                return -errno;
+        }
+
+        return mount_id != mount_id_parent;
 
 fallback:
         if (allow_symlink)
@@ -521,14 +498,11 @@ fallback:
                 return -errno;
         }
 
-        free(parent);
-        parent = NULL;
-
         r = path_get_parent(t, &parent);
         if (r < 0)
                 return r;
 
-        r = stat(parent, &b);
+        r = lstat(parent, &b);
         if (r < 0)
                 return -errno;
 
@@ -543,16 +517,7 @@ int path_is_read_only_fs(const char *path) {
         if (statvfs(path, &st) < 0)
                 return -errno;
 
-        if (st.f_flag & ST_RDONLY)
-                return true;
-
-        /* On NFS, statvfs() might not reflect whether we can actually
-         * write to the remote share. Let's try again with
-         * access(W_OK) which is more reliable, at least sometimes. */
-        if (access(path, W_OK) < 0 && errno == EROFS)
-                return true;
-
-        return false;
+        return !!(st.f_flag & ST_RDONLY);
 }
 
 int path_is_os_tree(const char *path) {
@@ -560,24 +525,24 @@ int path_is_os_tree(const char *path) {
         int r;
 
         /* We use /usr/lib/os-release as flag file if something is an OS */
-        p = strjoina(path, "/usr/lib/os-release");
+        p = strappenda(path, "/usr/lib/os-release");
         r = access(p, F_OK);
 
         if (r >= 0)
                 return 1;
 
         /* Also check for the old location in /etc, just in case. */
-        p = strjoina(path, "/etc/os-release");
+        p = strappenda(path, "/etc/os-release");
         r = access(p, F_OK);
 
         return r >= 0;
 }
 
-int find_binary(const char *name, bool local, char **filename) {
+int find_binary(const char *name, char **filename) {
         assert(name);
 
         if (is_path(name)) {
-                if (local && access(name, X_OK) < 0)
+                if (access(name, X_OK) < 0)
                         return -errno;
 
                 if (filename) {
@@ -593,7 +558,7 @@ int find_binary(const char *name, bool local, char **filename) {
                 return 0;
         } else {
                 const char *path;
-                const char *word, *state;
+                char *state, *w;
                 size_t l;
 
                 /**
@@ -604,10 +569,10 @@ int find_binary(const char *name, bool local, char **filename) {
                 if (!path)
                         path = DEFAULT_PATH;
 
-                FOREACH_WORD_SEPARATOR(word, l, path, ":", state) {
+                FOREACH_WORD_SEPARATOR(w, l, path, ":", state) {
                         _cleanup_free_ char *p = NULL;
 
-                        if (asprintf(&p, "%.*s/%s", (int) l, word, name) < 0)
+                        if (asprintf(&p, "%.*s/%s", (int) l, w, name) < 0)
                                 return -ENOMEM;
 
                         if (access(p, X_OK) < 0)
@@ -665,13 +630,13 @@ int fsck_exists(const char *fstype) {
         const char *checker;
         int r;
 
-        checker = strjoina("fsck.", fstype);
+        checker = strappenda("fsck.", fstype);
 
-        r = find_binary(checker, true, &p);
+        r = find_binary(checker, &p);
         if (r < 0)
                 return r;
 
-        /* An fsck that is linked to /bin/true is a non-existent
+        /* An fsck that is linked to /bin/true is a non-existant
          * fsck */
 
         r = readlink_malloc(p, &d);

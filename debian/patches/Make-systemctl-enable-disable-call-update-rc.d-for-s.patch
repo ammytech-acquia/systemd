@@ -1,28 +1,26 @@
 From: Michael Stapelberg <michael@stapelberg.de>
 Date: Mon, 29 Jul 2013 22:01:21 +0200
 Subject: Make systemctl enable/disable call update-rc.d for sysv init scripts
+ (#709780)
 
-Also run update-rc.d defaults before update-rc.d <enable|disable> (#722523)
-
-Closes: #709780
 ---
- src/systemctl/systemctl.c | 59 +++++++++++++++++++++++++++++++++++++++--------
- 1 file changed, 49 insertions(+), 10 deletions(-)
+ src/systemctl/systemctl.c | 21 +++++++++++----------
+ 1 file changed, 11 insertions(+), 10 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index 4ec0cff..278f2f9 100644
+index 8086e1e..754c0f7 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -5117,7 +5117,7 @@ static int import_environment(sd_bus *bus, char **args) {
+@@ -4990,7 +4990,7 @@ static int import_environment(sd_bus *bus, char **args) {
  static int enable_sysv_units(const char *verb, char **args) {
          int r = 0;
  
 -#if defined(HAVE_SYSV_COMPAT) && defined(HAVE_CHKCONFIG)
 +#if defined(HAVE_SYSV_COMPAT)
-         unsigned f = 0;
+         unsigned f = 1, t = 1;
          _cleanup_lookup_paths_free_ LookupPaths paths = {};
  
-@@ -5125,8 +5125,9 @@ static int enable_sysv_units(const char *verb, char **args) {
+@@ -4998,8 +4998,9 @@ static int enable_sysv_units(const char *verb, char **args) {
                  return 0;
  
          if (!streq(verb, "enable") &&
@@ -34,7 +32,7 @@ index 4ec0cff..278f2f9 100644
                  return 0;
  
          /* Processes all SysV units, and reshuffles the array so that
-@@ -5142,7 +5143,7 @@ static int enable_sysv_units(const char *verb, char **args) {
+@@ -5015,7 +5016,7 @@ static int enable_sysv_units(const char *verb, char **args) {
                  _cleanup_free_ char *p = NULL, *q = NULL, *l = NULL;
                  bool found_native = false, found_sysv;
                  unsigned c = 1;
@@ -43,9 +41,9 @@ index 4ec0cff..278f2f9 100644
                  char **k;
                  int j;
                  pid_t pid;
-@@ -5180,17 +5181,55 @@ static int enable_sysv_units(const char *verb, char **args) {
-                 if (!found_sysv)
-                         continue;
+@@ -5067,15 +5068,15 @@ static int enable_sysv_units(const char *verb, char **args) {
+                 /* Mark this entry, so that we don't try enabling it as native unit */
+                 args[f] = (char*) "";
  
 -                log_info("%s is not a native service, redirecting to /sbin/chkconfig.", name);
 +                log_info("%s is not a native service, redirecting to /usr/sbin/update-rc.d.", name);
@@ -57,51 +55,11 @@ index 4ec0cff..278f2f9 100644
 +                    continue;
 +                }
  
-+                /* Run update-rc.d <file> defaults first to ensure the K- and
-+                 * S-symlinks are present. If they are missing, update-rc.d
-+                 * <enable|disable> will fail. See
-+                 * http://bugs.debian.org/722523 */
                  argv[c++] = basename(p);
 -                argv[c++] =
 -                        streq(verb, "enable") ? "on" :
 -                        streq(verb, "disable") ? "off" : "--level=5";
-+                argv[c++] = "defaults";
-+                argv[c] = NULL;
-+
-+                l = strv_join((char**)argv, " ");
-+                if (!l) {
-+                        return log_oom();
-+                }
-+
-+                log_info("Executing %s", l);
-+
-+                pid = fork();
-+                if (pid < 0) {
-+                        log_error("Failed to fork: %m");
-+                        return -errno;
-+                } else if (pid == 0) {
-+                        /* Child */
-+
-+                        execv(argv[0], (char**) argv);
-+                        _exit(EXIT_FAILURE);
-+                }
-+
-+                j = wait_for_terminate(pid, &status);
-+                if (j < 0) {
-+                        log_error("Failed to wait for child: %s", strerror(-r));
-+                        return j;
-+                }
-+
-+                if (status.si_code == CLD_EXITED) {
-+                        if (status.si_status != 0)
-+                                return -EINVAL;
-+                } else
-+                        return -EPROTO;
-+
-+                argv[c-1] = verb;
++                argv[c++] = verb;
                  argv[c] = NULL;
  
-+                free(l);
                  l = strv_join((char**)argv, " ");
-                 if (!l)
-                         return log_oom();

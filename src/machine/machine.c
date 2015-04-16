@@ -32,10 +32,9 @@
 #include "fileio.h"
 #include "special.h"
 #include "unit-name.h"
+#include "machine.h"
 #include "bus-util.h"
 #include "bus-error.h"
-#include "machine.h"
-#include "machine-dbus.h"
 
 Machine* machine_new(Manager *manager, const char *name) {
         Machine *m;
@@ -95,7 +94,6 @@ void machine_free(Machine *m) {
         free(m->state_file);
         free(m->service);
         free(m->root_directory);
-        free(m->netif);
         free(m);
 }
 
@@ -178,21 +176,6 @@ int machine_save(Machine *m) {
                         m->timestamp.realtime,
                         m->timestamp.monotonic);
 
-        if (m->n_netif > 0) {
-                unsigned i;
-
-                fputs("NETIF=", f);
-
-                for (i = 0; i < m->n_netif; i++) {
-                        if (i != 0)
-                                fputc(' ', f);
-
-                        fprintf(f, "%i", m->netif[i]);
-                }
-
-                fputc('\n', f);
-        }
-
         r = fflush_and_check(f);
         if (r < 0)
                 goto finish;
@@ -202,25 +185,23 @@ int machine_save(Machine *m) {
                 goto finish;
         }
 
-        free(temp_path);
-        temp_path = NULL;
-
         if (m->unit) {
                 char *sl;
 
                 /* Create a symlink from the unit name to the machine
                  * name, so that we can quickly find the machine for
                  * each given unit */
-                sl = strjoina("/run/systemd/machines/unit:", m->unit);
+                sl = strappenda("/run/systemd/machines/unit:", m->unit);
                 symlink(m->name, sl);
         }
 
 finish:
-        if (temp_path)
-                unlink(temp_path);
+        if (r < 0) {
+                if (temp_path)
+                        unlink(temp_path);
 
-        if (r < 0)
-                log_error_errno(r, "Failed to save machine data %s: %m", m->state_file);
+                log_error("Failed to save machine data %s: %s", m->state_file, strerror(-r));
+        }
 
         return r;
 }
@@ -232,7 +213,7 @@ static void machine_unlink(Machine *m) {
 
                 char *sl;
 
-                sl = strjoina("/run/systemd/machines/unit:", m->unit);
+                sl = strappenda("/run/systemd/machines/unit:", m->unit);
                 unlink(sl);
         }
 
@@ -241,7 +222,7 @@ static void machine_unlink(Machine *m) {
 }
 
 int machine_load(Machine *m) {
-        _cleanup_free_ char *realtime = NULL, *monotonic = NULL, *id = NULL, *leader = NULL, *class = NULL, *netif = NULL;
+        _cleanup_free_ char *realtime = NULL, *monotonic = NULL, *id = NULL, *leader = NULL, *class = NULL;
         int r;
 
         assert(m);
@@ -256,13 +237,13 @@ int machine_load(Machine *m) {
                            "CLASS",     &class,
                            "REALTIME",  &realtime,
                            "MONOTONIC", &monotonic,
-                           "NETIF",     &netif,
                            NULL);
         if (r < 0) {
                 if (r == -ENOENT)
                         return 0;
 
-                return log_error_errno(r, "Failed to read %s: %m", m->state_file);
+                log_error("Failed to read %s: %s", m->state_file, strerror(-r));
+                return r;
         }
 
         if (id)
@@ -291,35 +272,6 @@ int machine_load(Machine *m) {
                         m->timestamp.monotonic = l;
         }
 
-        if (netif) {
-                size_t l, allocated = 0, nr = 0;
-                const char *word, *state;
-                int *ni = NULL;
-
-                FOREACH_WORD(word, l, netif, state) {
-                        char buf[l+1];
-                        int ifi;
-
-                        *(char*) (mempcpy(buf, word, l)) = 0;
-
-                        if (safe_atoi(buf, &ifi) < 0)
-                                continue;
-                        if (ifi <= 0)
-                                continue;
-
-                        if (!GREEDY_REALLOC(ni, allocated, nr+1)) {
-                                free(ni);
-                                return log_oom();
-                        }
-
-                        ni[nr++] = ifi;
-                }
-
-                free(m->netif);
-                m->netif = ni;
-                m->n_netif = nr;
-        }
-
         return r;
 }
 
@@ -340,7 +292,7 @@ static int machine_start_scope(Machine *m, sd_bus_message *properties, sd_bus_er
                 if (!scope)
                         return log_oom();
 
-                description = strjoina(m->class == MACHINE_VM ? "Virtual Machine " : "Container ", m->name);
+                description = strappenda(m->class == MACHINE_VM ? "Virtual Machine " : "Container ", m->name);
 
                 r = manager_start_scope(m->manager, scope, m->leader, SPECIAL_MACHINE_SLICE, description, properties, error, &job);
                 if (r < 0) {
@@ -379,10 +331,10 @@ int machine_start(Machine *m, sd_bus_message *properties, sd_bus_error *error) {
                 return r;
 
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_MACHINE_START),
+                   MESSAGE_ID(SD_MESSAGE_MACHINE_START),
                    "NAME=%s", m->name,
                    "LEADER="PID_FMT, m->leader,
-                   LOG_MESSAGE("New machine %s.", m->name),
+                   "MESSAGE=New machine %s.", m->name,
                    NULL);
 
         if (!dual_timestamp_is_set(&m->timestamp))
@@ -408,16 +360,18 @@ static int machine_stop_scope(Machine *m) {
         if (!m->unit)
                 return 0;
 
-        r = manager_stop_unit(m->manager, m->unit, &error, &job);
-        if (r < 0) {
-                log_error("Failed to stop machine scope: %s", bus_error_message(&error, r));
-                return r;
+        if (!m->registered) {
+                r = manager_stop_unit(m->manager, m->unit, &error, &job);
+                if (r < 0) {
+                        log_error("Failed to stop machine scope: %s", bus_error_message(&error, r));
+                        return r;
+                }
         }
 
         free(m->scope_job);
         m->scope_job = job;
 
-        return 0;
+        return r;
 }
 
 int machine_stop(Machine *m) {
@@ -426,10 +380,10 @@ int machine_stop(Machine *m) {
 
         if (m->started)
                 log_struct(LOG_INFO,
-                           LOG_MESSAGE_ID(SD_MESSAGE_MACHINE_STOP),
+                           MESSAGE_ID(SD_MESSAGE_MACHINE_STOP),
                            "NAME=%s", m->name,
                            "LEADER="PID_FMT, m->leader,
-                           LOG_MESSAGE("Machine %s terminated.", m->name),
+                           "MESSAGE=Machine %s terminated.", m->name,
                            NULL);
 
         /* Kill cgroup */
@@ -493,8 +447,6 @@ int machine_kill(Machine *m, KillWho who, int signo) {
 
                 if (kill(m->leader, signo) < 0)
                         return -errno;
-
-                return 0;
         }
 
         /* Otherwise make PID 1 do it for us, for the entire cgroup */

@@ -1,24 +1,24 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-  This file is part of systemd.
+This file is part of systemd.
 
-  Copyright 2014 Zbigniew Jędrzejewski-Szmek
+Copyright 2014 Zbigniew Jędrzejewski-Szmek
 
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
+systemd is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
 
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
+systemd is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Lesser General Public License for more details.
 
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Lesser General Public License
+along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="sd_bus_message_append_basic" conditional="ENABLE_KDBUS">
@@ -95,7 +95,7 @@
           <row>
             <entry><literal>y</literal></entry>
             <entry><constant>SD_BUS_TYPE_BYTE</constant></entry>
-            <entry>unsigned integer</entry>
+            <entry>unsigned interger</entry>
             <entry>1 byte</entry>
           </row>
 
@@ -200,7 +200,7 @@
     valid Unicode string encoded as UTF-8. In case of the two latter
     types, the additional requirements for a D-Bus object path or
     type signature should be satisfied. Those requirements should be
-    verified by the recipient of the message.
+    verified by the recepient of the message.
     </para>
   </refsect1>
 
@@ -219,35 +219,35 @@
     <variablelist>
 
       <varlistentry>
-        <term><constant>-EINVAL</constant></term>
+        <term><varname>-EINVAL</varname></term>
 
         <listitem><para>Specified parameter is invalid.
         </para></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><constant>-EPERM</constant></term>
+        <term><varname>-EPERM</varname></term>
 
         <listitem><para>Message has been sealed.
         </para></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><constant>-ESTALE</constant></term>
+        <term><varname>-ESTALE</varname></term>
 
         <listitem><para>Message is in invalid state.
         </para></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><constant>-ENXIO</constant></term>
+        <term><varname>-ENXIO</varname></term>
 
         <listitem><para>Message cannot be appended to.
         </para></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><constant>-ENOMEM</constant></term>
+        <term><varname>-ENOMEM</varname></term>
 
         <listitem><para>Memory allocation failed.</para></listitem>
       </varlistentry>
@@ -260,7 +260,7 @@
     <para>The <function>sd_bus_append_basic()</function> function
     described here is available as a shared library, which can be
     compiled and linked to with the
-    <constant>libsystemd</constant> <citerefentry project='die-net'><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    <constant>libsystemd</constant> <citerefentry><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
     file.</para>
   </refsect1>
 

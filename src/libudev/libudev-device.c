@@ -139,7 +139,7 @@ static int udev_device_set_ifindex(struct udev_device *udev_device, int ifindex)
         char num[32];
 
         udev_device->ifindex = ifindex;
-        snprintf(num, sizeof(num), "%d", ifindex);
+        snprintf(num, sizeof(num), "%u", ifindex);
         udev_device_add_property(udev_device, "IFINDEX", num);
         return 0;
 }
@@ -258,7 +258,7 @@ static int udev_device_set_devtype(struct udev_device *udev_device, const char *
         return 0;
 }
 
-static int udev_device_set_subsystem(struct udev_device *udev_device, const char *subsystem)
+int udev_device_set_subsystem(struct udev_device *udev_device, const char *subsystem)
 {
         free(udev_device->subsystem);
         udev_device->subsystem = strdup(subsystem);
@@ -390,44 +390,6 @@ static struct udev_list_entry *udev_device_add_property_from_string(struct udev_
         if (val[0] == '\0')
                 val = NULL;
         return udev_device_add_property(udev_device, name, val);
-}
-
-static int udev_device_set_syspath(struct udev_device *udev_device, const char *syspath)
-{
-        const char *pos;
-        size_t len;
-
-        free(udev_device->syspath);
-        udev_device->syspath = strdup(syspath);
-        if (udev_device->syspath ==  NULL)
-                return -ENOMEM;
-        udev_device->devpath = udev_device->syspath + strlen("/sys");
-        udev_device_add_property(udev_device, "DEVPATH", udev_device->devpath);
-
-        pos = strrchr(udev_device->syspath, '/');
-        if (pos == NULL)
-                return -EINVAL;
-        udev_device->sysname = strdup(&pos[1]);
-        if (udev_device->sysname == NULL)
-                return -ENOMEM;
-
-        /* some devices have '!' in their name, change that to '/' */
-        len = 0;
-        while (udev_device->sysname[len] != '\0') {
-                if (udev_device->sysname[len] == '!')
-                        udev_device->sysname[len] = '/';
-                len++;
-        }
-
-        /* trailing number */
-        while (len > 0 && isdigit(udev_device->sysname[--len]))
-                udev_device->sysnum = &udev_device->sysname[len];
-
-        /* sysname is completely numeric */
-        if (len == 0)
-                udev_device->sysnum = NULL;
-
-        return 0;
 }
 
 /*
@@ -572,8 +534,10 @@ int udev_device_read_db(struct udev_device *udev_device, const char *dbfile)
         }
 
         f = fopen(dbfile, "re");
-        if (f == NULL)
-                return log_debug_errno(errno, "no db file to read %s: %m", dbfile);
+        if (f == NULL) {
+                udev_dbg(udev_device->udev, "no db file to read %s: %m\n", dbfile);
+                return -errno;
+        }
 
         /* devices with a database entry are initialized */
         udev_device->is_initialized = true;
@@ -613,7 +577,7 @@ int udev_device_read_db(struct udev_device *udev_device, const char *dbfile)
         }
         fclose(f);
 
-        log_debug("device %p filled with db file data", udev_device);
+        udev_dbg(udev_device->udev, "device %p filled with db file data\n", udev_device);
         return 0;
 }
 
@@ -675,20 +639,17 @@ void udev_device_set_info_loaded(struct udev_device *device)
         device->info_loaded = true;
 }
 
-static struct udev_device *udev_device_new(struct udev *udev)
+struct udev_device *udev_device_new(struct udev *udev)
 {
         struct udev_device *udev_device;
+        struct udev_list_entry *list_entry;
 
-        if (udev == NULL) {
-                errno = EINVAL;
+        if (udev == NULL)
                 return NULL;
-        }
 
         udev_device = new0(struct udev_device, 1);
-        if (udev_device == NULL) {
-                errno = ENOMEM;
+        if (udev_device == NULL)
                 return NULL;
-        }
         udev_device->refcount = 1;
         udev_device->udev = udev;
         udev_list_init(udev, &udev_device->devlinks_list, true);
@@ -697,7 +658,11 @@ static struct udev_device *udev_device_new(struct udev *udev)
         udev_list_init(udev, &udev_device->sysattr_list, false);
         udev_list_init(udev, &udev_device->tags_list, true);
         udev_device->watch_handle = -1;
-
+        /* copy global properties */
+        udev_list_entry_foreach(list_entry, udev_get_properties_list_entry(udev))
+                udev_device_add_property(udev_device,
+                                         udev_list_entry_get_name(list_entry),
+                                         udev_list_entry_get_value(list_entry));
         return udev_device;
 }
 
@@ -723,30 +688,22 @@ _public_ struct udev_device *udev_device_new_from_syspath(struct udev *udev, con
         struct stat statbuf;
         struct udev_device *udev_device;
 
-        if (udev == NULL) {
-                errno = EINVAL;
+        if (udev == NULL)
                 return NULL;
-        }
-
-        if (syspath == NULL) {
-                errno = EINVAL;
+        if (syspath == NULL)
                 return NULL;
-        }
 
         /* path starts in sys */
         if (!startswith(syspath, "/sys")) {
-                log_debug("not in sys :%s", syspath);
-                errno = EINVAL;
+                udev_dbg(udev, "not in sys :%s\n", syspath);
                 return NULL;
         }
 
         /* path is not a root directory */
         subdir = syspath + strlen("/sys");
         pos = strrchr(subdir, '/');
-        if (pos == NULL || pos[1] == '\0' || pos < &subdir[2]) {
-                errno = EINVAL;
+        if (pos == NULL || pos[1] == '\0' || pos < &subdir[2])
                 return NULL;
-        }
 
         /* resolve possible symlink to real path */
         strscpy(path, sizeof(path), syspath);
@@ -761,13 +718,8 @@ _public_ struct udev_device *udev_device_new_from_syspath(struct udev *udev, con
                         return NULL;
         } else {
                 /* everything else just needs to be a directory */
-                if (stat(path, &statbuf) != 0)
+                if (stat(path, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode))
                         return NULL;
-
-                if (!S_ISDIR(statbuf.st_mode)) {
-                        errno = EISDIR;
-                        return NULL;
-                }
         }
 
         udev_device = udev_device_new(udev);
@@ -775,7 +727,7 @@ _public_ struct udev_device *udev_device_new_from_syspath(struct udev *udev, con
                 return NULL;
 
         udev_device_set_syspath(udev_device, path);
-        log_debug("device %p has devpath '%s'", udev_device, udev_device_get_devpath(udev_device));
+        udev_dbg(udev, "device %p has devpath '%s'\n", udev_device, udev_device_get_devpath(udev_device));
 
         return udev_device;
 }
@@ -805,10 +757,8 @@ _public_ struct udev_device *udev_device_new_from_devnum(struct udev *udev, char
                 type_str = "block";
         else if (type == 'c')
                 type_str = "char";
-        else {
-                errno = EINVAL;
+        else
                 return NULL;
-        }
 
         /* use /sys/dev/{block,char}/<maj>:<min> link */
         snprintf(path, sizeof(path), "/sys/dev/%s/%u:%u",
@@ -854,10 +804,8 @@ _public_ struct udev_device *udev_device_new_from_device_id(struct udev *udev, c
                 int ifindex;
 
                 ifindex = strtoul(&id[1], NULL, 10);
-                if (ifindex <= 0) {
-                        errno = EINVAL;
+                if (ifindex <= 0)
                         return NULL;
-                }
 
                 sk = socket(PF_INET, SOCK_DGRAM, 0);
                 if (sk < 0)
@@ -875,24 +823,18 @@ _public_ struct udev_device *udev_device_new_from_device_id(struct udev *udev, c
                         return NULL;
                 if (udev_device_get_ifindex(dev) == ifindex)
                         return dev;
-
-                /* this is racy, so we may end up with the wrong device */
                 udev_device_unref(dev);
-                errno = ENODEV;
                 return NULL;
         }
         case '+':
                 strscpy(subsys, sizeof(subsys), &id[1]);
                 sysname = strchr(subsys, ':');
-                if (sysname == NULL) {
-                        errno = EINVAL;
+                if (sysname == NULL)
                         return NULL;
-                }
                 sysname[0] = '\0';
                 sysname = &sysname[1];
                 return udev_device_new_from_subsystem_sysname(udev, subsys, sysname);
         default:
-                errno = EINVAL;
                 return NULL;
         }
 }
@@ -956,9 +898,7 @@ _public_ struct udev_device *udev_device_new_from_subsystem_sysname(struct udev 
                         strscpyl(path, sizeof(path), "/sys/bus/", subsys, "/drivers/", driver, NULL);
                         if (stat(path, &statbuf) == 0)
                                 goto found;
-                } else
-                        errno = EINVAL;
-
+                }
                 goto out;
         }
 
@@ -1007,7 +947,7 @@ _public_ struct udev_device *udev_device_new_from_environment(struct udev *udev)
                 udev_device_add_property_from_string_parse(udev_device, environ[i]);
 
         if (udev_device_add_property_from_string_parse_finish(udev_device) < 0) {
-                log_debug("missing values, invalid device");
+                udev_dbg(udev, "missing values, invalid device\n");
                 udev_device_unref(udev_device);
                 udev_device = NULL;
         }
@@ -1034,8 +974,6 @@ static struct udev_device *device_new_from_parent(struct udev_device *udev_devic
                 if (udev_device_parent != NULL)
                         return udev_device_parent;
         }
-
-        errno = ENOENT;
         return NULL;
 }
 
@@ -1059,10 +997,8 @@ static struct udev_device *device_new_from_parent(struct udev_device *udev_devic
  **/
 _public_ struct udev_device *udev_device_get_parent(struct udev_device *udev_device)
 {
-        if (udev_device == NULL) {
-                errno = EINVAL;
+        if (udev_device == NULL)
                 return NULL;
-        }
         if (!udev_device->parent_set) {
                 udev_device->parent_set = true;
                 udev_device->parent_device = device_new_from_parent(udev_device);
@@ -1095,10 +1031,8 @@ _public_ struct udev_device *udev_device_get_parent_with_subsystem_devtype(struc
 {
         struct udev_device *parent;
 
-        if (subsystem == NULL) {
-                errno = EINVAL;
+        if (subsystem == NULL)
                 return NULL;
-        }
 
         parent = udev_device_get_parent(udev_device);
         while (parent != NULL) {
@@ -1115,10 +1049,6 @@ _public_ struct udev_device *udev_device_get_parent_with_subsystem_devtype(struc
                 }
                 parent = udev_device_get_parent(parent);
         }
-
-        if (!parent)
-                errno = ENOENT;
-
         return parent;
 }
 
@@ -1645,6 +1575,44 @@ _public_ struct udev_list_entry *udev_device_get_sysattr_list_entry(struct udev_
         return udev_list_get_entry(&udev_device->sysattr_list);
 }
 
+int udev_device_set_syspath(struct udev_device *udev_device, const char *syspath)
+{
+        const char *pos;
+        size_t len;
+
+        free(udev_device->syspath);
+        udev_device->syspath = strdup(syspath);
+        if (udev_device->syspath ==  NULL)
+                return -ENOMEM;
+        udev_device->devpath = udev_device->syspath + strlen("/sys");
+        udev_device_add_property(udev_device, "DEVPATH", udev_device->devpath);
+
+        pos = strrchr(udev_device->syspath, '/');
+        if (pos == NULL)
+                return -EINVAL;
+        udev_device->sysname = strdup(&pos[1]);
+        if (udev_device->sysname == NULL)
+                return -ENOMEM;
+
+        /* some devices have '!' in their name, change that to '/' */
+        len = 0;
+        while (udev_device->sysname[len] != '\0') {
+                if (udev_device->sysname[len] == '!')
+                        udev_device->sysname[len] = '/';
+                len++;
+        }
+
+        /* trailing number */
+        while (len > 0 && isdigit(udev_device->sysname[--len]))
+                udev_device->sysnum = &udev_device->sysname[len];
+
+        /* sysname is completely numeric */
+        if (len == 0)
+                udev_device->sysnum = NULL;
+
+        return 0;
+}
+
 static int udev_device_set_devnode(struct udev_device *udev_device, const char *devnode)
 {
         free(udev_device->devnode);
@@ -1686,7 +1654,7 @@ const char *udev_device_get_id_filename(struct udev_device *udev_device)
                                 udev_device->id_filename = NULL;
                 } else if (udev_device_get_ifindex(udev_device) > 0) {
                         /* use netdev ifindex -- n3 */
-                        if (asprintf(&udev_device->id_filename, "n%i", udev_device_get_ifindex(udev_device)) < 0)
+                        if (asprintf(&udev_device->id_filename, "n%u", udev_device_get_ifindex(udev_device)) < 0)
                                 udev_device->id_filename = NULL;
                 } else {
                         /*
@@ -1730,33 +1698,14 @@ void udev_device_set_is_initialized(struct udev_device *udev_device)
         udev_device->is_initialized = true;
 }
 
-static bool is_valid_tag(const char *tag)
-{
-        return !strchr(tag, ':') && !strchr(tag, ' ');
-}
-
 int udev_device_add_tag(struct udev_device *udev_device, const char *tag)
 {
-        if (!is_valid_tag(tag))
+        if (strchr(tag, ':') != NULL || strchr(tag, ' ') != NULL)
                 return -EINVAL;
         udev_device->tags_uptodate = false;
         if (udev_list_entry_add(&udev_device->tags_list, tag, NULL) != NULL)
                 return 0;
         return -ENOMEM;
-}
-
-void udev_device_remove_tag(struct udev_device *udev_device, const char *tag)
-{
-        struct udev_list_entry *e;
-
-        if (!is_valid_tag(tag))
-                return;
-        e = udev_list_get_entry(&udev_device->tags_list);
-        e = udev_list_entry_get_by_name(e, tag);
-        if (e) {
-                udev_device->tags_uptodate = false;
-                udev_list_entry_delete(e);
-        }
 }
 
 void udev_device_cleanup_tags_list(struct udev_device *udev_device)
@@ -1921,92 +1870,4 @@ bool udev_device_get_db_persist(struct udev_device *udev_device)
 void udev_device_set_db_persist(struct udev_device *udev_device)
 {
         udev_device->db_persist = true;
-}
-
-int udev_device_rename(struct udev_device *udev_device, const char *name)
-{
-        _cleanup_free_ char *dirname = NULL;
-        char *new_syspath;
-        int r;
-
-        if (udev_device == NULL || name == NULL)
-                return -EINVAL;
-
-        dirname = dirname_malloc(udev_device->syspath);
-        if (!dirname)
-                return -ENOMEM;
-
-        new_syspath = strjoina(dirname, "/", name);
-
-        r = udev_device_set_syspath(udev_device, new_syspath);
-        if (r < 0)
-                return r;
-
-        return 0;
-}
-
-struct udev_device *udev_device_shallow_clone(struct udev_device *old_device)
-{
-        struct udev_device *device;
-
-        if (old_device == NULL)
-                return NULL;
-
-        device = udev_device_new(old_device->udev);
-        if (!device) {
-                errno = ENOMEM;
-
-                return NULL;
-        }
-
-        udev_device_set_syspath(device, udev_device_get_syspath(old_device));
-        udev_device_set_subsystem(device, udev_device_get_subsystem(old_device));
-        udev_device_set_devnum(device, udev_device_get_devnum(old_device));
-
-        return device;
-}
-
-struct udev_device *udev_device_new_from_nulstr(struct udev *udev, char *nulstr, ssize_t buflen) {
-        struct udev_device *device;
-        ssize_t bufpos = 0;
-
-        if (nulstr == NULL || buflen <= 0) {
-                errno = EINVAL;
-
-                return NULL;
-        }
-
-        device = udev_device_new(udev);
-        if (!device) {
-                errno = ENOMEM;
-
-                return NULL;
-        }
-
-        udev_device_set_info_loaded(device);
-
-        while (bufpos < buflen) {
-                char *key;
-                size_t keylen;
-
-                key = nulstr + bufpos;
-                keylen = strlen(key);
-                if (keylen == 0)
-                        break;
-
-                bufpos += keylen + 1;
-                udev_device_add_property_from_string_parse(device, key);
-        }
-
-        if (udev_device_add_property_from_string_parse_finish(device) < 0) {
-                log_debug("missing values, invalid device");
-
-                udev_device_unref(device);
-
-                errno = EINVAL;
-
-                return NULL;
-        }
-
-        return device;
 }

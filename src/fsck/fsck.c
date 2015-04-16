@@ -35,7 +35,7 @@
 #include "special.h"
 #include "bus-util.h"
 #include "bus-error.h"
-#include "bus-common-errors.h"
+#include "bus-errors.h"
 #include "fileio.h"
 #include "udev-util.h"
 #include "path-util.h"
@@ -47,14 +47,14 @@ static const char *arg_repair = "-a";
 
 static void start_target(const char *target) {
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_bus_close_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         assert(target);
 
         r = bus_open_system_systemd(&bus);
         if (r < 0) {
-                log_error_errno(r, "Failed to get D-Bus connection: %m");
+                log_error("Failed to get D-Bus connection: %s", strerror(-r));
                 return;
         }
 
@@ -222,7 +222,7 @@ int main(int argc, char *argv[]) {
         const char *device, *type;
         bool root_directory;
         int progress_pipe[2] = { -1, -1 };
-        char dash_c[sizeof("-C")-1 + DECIMAL_STR_MAX(int) + 1];
+        char dash_c[2+10+1];
         struct stat st;
 
         if (argc > 2) {
@@ -236,10 +236,7 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
-        q = parse_proc_cmdline(parse_proc_cmdline_item);
-        if (q < 0)
-                log_warning_errno(q, "Failed to parse kernel command line, ignoring: %m");
-
+        parse_proc_cmdline(parse_proc_cmdline_item);
         test_files();
 
         if (!arg_force && arg_skip)
@@ -256,7 +253,7 @@ int main(int argc, char *argv[]) {
                 root_directory = false;
 
                 if (stat(device, &st) < 0) {
-                        log_error_errno(errno, "Failed to stat '%s': %m", device);
+                        log_error("Failed to stat '%s': %m", device);
                         return EXIT_FAILURE;
                 }
 
@@ -271,7 +268,7 @@ int main(int argc, char *argv[]) {
                 /* Find root device */
 
                 if (stat("/", &st) < 0) {
-                        log_error_errno(errno, "Failed to stat() the root directory: %m");
+                        log_error("Failed to stat() the root directory: %m");
                         return EXIT_FAILURE;
                 }
 
@@ -309,12 +306,12 @@ int main(int argc, char *argv[]) {
                         log_info("fsck.%s doesn't exist, not checking file system on %s", type, device);
                         return EXIT_SUCCESS;
                 } else if (r < 0)
-                        log_warning_errno(r, "fsck.%s cannot be used for %s: %m", type, device);
+                        log_warning("fsck.%s cannot be used for %s: %s", type, device, strerror(-r));
         }
 
         if (arg_show_progress)
                 if (pipe(progress_pipe) < 0) {
-                        log_error_errno(errno, "pipe(): %m");
+                        log_error("pipe(): %m");
                         return EXIT_FAILURE;
                 }
 
@@ -323,11 +320,16 @@ int main(int argc, char *argv[]) {
         cmdline[i++] = "-T";
 
         /*
-         * Since util-linux v2.25 fsck uses /run/fsck/<diskname>.lock files.
-         * The previous versions use flock for the device and conflict with
-         * udevd, see https://bugs.freedesktop.org/show_bug.cgi?id=79576#c5
+         * Disable locking which conflict with udev's event
+         * ownershipi, until util-linux moves the flock
+         * synchronization file which prevents multiple fsck running
+         * on the same rotationg media, from the disk device
+         * node to a privately owned regular file.
+         *
+         * https://bugs.freedesktop.org/show_bug.cgi?id=79576#c5
+         *
+         * cmdline[i++] = "-l";
          */
-        cmdline[i++] = "-l";
 
         if (!root_directory)
                 cmdline[i++] = "-M";
@@ -336,7 +338,8 @@ int main(int argc, char *argv[]) {
                 cmdline[i++] = "-f";
 
         if (progress_pipe[1] >= 0) {
-                xsprintf(dash_c, "-C%i", progress_pipe[1]);
+                snprintf(dash_c, sizeof(dash_c), "-C%i", progress_pipe[1]);
+                char_array_0(dash_c);
                 cmdline[i++] = dash_c;
         }
 
@@ -345,7 +348,7 @@ int main(int argc, char *argv[]) {
 
         pid = fork();
         if (pid < 0) {
-                log_error_errno(errno, "fork(): %m");
+                log_error("fork(): %m");
                 goto finish;
         } else if (pid == 0) {
                 /* Child */
@@ -364,7 +367,7 @@ int main(int argc, char *argv[]) {
 
         q = wait_for_terminate(pid, &status);
         if (q < 0) {
-                log_error_errno(q, "waitid(): %m");
+                log_error("waitid(): %s", strerror(-q));
                 goto finish;
         }
 

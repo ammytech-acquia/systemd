@@ -6,16 +6,16 @@ Prefer /etc/default/locale over /etc/locale.conf when writing the locale
 configuration and use /etc/default/keyboard instead of
 /etc/X11/xorg.conf.d/00-keyboard.conf.
 
-Patch courtesy of Steve Langasek.
+Path courtesy of Steve Langasek.
 ---
- src/locale/localed.c | 204 ++++++++++++++++++++++++++++-----------------------
- 1 file changed, 112 insertions(+), 92 deletions(-)
+ src/locale/localed.c | 214 +++++++++++++++++++++++++++------------------------
+ 1 file changed, 113 insertions(+), 101 deletions(-)
 
 diff --git a/src/locale/localed.c b/src/locale/localed.c
-index d1c90d6..be28282 100644
+index 23da149..4db8bef 100644
 --- a/src/locale/localed.c
 +++ b/src/locale/localed.c
-@@ -168,6 +168,24 @@ static int locale_read_data(Context *c) {
+@@ -170,6 +170,24 @@ static int locale_read_data(Context *c) {
                             "LC_IDENTIFICATION", &c->locale[LOCALE_LC_IDENTIFICATION],
                             NULL);
  
@@ -40,14 +40,14 @@ index d1c90d6..be28282 100644
          if (r == -ENOENT) {
                  int p;
  
-@@ -205,64 +223,17 @@ static int vconsole_read_data(Context *c) {
+@@ -206,72 +224,17 @@ static int vconsole_read_data(Context *c) {
  }
  
  static int x11_read_data(Context *c) {
--        _cleanup_fclose_ FILE *f;
+-        FILE *f;
 -        char line[LINE_MAX];
 -        bool in_section = false;
-         int r;
++        int r;
  
          context_free_x11(c);
  
@@ -65,11 +65,13 @@ index d1c90d6..be28282 100644
 -                        continue;
 -
 -                if (in_section && first_word(l, "Option")) {
--                        _cleanup_strv_free_ char **a = NULL;
+-                        char **a;
 -
--                        r = strv_split_quoted(&a, l, false);
--                        if (r < 0)
--                                return r;
+-                        a = strv_split_quoted(l);
+-                        if (!a) {
+-                                fclose(f);
+-                                return -ENOMEM;
+-                        }
 -
 -                        if (strv_length(a) == 3) {
 -                                if (streq(a[1], "XkbLayout")) {
@@ -87,19 +89,26 @@ index d1c90d6..be28282 100644
 -                                }
 -                        }
 -
--                } else if (!in_section && first_word(l, "Section")) {
--                        _cleanup_strv_free_ char **a = NULL;
+-                        strv_free(a);
 -
--                        r = strv_split_quoted(&a, l, false);
--                        if (r < 0)
+-                } else if (!in_section && first_word(l, "Section")) {
+-                        char **a;
+-
+-                        a = strv_split_quoted(l);
+-                        if (!a) {
+-                                fclose(f);
 -                                return -ENOMEM;
+-                        }
 -
 -                        if (strv_length(a) == 2 && streq(a[1], "InputClass"))
 -                                in_section = true;
 -
+-                        strv_free(a);
 -                } else if (in_section && first_word(l, "EndSection"))
 -                        in_section = false;
 -        }
+-
+-        fclose(f);
 -
 -        return 0;
 +        r = parse_env_file("/etc/default/keyboard", NEWLINE,
@@ -112,13 +121,11 @@ index d1c90d6..be28282 100644
  }
  
  static int context_read_data(Context *c) {
-@@ -278,10 +249,15 @@ static int context_read_data(Context *c) {
- static int locale_write_data(Context *c, char ***settings) {
+@@ -287,8 +250,13 @@ static int context_read_data(Context *c) {
+ static int locale_write_data(Context *c) {
          int r, p;
-         _cleanup_strv_free_ char **l = NULL;
+         char **l = NULL;
 +        const char *path = "/etc/locale.conf";
- 
-         /* Set values will be returned as strv in *settings on success. */
  
 -        r = load_env_file(NULL, "/etc/locale.conf", NULL, &l);
 +        r = load_env_file(NULL, path, NULL, &l);
@@ -129,10 +136,10 @@ index d1c90d6..be28282 100644
          if (r < 0 && r != -ENOENT)
                  return r;
  
-@@ -308,13 +284,13 @@ static int locale_write_data(Context *c, char ***settings) {
-         }
- 
+@@ -320,13 +288,13 @@ static int locale_write_data(Context *c) {
          if (strv_isempty(l)) {
+                 strv_free(l);
+ 
 -                if (unlink("/etc/locale.conf") < 0)
 +                if (unlink(path) < 0)
                          return errno == ENOENT ? 0 : -errno;
@@ -142,13 +149,13 @@ index d1c90d6..be28282 100644
  
 -        r = write_env_file_label("/etc/locale.conf", l);
 +        r = write_env_file_label(path, l);
-         if (r < 0)
-                 return r;
+         strv_free(l);
  
-@@ -435,57 +411,101 @@ static int vconsole_write_data(Context *c) {
+         return r;
+@@ -447,57 +415,101 @@ static int vconsole_write_data(Context *c) {
  }
  
- static int x11_write_data(Context *c) {
+ static int write_data_x11(Context *c) {
 -        _cleanup_fclose_ FILE *f = NULL;
 -        _cleanup_free_ char *temp_path = NULL;
          int r;
@@ -184,9 +191,8 @@ index d1c90d6..be28282 100644
 +                        return -ENOMEM;
 +
 +                l = u;
-         }
- 
--        mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
++        }
++
 +        if (isempty(c->x11_model)) {
 +                l = strv_env_unset(l, "XKBMODEL");
 +        } else {
@@ -194,10 +200,7 @@ index d1c90d6..be28282 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
- 
--        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
--        if (r < 0)
--                return r;
++
 +                u = strv_env_set(l, t);
 +                free(t);
 +                strv_free(l);
@@ -206,8 +209,9 @@ index d1c90d6..be28282 100644
 +                        return -ENOMEM;
 +
 +                l = u;
-+        }
-+
+         }
+ 
+-        mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
 +        if (isempty(c->x11_variant)) {
 +                l = strv_env_unset(l, "XKBVARIANT");
 +        } else {
@@ -219,7 +223,10 @@ index d1c90d6..be28282 100644
 +                u = strv_env_set(l, t);
 +                free(t);
 +                strv_free(l);
-+
+ 
+-        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
+-        if (r < 0)
+-                return r;
 +                if (!u)
 +                        return -ENOMEM;
  

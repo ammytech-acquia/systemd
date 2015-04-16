@@ -1,5 +1,5 @@
 '\" t
-.TH "SYSTEMD\&.EXEC" "5" "" "systemd 219" "systemd.exec"
+.TH "SYSTEMD\&.EXEC" "5" "" "systemd 215" "systemd.exec"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -127,7 +127,7 @@ for details\&. Defaults to false\&.
 .PP
 \fICPUAffinity=\fR
 .RS 4
-Controls the CPU affinity of the executed processes\&. Takes a space\-separated list of CPU indices\&. This option may be specified more than once in which case the specified CPU affinity masks are merged\&. If the empty string is assigned, the mask is reset, all assignments prior to this will have no effect\&. See
+Controls the CPU affinity of the executed processes\&. Takes a space\-separated list of CPU indices\&. This option may be specified more than once in which case the specificed CPU affinity masks are merged\&. If the empty string is assigned, the mask is reset, all assignments prior to this will have no effect\&. See
 \fBsched_setaffinity\fR(2)
 for details\&.
 .RE
@@ -190,36 +190,26 @@ Controls where file descriptor 0 (STDIN) of the executed processes is connected 
 \fBtty\-force\fR,
 \fBtty\-fail\fR
 or
-\fBsocket\fR\&.
-.sp
-If
+\fBsocket\fR\&. If
 \fBnull\fR
 is selected, standard input will be connected to
-/dev/null, i\&.e\&. all read attempts by the process will result in immediate EOF\&.
-.sp
-If
+/dev/null, i\&.e\&. all read attempts by the process will result in immediate EOF\&. If
 \fBtty\fR
 is selected, standard input is connected to a TTY (as configured by
 \fITTYPath=\fR, see below) and the executed process becomes the controlling process of the terminal\&. If the terminal is already being controlled by another process, the executed process waits until the current controlling process releases the terminal\&.
-.sp
 \fBtty\-force\fR
 is similar to
 \fBtty\fR, but the executed process is forcefully and immediately made the controlling process of the terminal, potentially removing previous controlling processes from the terminal\&.
-.sp
 \fBtty\-fail\fR
 is similar to
 \fBtty\fR
-but if the terminal already has a controlling process start\-up of the executed process fails\&.
-.sp
-The
+but if the terminal already has a controlling process start\-up of the executed process fails\&. The
 \fBsocket\fR
 option is only valid in socket\-activated services, and only when the socket configuration file (see
 \fBsystemd.socket\fR(5)
 for details) specifies a single socket only\&. If this option is set, standard input will be connected to the socket the service was activated from, which is primarily useful for compatibility with daemons designed for use with the traditional
 \fBinetd\fR(8)
-daemon\&.
-.sp
-This setting defaults to
+daemon\&. This setting defaults to
 \fBnull\fR\&.
 .RE
 .PP
@@ -229,52 +219,38 @@ Controls where file descriptor 1 (STDOUT) of the executed processes is connected
 \fBinherit\fR,
 \fBnull\fR,
 \fBtty\fR,
-\fBjournal\fR,
 \fBsyslog\fR,
 \fBkmsg\fR,
-\fBjournal+console\fR,
+\fBjournal\fR,
 \fBsyslog+console\fR,
-\fBkmsg+console\fR
+\fBkmsg+console\fR,
+\fBjournal+console\fR
 or
-\fBsocket\fR\&.
-.sp
-\fBinherit\fR
-duplicates the file descriptor of standard input for standard output\&.
-.sp
-\fBnull\fR
-connects standard output to
-/dev/null, i\&.e\&. everything written to it will be lost\&.
-.sp
-\fBtty\fR
-connects standard output to a tty (as configured via
+\fBsocket\fR\&. If set to
+\fBinherit\fR, the file descriptor of standard input is duplicated for standard output\&. If set to
+\fBnull\fR, standard output will be connected to
+/dev/null, i\&.e\&. everything written to it will be lost\&. If set to
+\fBtty\fR, standard output will be connected to a tty (as configured via
 \fITTYPath=\fR, see below)\&. If the TTY is used for output only, the executed process will not become the controlling process of the terminal, and will not fail or wait for other processes to release the terminal\&.
-.sp
-\fBjournal\fR
-connects standard output with the journal which is accessible via
-\fBjournalctl\fR(1)\&. Note that everything that is written to syslog or kmsg (see below) is implicitly stored in the journal as well, the specific two options listed below are hence supersets of this one\&.
-.sp
 \fBsyslog\fR
 connects standard output to the
 \fBsyslog\fR(3)
-system syslog service, in addition to the journal\&. Note that the journal daemon is usually configured to forward everything it receives to syslog anyway, in which case this option is no different from
-\fBjournal\fR\&.
-.sp
+system syslog service\&.
 \fBkmsg\fR
-connects standard output with the kernel log buffer which is accessible via
-\fBdmesg\fR(1), in addition to the journal\&. The journal daemon might be configured to send all logs to kmsg anyway, in which case this option is no different from
-\fBjournal\fR\&.
-.sp
-\fBjournal+console\fR,
-\fBsyslog+console\fR
+connects it with the kernel log buffer which is accessible via
+\fBdmesg\fR(1)\&.
+\fBjournal\fR
+connects it with the journal which is accessible via
+\fBjournalctl\fR(1)
+(Note that everything that is written to syslog or kmsg is implicitly stored in the journal as well, those options are hence supersets of this one)\&.
+\fBsyslog+console\fR,
+\fBjournal+console\fR
 and
 \fBkmsg+console\fR
-work in a similar way as the three options above but copy the output to the system console as well\&.
-.sp
+work similarly but copy the output to the system console as well\&.
 \fBsocket\fR
-connects standard output to a socket acquired via socket activation\&. The semantics are similar to the same option of
-\fIStandardInput=\fR\&.
-.sp
-This setting defaults to the value set with
+connects standard output to a socket from socket activation, semantics are similar to the respective option of
+\fIStandardInput=\fR\&. This setting defaults to the value set with
 \fBDefaultStandardOutput=\fR
 in
 \fBsystemd-system.conf\fR(5), which defaults to
@@ -325,17 +301,14 @@ is a virtual console terminal, try to deallocate the TTY before and after execut
 .PP
 \fISyslogIdentifier=\fR
 .RS 4
-Sets the process name to prefix log lines sent to the logging system or the kernel log buffer with\&. If not set, defaults to the process name of the executed process\&. This option is only useful when
+Sets the process name to prefix log lines sent to syslog or the kernel log buffer with\&. If not set, defaults to the process name of the executed process\&. This option is only useful when
 \fIStandardOutput=\fR
 or
 \fIStandardError=\fR
 are set to
-\fBsyslog\fR,
-\fBjournal\fR
+\fBsyslog\fR
 or
-\fBkmsg\fR
-(or to the same settings in combination with
-\fB+console\fR)\&.
+\fBkmsg\fR\&.
 .RE
 .PP
 \fISyslogFacility=\fR
@@ -420,124 +393,11 @@ for more information\&. Note that in contrast to most other time span definition
 .PP
 \fILimitCPU=\fR, \fILimitFSIZE=\fR, \fILimitDATA=\fR, \fILimitSTACK=\fR, \fILimitCORE=\fR, \fILimitRSS=\fR, \fILimitNOFILE=\fR, \fILimitAS=\fR, \fILimitNPROC=\fR, \fILimitMEMLOCK=\fR, \fILimitLOCKS=\fR, \fILimitSIGPENDING=\fR, \fILimitMSGQUEUE=\fR, \fILimitNICE=\fR, \fILimitRTPRIO=\fR, \fILimitRTTIME=\fR
 .RS 4
-These settings set both soft and hard limits of various resources for executed processes\&. See
+These settings control various resource limits for executed processes\&. See
 \fBsetrlimit\fR(2)
 for details\&. Use the string
 \fIinfinity\fR
 to configure no limit on a specific resource\&.
-.sp
-.it 1 an-trap
-.nr an-no-space-flag 1
-.nr an-break-flag 1
-.br
-.B Table\ \&1.\ \&Limit directives and their equivalent with ulimit
-.TS
-allbox tab(:);
-lB lB.
-T{
-Directive
-T}:T{
-ulimit equivalent
-T}
-.T&
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l.
-T{
-LimitCPU
-T}:T{
-ulimit \-t
-T}
-T{
-LimitFSIZE
-T}:T{
-ulimit \-f
-T}
-T{
-LimitDATA
-T}:T{
-ulimit \-d
-T}
-T{
-LimitSTACK
-T}:T{
-ulimit \-s
-T}
-T{
-LimitCORE
-T}:T{
-ulimit \-c
-T}
-T{
-LimitRSS
-T}:T{
-ulimit \-m
-T}
-T{
-LimitNOFILE
-T}:T{
-ulimit \-n
-T}
-T{
-LimitAS
-T}:T{
-ulimit \-v
-T}
-T{
-LimitNPROC
-T}:T{
-ulimit \-u
-T}
-T{
-LimitMEMLOCK
-T}:T{
-ulimit \-l
-T}
-T{
-LimitLOCKS
-T}:T{
-ulimit \-x
-T}
-T{
-LimitSIGPENDING
-T}:T{
-ulimit \-i
-T}
-T{
-LimitMSGQUEUE
-T}:T{
-ulimit \-q
-T}
-T{
-LimitNICE
-T}:T{
-ulimit \-e
-T}
-T{
-LimitRTPRIO
-T}:T{
-ulimit \-r
-T}
-T{
-LimitRTTIME
-T}:T{
-No equivalent
-T}
-.TE
-.sp 1
 .RE
 .PP
 \fIPAMName=\fR
@@ -567,15 +427,16 @@ does\&. If this option is not used, the capability bounding set is not modified 
 .PP
 \fISecureBits=\fR
 .RS 4
-Controls the secure bits set for the executed process\&. Takes a space\-separated combination of options from the following list:
+Controls the secure bits set for the executed process\&. See
+\fBcapabilities\fR(7)
+for details\&. Takes a list of strings:
 \fBkeep\-caps\fR,
 \fBkeep\-caps\-locked\fR,
 \fBno\-setuid\-fixup\fR,
 \fBno\-setuid\-fixup\-locked\fR,
-\fBnoroot\fR, and
-\fBnoroot\-locked\fR\&. This option may appear more than once in which case the secure bits are ORed\&. If the empty string is assigned to this option, the bits are reset to 0\&. See
-\fBcapabilities\fR(7)
-for details\&.
+\fBnoroot\fR
+and/or
+\fBnoroot\-locked\fR\&. This option may appear more than once in which case the secure bits are ORed\&. If the empty string is assigned to this option, the bits are reset to 0\&.
 .RE
 .PP
 \fICapabilities=\fR
@@ -585,7 +446,7 @@ Controls the
 set for the executed process\&. Take a capability string describing the effective, permitted and inherited capability sets as documented in
 \fBcap_from_text\fR(3)\&. Note that these capability sets are usually influenced (and filtered) by the capabilities attached to the executed file\&. Due to that
 \fICapabilityBoundingSet=\fR
-is probably a much more useful setting\&.
+is probably the much more useful setting\&.
 .RE
 .PP
 \fIReadWriteDirectories=\fR, \fIReadOnlyDirectories=\fR, \fIInaccessibleDirectories=\fR
@@ -660,9 +521,7 @@ for details\&. Note that this option will disconnect all socket families from th
 Takes a boolean argument or
 "full"\&. If true, mounts the
 /usr
-and
-/boot
-directories read\-only for processes invoked by this unit\&. If set to
+directory read\-only for processes invoked by this unit\&. If set to
 "full", the
 /etc
 directory is mounted read\-only, too\&. This setting ensures that any modification of the vendor supplied operating system (and optionally its configuration) is prohibited for the service\&. It is recommended to enable this setting for all long\-running services, unless they are involved with system updates or need to modify the operating system in other ways\&. Note however that processes retaining the CAP_SYS_ADMIN capability can undo the effect of this setting\&. This setting is hence particularly useful for daemons which have this capability removed, for example with
@@ -677,7 +536,7 @@ Takes a boolean argument or
 and
 /run/user
 are made inaccessible and empty for processes invoked by this unit\&. If set to
-"read\-only", the two directories are made read\-only instead\&. It is recommended to enable this setting for all long\-running services (in particular network\-facing ones), to ensure they cannot get access to private user data, unless the services actually require access to the user\*(Aqs private data\&. Note however that processes retaining the CAP_SYS_ADMIN capability can undo the effect of this setting\&. This setting is hence particularly useful for daemons which have this capability removed, for example with
+"read\-only", the two directores are made read\-only instead\&. It is recommended to enable this setting for all long\-running services (in particular network\-facing ones), to ensure they cannot get access to private user data, unless the services actually require access to the user\*(Aqs private data\&. Note however that processes retaining the CAP_SYS_ADMIN capability can undo the effect of this setting\&. This setting is hence particularly useful for daemons which have this capability removed, for example with
 \fICapabilityBoundingSet=\fR\&. Defaults to off\&.
 .RE
 .PP
@@ -698,10 +557,10 @@ to run processes so that none of their mounts and unmounts will propagate to the
 \fBprivate\fR
 to also ensure that no mounts and unmounts from the host will propagate into the unit processes\*(Aq namespace\&. Note that
 \fBslave\fR
-means that file systems mounted on the host might stay mounted continuously in the unit\*(Aqs namespace, and thus keep the device busy\&. Note that the file system namespace related options (\fIPrivateTmp=\fR,
+means that file systems mounted on the host might stay mounted continously in the unit\*(Aqs namespace, and thus keep the device busy\&. Note that the file system namespace related options (\fIPrivateTmp=\fR,
 \fIPrivateDevices=\fR,
-\fIProtectSystem=\fR,
-\fIProtectHome=\fR,
+\fIReadOnlySystem=\fR,
+\fIProtectedHome=\fR,
 \fIReadOnlyDirectories=\fR,
 \fIInaccessibleDirectories=\fR
 and
@@ -720,7 +579,7 @@ implementations where utmp/wtmp entries must be created and cleared before and a
 .PP
 \fISELinuxContext=\fR
 .RS 4
-Set the SELinux security context of the executed process\&. If set, this will override the automated domain transition\&. However, the policy still needs to authorize the transition\&. This directive is ignored if SELinux is disabled\&. If prefixed by
+Set the SELinux security context of the executed process\&. If set, this will override the automated domain transition\&. However, the policy still needs to autorize the transition\&. This directive is ignored if SELinux is disabled\&. If prefixed by
 "\-", all errors will be ignored\&. See
 \fBsetexeccon\fR(3)
 for details\&.
@@ -730,18 +589,6 @@ for details\&.
 .RS 4
 Takes a profile name as argument\&. The process executed by the unit will switch to this profile when started\&. Profiles must already be loaded in the kernel, or the unit will fail\&. This result in a non operation if AppArmor is not enabled\&. If prefixed by
 "\-", all errors will be ignored\&.
-.RE
-.PP
-\fISmackProcessLabel=\fR
-.RS 4
-Takes a
-\fBSMACK64\fR
-security label as argument\&. The process executed by the unit will be started under this label and SMACK will decide whether the processes is allowed to run or not based on it\&. The process will continue to run under the label specified here unless the executable has its own
-\fBSMACK64EXEC\fR
-label, in which case the process will transition to run under that label\&. When not specified, the label that systemd is running under is used\&. This directive is ignored if SMACK is disabled\&.
-.sp
-The value may be prefixed by
-"\-", in which case all errors will be ignored\&. An empty value may be specified to unset previous assignments\&.
 .RE
 .PP
 \fIIgnoreSIGPIPE=\fR
@@ -868,7 +715,7 @@ Processes started by the system are executed in a clean environment in which sel
 .PP
 \fI$PATH\fR
 .RS 4
-Colon\-separated list of directories to use when launching executables\&. Systemd uses a fixed value of
+Colon\-separated list of directiories to use when launching executables\&. Systemd uses a fixed value of
 /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\&.
 .RE
 .PP
@@ -953,7 +800,7 @@ options above; to specify variables globally, use
 .SH "SEE ALSO"
 .PP
 \fBsystemd\fR(1),
-\fBsystemctl\fR(1),
+\fBsystemctl\fR(8),
 \fBjournalctl\fR(8),
 \fBsystemd.unit\fR(5),
 \fBsystemd.service\fR(5),

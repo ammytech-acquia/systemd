@@ -34,20 +34,6 @@ __get_slices() {
         systemctl list-units -t slice --no-legend --no-pager | { while read a b; do echo " $a"; done; };
 }
 
-__get_machines() {
-        local a b
-        machinectl list --no-legend --no-pager | { while read a b; do echo " $a"; done; };
-}
-
-__get_env() {
-        local a
-        env | { while read a; do echo " ${a%%=*}"; done; };
-}
-
-__get_interfaces(){
-    cut -f 1 -d ' ' /proc/net/dev | tail -n +3 | tr -s '\n' | tr -d ':' | xargs
-}
-
 _systemd_nspawn() {
         local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
         local i verb comps
@@ -56,8 +42,7 @@ _systemd_nspawn() {
                [STANDALONE]='-h --help --version --private-network -b --boot --read-only -q --quiet --share-system --keep-unit --network-veth -j'
                       [ARG]='-D --directory -u --user --uuid --capability --drop-capability --link-journal --bind --bind-ro -M --machine
                              -S --slice --setenv -Z --selinux-context -L --selinux-apifs-context --register --network-interface --network-bridge
-                             --personality -i --image --tmpfs --volatile
-                             --network-macvlan'
+                             --personality -i --image'
         )
 
         _init_completion || return
@@ -65,8 +50,7 @@ _systemd_nspawn() {
         if __contains_word "$prev" ${OPTS[ARG]}; then
                 case $prev in
                         --directory|-D)
-                                compopt -o nospace
-                                comps=$(compgen -S/ -A directory -- "$cur" )
+                                comps=$(compgen -A directory -- "$cur" )
                         ;;
                         --user|-u)
                                 comps=$( __get_users )
@@ -88,21 +72,16 @@ _systemd_nspawn() {
                                 comps='no auto guest host'
                         ;;
                         --bind|--bind-ro)
-                                compopt -o nospace
-                                comps=$(compgen -S/ -A directory -- "$cur" )
-                        ;;
-                        --tmpfs)
-                                compopt -o nospace
-                                comps=$(compgen -S/ -A directory -- "$cur" )
+                                comps=''
                         ;;
                         --machine|-M)
-                                comps=$( __get_machines )
+                                comps=''
                         ;;
                         --slice|-S)
                                 comps=$( __get_slices )
                         ;;
                         --setenv)
-                                comps=$( __get_env )
+                                comps=''
                         ;;
                         --selinux-context|-Z)
                                 comps=''
@@ -114,22 +93,15 @@ _systemd_nspawn() {
                                 comps='yes no'
                         ;;
                         --network-interface)
-                                comps=$(__get_interfaces)
-                        ;;
-                        --network-bridge)
                                 comps=''
                         ;;
-                        --network-macvlan)
+                        --network-bridge)
                                 comps=''
                         ;;
                         --personality)
                                 comps='x86 x86-64'
                         ;;
-                        --volatile)
-                                comps='yes state no'
-                        ;;
                         --image|-i)
-                                compopt -o nospace
                                 comps=$( compgen -A file -- "$cur" )
                         ;;
                 esac

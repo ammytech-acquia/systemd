@@ -27,9 +27,7 @@
 #include <string.h>
 #include <sys/uio.h>
 
-typedef struct Ring Ring;
-
-struct Ring {
+struct ring {
         uint8_t *buf;           /* buffer or NULL */
         size_t size;            /* actual size of @buf */
         size_t start;           /* start position of ring */
@@ -37,25 +35,25 @@ struct Ring {
 };
 
 /* flush buffer so it is empty again */
-void ring_flush(Ring *r);
+void ring_flush(struct ring *r);
 
 /* flush buffer, free allocated data and reset to initial state */
-void ring_clear(Ring *r);
+void ring_clear(struct ring *r);
 
 /* get pointers to buffer data and their length */
-size_t ring_peek(Ring *r, struct iovec *vec);
+size_t ring_peek(struct ring *r, struct iovec *vec);
 
 /* copy data into external linear buffer */
-size_t ring_copy(Ring *r, void *buf, size_t size);
+size_t ring_copy(struct ring *r, void *buf, size_t size);
 
 /* push data to the end of the buffer */
-int ring_push(Ring *r, const void *u8, size_t size);
+int ring_push(struct ring *r, const void *u8, size_t size);
 
 /* pull data from the front of the buffer */
-void ring_pull(Ring *r, size_t size);
+void ring_pull(struct ring *r, size_t size);
 
 /* return size of occupied buffer in bytes */
-static inline size_t ring_get_size(Ring *r)
+static inline size_t ring_get_size(struct ring *r)
 {
         return r->used;
 }

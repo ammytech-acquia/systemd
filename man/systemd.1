@@ -1,5 +1,5 @@
 '\" t
-.TH "SYSTEMD" "1" "" "systemd 219" "systemd"
+.TH "SYSTEMD" "1" "" "systemd 215" "systemd"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -42,15 +42,9 @@ are mostly equivalent when invoked from normal login sessions\&. See
 \fBtelinit\fR(8)
 for more information\&.
 .PP
-When run as a system instance, systemd interprets the configuration file
-system\&.conf
-and the files in
-system\&.conf\&.d
-directories; when run as a user instance, systemd interprets the configuration file
-user\&.conf
-and the files in
-user\&.conf\&.d
-directories\&. See
+When run as system instance, systemd interprets the configuration file
+system\&.conf, otherwise
+user\&.conf\&. See
 \fBsystemd-system.conf\fR(5)
 for more information\&.
 .SH "OPTIONS"
@@ -112,8 +106,10 @@ Show terse service status information while booting\&. This switch has no effect
 Set log target\&. Argument must be one of
 \fBconsole\fR,
 \fBjournal\fR,
+\fBsyslog\fR,
 \fBkmsg\fR,
 \fBjournal\-or\-kmsg\fR,
+\fBsyslog\-or\-kmsg\fR,
 \fBnull\fR\&.
 .RE
 .PP
@@ -462,7 +458,7 @@ unit when this signal is received\&. This is mostly equivalent to
 Upon receiving this signal the systemd system manager will start the
 ctrl\-alt\-del\&.target
 unit\&. This is mostly equivalent to
-\fBsystemctl start ctl\-alt\-del\&.target\fR\&. If this signal is received more often than 7 times per 2s an immediate reboot is triggered\&. Note that pressing Ctrl\-Alt\-Del on the console will trigger this signal\&. Hence, if a reboot is hanging pressing Ctrl\-Alt\-Del more than 7 times in 2s is a relatively safe way to trigger an immediate reboot\&.
+\fBsystemctl start ctl\-alt\-del\&.target\fR\&.
 .sp
 systemd user managers treat this signal the same way as
 \fBSIGTERM\fR\&.
@@ -494,7 +490,7 @@ When this signal is received the systemd manager will try to reconnect to the D\
 \fBSIGUSR2\fR
 .RS 4
 When this signal is received the systemd manager will log its complete state in human readable form\&. The data logged is the same as printed by
-\fBsystemd\-analyze dump\fR\&.
+\fBsystemctl dump\fR\&.
 .RE
 .PP
 \fBSIGHUP\fR
@@ -613,7 +609,7 @@ on
 Immediately exits the manager (only available for \-\-user instances)\&.
 .RE
 .PP
-\fBSIGRTMIN+26\fR, \fBSIGRTMIN+27\fR, \fBSIGRTMIN+28\fR
+\fBSIGRTMIN+26\fR, \fBSIGRTMIN+27\fR, \fBSIGRTMIN+28\fR, \fBSIGRTMIN+29\fR
 .RS 4
 Sets the log level to
 "journal\-or\-kmsg"
@@ -623,16 +619,21 @@ on
 \fBSIGRTMIN+27\fR,
 "kmsg"
 on
-\fBSIGRTMIN+28\fR), as controlled via
+\fBSIGRTMIN+28\fR, or
+"syslog\-or\-kmsg"
+on
+\fBSIGRTMIN+29\fR), as controlled via
 \fIsystemd\&.log_target=journal\-or\-kmsg\fR
 (or
 \fIsystemd\&.log_target=console\fR
 on
-\fBSIGRTMIN+27\fR
-or
+\fBSIGRTMIN+27\fR,
 \fIsystemd\&.log_target=kmsg\fR
 on
-\fBSIGRTMIN+28\fR) on the kernel command line\&.
+\fBSIGRTMIN+28\fR, or
+\fIsystemd\&.log_target=syslog\-or\-kmsg\fR
+on
+\fBSIGRTMIN+29\fR) on the kernel command line\&.
 .RE
 .SH "ENVIRONMENT"
 .PP
@@ -791,14 +792,14 @@ Turn on debugging output\&. This is equivalent to
 \fIsystemd\&.log_level=debug\fR\&. Note that this option is also read by the kernel itself and enables kernel debug output\&. Passing this option hence turns on the debug output from both the system manager and the kernel\&.
 .RE
 .PP
-\fIemergency\fR, \fI\-b\fR
+\fI\-b\fR, \fIemergency\fR
 .RS 4
 Boot into emergency mode\&. This is equivalent to
 \fIsystemd\&.unit=emergency\&.target\fR
 and provided for compatibility reasons and to be easier to type\&.
 .RE
 .PP
-\fIrescue\fR, \fIsingle\fR, \fIs\fR, \fIS\fR, \fI1\fR
+\fIsingle\fR, \fIs\fR, \fIS\fR, \fI1\fR
 .RS 4
 Boot into rescue mode\&. This is equivalent to
 \fIsystemd\&.unit=rescue\&.target\fR

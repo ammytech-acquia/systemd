@@ -42,13 +42,14 @@
 #include "sd-daemon.h"
 #include "sd-messages.h"
 #include "sd-bus.h"
+#include "manager.h"
 #include "log.h"
+#include "load-fragment.h"
 #include "fdset.h"
 #include "special.h"
 #include "conf-parser.h"
 #include "missing.h"
 #include "label.h"
-#include "pager.h"
 #include "build.h"
 #include "strv.h"
 #include "def.h"
@@ -62,12 +63,9 @@
 #include "env-util.h"
 #include "clock-util.h"
 #include "fileio.h"
+#include "dbus-manager.h"
 #include "bus-error.h"
 #include "bus-util.h"
-#include "selinux-util.h"
-#include "manager.h"
-#include "dbus-manager.h"
-#include "load-fragment.h"
 
 #include "mount-setup.h"
 #include "loopback-setup.h"
@@ -76,7 +74,9 @@
 #include "selinux-setup.h"
 #include "ima-setup.h"
 #include "smack-setup.h"
+#ifdef HAVE_KMOD
 #include "kmod-setup.h"
+#endif
 
 static enum {
         ACTION_RUN,
@@ -94,7 +94,6 @@ static int arg_crash_chvt = -1;
 static bool arg_confirm_spawn = false;
 static ShowStatus arg_show_status = _SHOW_STATUS_UNSET;
 static bool arg_switched_root = false;
-static int arg_no_pager = -1;
 static char ***arg_join_controllers = NULL;
 static ExecOutput arg_default_std_output = EXEC_OUTPUT_JOURNAL;
 static ExecOutput arg_default_std_error = EXEC_OUTPUT_INHERIT;
@@ -108,7 +107,7 @@ static usec_t arg_shutdown_watchdog = 10 * USEC_PER_MINUTE;
 static char **arg_default_environment = NULL;
 static struct rlimit *arg_default_rlimit[_RLIMIT_MAX] = {};
 static uint64_t arg_capability_bounding_set_drop = 0;
-static nsec_t arg_timer_slack_nsec = NSEC_INFINITY;
+static nsec_t arg_timer_slack_nsec = (nsec_t) -1;
 static usec_t arg_default_timer_accuracy_usec = 1 * USEC_PER_MINUTE;
 static Set* arg_syscall_archs = NULL;
 static FILE* arg_serialization = NULL;
@@ -118,21 +117,13 @@ static bool arg_default_memory_accounting = false;
 
 static void nop_handler(int sig) {}
 
-static void pager_open_if_enabled(void) {
-
-        if (arg_no_pager <= 0)
-                return;
-
-        pager_open(false);
-}
-
 noreturn static void crash(int sig) {
 
         if (getpid() != 1)
                 /* Pass this on immediately, if this is not PID 1 */
                 raise(sig);
         else if (!arg_dump_core)
-                log_emergency("Caught <%s>, not dumping core.", signal_to_string(sig));
+                log_error("Caught <%s>, not dumping core.", signal_to_string(sig));
         else {
                 struct sigaction sa = {
                         .sa_handler = nop_handler,
@@ -143,9 +134,9 @@ noreturn static void crash(int sig) {
                 /* We want to wait for the core process, hence let's enable SIGCHLD */
                 sigaction(SIGCHLD, &sa, NULL);
 
-                pid = raw_clone(SIGCHLD, NULL);
+                pid = fork();
                 if (pid < 0)
-                        log_emergency_errno(errno, "Caught <%s>, cannot fork for core dump: %m", signal_to_string(sig));
+                        log_error("Caught <%s>, cannot fork for core dump: %m", signal_to_string(sig));
 
                 else if (pid == 0) {
                         struct rlimit rl = {};
@@ -164,11 +155,11 @@ noreturn static void crash(int sig) {
                         chdir("/");
 
                         /* Raise the signal again */
-                        pid = raw_getpid();
-                        kill(pid, sig); /* raise() would kill the parent */
+                        raise(sig);
 
                         assert_not_reached("We shouldn't be here...");
                         _exit(1);
+
                 } else {
                         siginfo_t status;
                         int r;
@@ -176,17 +167,11 @@ noreturn static void crash(int sig) {
                         /* Order things nicely. */
                         r = wait_for_terminate(pid, &status);
                         if (r < 0)
-                                log_emergency_errno(r, "Caught <%s>, waitpid() failed: %m", signal_to_string(sig));
+                                log_error("Caught <%s>, waitpid() failed: %s", signal_to_string(sig), strerror(-r));
                         else if (status.si_code != CLD_DUMPED)
-                                log_emergency("Caught <%s>, core dump failed (child "PID_FMT", code=%s, status=%i/%s).",
-                                              signal_to_string(sig),
-                                              pid, sigchld_code_to_string(status.si_code),
-                                              status.si_status,
-                                              strna(status.si_code == CLD_EXITED
-                                                    ? exit_status_to_string(status.si_status, EXIT_STATUS_FULL)
-                                                    : signal_to_string(status.si_status)));
+                                log_error("Caught <%s>, core dump failed.", signal_to_string(sig));
                         else
-                                log_emergency("Caught <%s>, dumped core as pid "PID_FMT".", signal_to_string(sig), pid);
+                                log_error("Caught <%s>, dumped core as pid "PID_FMT".", signal_to_string(sig), pid);
                 }
         }
 
@@ -206,52 +191,58 @@ noreturn static void crash(int sig) {
                 /* Let the kernel reap children for us */
                 assert_se(sigaction(SIGCHLD, &sa, NULL) == 0);
 
-                pid = raw_clone(SIGCHLD, NULL);
+                pid = fork();
                 if (pid < 0)
-                        log_emergency_errno(errno, "Failed to fork off crash shell: %m");
+                        log_error("Failed to fork off crash shell: %m");
                 else if (pid == 0) {
                         make_console_stdio();
-                        execle("/bin/sh", "/bin/sh", NULL, environ);
+                        execl("/bin/sh", "/bin/sh", NULL);
 
-                        log_emergency_errno(errno, "execle() failed: %m");
+                        log_error("execl() failed: %m");
                         _exit(1);
-                } else
-                        log_info("Successfully spawned crash shell as PID "PID_FMT".", pid);
+                }
+
+                log_info("Successfully spawned crash shell as pid "PID_FMT".", pid);
         }
 
-        log_emergency("Freezing execution.");
+        log_info("Freezing execution.");
         freeze();
 }
 
 static void install_crash_handler(void) {
-        static const struct sigaction sa = {
+        struct sigaction sa = {
                 .sa_handler = crash,
-                .sa_flags = SA_NODEFER, /* So that we can raise the signal again from the signal handler */
+                .sa_flags = SA_NODEFER,
         };
-        int r;
 
-        /* We ignore the return value here, since, we don't mind if we
-         * cannot set up a crash handler */
-        r = sigaction_many(&sa, SIGNALS_CRASH_HANDLER, -1);
-        if (r < 0)
-                log_debug_errno(r, "I had trouble setting up the crash handler, ignoring: %m");
+        sigaction_many(&sa, SIGNALS_CRASH_HANDLER, -1);
 }
 
-static int console_setup(void) {
-        _cleanup_close_ int tty_fd = -1;
-        int r;
+static int console_setup(bool do_reset) {
+        int tty_fd, r;
+
+        /* If we are init, we connect stdin/stdout/stderr to /dev/null
+         * and make sure we don't have a controlling tty. */
+
+        release_terminal();
+
+        if (!do_reset)
+                return 0;
 
         tty_fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
-        if (tty_fd < 0)
-                return log_error_errno(tty_fd, "Failed to open /dev/console: %m");
+        if (tty_fd < 0) {
+                log_error("Failed to open /dev/console: %s", strerror(-tty_fd));
+                return -tty_fd;
+        }
 
-        /* We don't want to force text mode.  plymouth may be showing
-         * pictures already from initrd. */
+        /* We don't want to force text mode.
+         * plymouth may be showing pictures already from initrd. */
         r = reset_terminal_fd(tty_fd, false);
         if (r < 0)
-                return log_error_errno(r, "Failed to reset /dev/console: %m");
+                log_error("Failed to reset /dev/console: %s", strerror(-r));
 
-        return 0;
+        safe_close(tty_fd);
+        return r;
 }
 
 static int set_default_unit(const char *u) {
@@ -274,7 +265,6 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
         static const char * const rlmap[] = {
                 "emergency", SPECIAL_EMERGENCY_TARGET,
                 "-b",        SPECIAL_EMERGENCY_TARGET,
-                "rescue",    SPECIAL_RESCUE_TARGET,
                 "single",    SPECIAL_RESCUE_TARGET,
                 "-s",        SPECIAL_RESCUE_TARGET,
                 "s",         SPECIAL_RESCUE_TARGET,
@@ -298,6 +288,26 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
 
                 if (in_initrd())
                         return set_default_unit(value);
+
+        } else if (streq(key, "systemd.log_target") && value) {
+
+                if (log_set_target_from_string(value) < 0)
+                        log_warning("Failed to parse log target %s. Ignoring.", value);
+
+        } else if (streq(key, "systemd.log_level") && value) {
+
+                if (log_set_max_level_from_string(value) < 0)
+                        log_warning("Failed to parse log level %s. Ignoring.", value);
+
+        } else if (streq(key, "systemd.log_color") && value) {
+
+                if (log_show_color_from_string(value) < 0)
+                        log_warning("Failed to parse log color setting %s. Ignoring.", value);
+
+        } else if (streq(key, "systemd.log_location") && value) {
+
+                if (log_show_location_from_string(value) < 0)
+                        log_warning("Failed to parse log location setting %s. Ignoring.", value);
 
         } else if (streq(key, "systemd.dump_core") && value) {
 
@@ -361,19 +371,20 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                         if (env)
                                 arg_default_environment = env;
                         else
-                                log_warning_errno(ENOMEM, "Setting environment variable '%s' failed, ignoring: %m", value);
+                                log_warning("Setting environment variable '%s' failed, ignoring: %s", value, strerror(ENOMEM));
                 } else
                         log_warning("Environment variable name '%s' is not valid. Ignoring.", value);
 
         } else if (streq(key, "quiet") && !value) {
+
+                log_set_max_level(LOG_NOTICE);
 
                 if (arg_show_status == _SHOW_STATUS_UNSET)
                         arg_show_status = SHOW_STATUS_AUTO;
 
         } else if (streq(key, "debug") && !value) {
 
-                /* Note that log_parse_environment() handles 'debug'
-                 * too, and sets the log level to LOG_DEBUG. */
+                log_set_max_level(LOG_DEBUG);
 
                 if (detect_container(NULL) > 0)
                         log_set_target(LOG_TARGET_CONSOLE);
@@ -434,8 +445,9 @@ static int config_parse_cpu_affinity2(
                 void *data,
                 void *userdata) {
 
-        const char *word, *state;
+        char *w;
         size_t l;
+        char *state;
         cpu_set_t *c = NULL;
         unsigned ncpus = 0;
 
@@ -443,12 +455,12 @@ static int config_parse_cpu_affinity2(
         assert(lvalue);
         assert(rvalue);
 
-        FOREACH_WORD_QUOTED(word, l, rvalue, state) {
+        FOREACH_WORD_QUOTED(w, l, rvalue, state) {
                 char *t;
                 int r;
                 unsigned cpu;
 
-                if (!(t = strndup(word, l)))
+                if (!(t = strndup(w, l)))
                         return log_oom();
 
                 r = safe_atou(t, &cpu);
@@ -467,13 +479,10 @@ static int config_parse_cpu_affinity2(
 
                 CPU_SET_S(cpu, CPU_ALLOC_SIZE(ncpus), c);
         }
-        if (!isempty(state))
-                log_syntax(unit, LOG_ERR, filename, line, EINVAL,
-                           "Trailing garbage, ignoring.");
 
         if (c) {
                 if (sched_setaffinity(0, CPU_ALLOC_SIZE(ncpus), c) < 0)
-                        log_unit_warning(unit, "Failed to set CPU affinity: %m");
+                        log_warning_unit(unit, "Failed to set CPU affinity: %m");
 
                 CPU_FREE(c);
         }
@@ -540,7 +549,7 @@ static int config_parse_join_controllers(const char *unit,
                                          void *userdata) {
 
         unsigned n = 0;
-        const char *word, *state;
+        char *state, *w;
         size_t length;
 
         assert(filename);
@@ -549,10 +558,10 @@ static int config_parse_join_controllers(const char *unit,
 
         free_join_controllers();
 
-        FOREACH_WORD_QUOTED(word, length, rvalue, state) {
+        FOREACH_WORD_QUOTED(w, length, rvalue, state) {
                 char *s, **l;
 
-                s = strndup(word, length);
+                s = strndup(w, length);
                 if (!s)
                         return log_oom();
 
@@ -618,9 +627,6 @@ static int config_parse_join_controllers(const char *unit,
                         arg_join_controllers = t;
                 }
         }
-        if (!isempty(state))
-                log_syntax(unit, LOG_ERR, filename, line, EINVAL,
-                           "Trailing garbage, ignoring.");
 
         return 0;
 }
@@ -676,12 +682,23 @@ static int parse_config_file(void) {
                 {}
         };
 
-        const char *fn, *conf_dirs_nulstr;
+        _cleanup_fclose_ FILE *f;
+        const char *fn;
+        int r;
 
         fn = arg_running_as == SYSTEMD_SYSTEM ? PKGSYSCONFDIR "/system.conf" : PKGSYSCONFDIR "/user.conf";
-        conf_dirs_nulstr = arg_running_as == SYSTEMD_SYSTEM ? CONF_DIRS_NULSTR("systemd/system.conf") : CONF_DIRS_NULSTR("systemd/user.conf");
-        config_parse_many(fn, conf_dirs_nulstr, "Manager\0",
-                          config_item_table_lookup, items, false, NULL);
+        f = fopen(fn, "re");
+        if (!f) {
+                if (errno == ENOENT)
+                        return 0;
+
+                log_warning("Failed to open configuration file '%s': %m", fn);
+                return 0;
+        }
+
+        r = config_parse(NULL, fn, f, "Manager\0", config_item_table_lookup, (void*) items, false, false, NULL);
+        if (r < 0)
+                log_warning("Failed to parse configuration file: %s", strerror(-r));
 
         return 0;
 }
@@ -697,7 +714,6 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_SYSTEM,
                 ARG_USER,
                 ARG_TEST,
-                ARG_NO_PAGER,
                 ARG_VERSION,
                 ARG_DUMP_CONFIGURATION_ITEMS,
                 ARG_DUMP_CORE,
@@ -719,7 +735,6 @@ static int parse_argv(int argc, char *argv[]) {
                 { "system",                   no_argument,       NULL, ARG_SYSTEM                   },
                 { "user",                     no_argument,       NULL, ARG_USER                     },
                 { "test",                     no_argument,       NULL, ARG_TEST                     },
-                { "no-pager",                 no_argument,       NULL, ARG_NO_PAGER                 },
                 { "help",                     no_argument,       NULL, 'h'                          },
                 { "version",                  no_argument,       NULL, ARG_VERSION                  },
                 { "dump-configuration-items", no_argument,       NULL, ARG_DUMP_CONFIGURATION_ITEMS },
@@ -810,8 +825,10 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_UNIT:
 
                         r = set_default_unit(optarg);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to set default unit %s: %m", optarg);
+                        if (r < 0) {
+                                log_error("Failed to set default unit %s: %s", optarg, strerror(-r));
+                                return r;
+                        }
 
                         break;
 
@@ -825,12 +842,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_TEST:
                         arg_action = ACTION_TEST;
-                        if (arg_no_pager < 0)
-                                arg_no_pager = true;
-                        break;
-
-                case ARG_NO_PAGER:
-                        arg_no_pager = true;
                         break;
 
                 case ARG_VERSION:
@@ -892,8 +903,10 @@ static int parse_argv(int argc, char *argv[]) {
                         fd_cloexec(fd, true);
 
                         f = fdopen(fd, "r");
-                        if (!f)
-                                return log_error_errno(errno, "Failed to open serialization fd: %m");
+                        if (!f) {
+                                log_error("Failed to open serialization fd: %m");
+                                return -errno;
+                        }
 
                         if (arg_serialization)
                                 fclose(arg_serialization);
@@ -909,8 +922,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case 'h':
                         arg_action = ACTION_HELP;
-                        if (arg_no_pager < 0)
-                                arg_no_pager = true;
                         break;
 
                 case 'D':
@@ -926,13 +937,13 @@ static int parse_argv(int argc, char *argv[]) {
                          * parse_proc_cmdline_word() or ignore. */
 
                 case '?':
-                        if (getpid() != 1)
-                                return -EINVAL;
-                        else
-                                return 0;
-
                 default:
-                        assert_not_reached("Unhandled option code.");
+                        if (getpid() != 1) {
+                                log_error("Unknown option code %c", c);
+                                return -EINVAL;
+                        }
+
+                        break;
                 }
 
         if (optind < argc && getpid() != 1) {
@@ -941,6 +952,37 @@ static int parse_argv(int argc, char *argv[]) {
 
                 log_error("Excess arguments.");
                 return -EINVAL;
+        }
+
+        if (detect_container(NULL) > 0) {
+                char **a;
+
+                /* All /proc/cmdline arguments the kernel didn't
+                 * understand it passed to us. We're not really
+                 * interested in that usually since /proc/cmdline is
+                 * more interesting and complete. With one exception:
+                 * if we are run in a container /proc/cmdline is not
+                 * relevant for the container, hence we rely on argv[]
+                 * instead. */
+
+                for (a = argv; a < argv + argc; a++) {
+                        _cleanup_free_ char *w;
+                        char *value;
+
+                        w = strdup(*a);
+                        if (!w)
+                                return log_oom();
+
+                        value = strchr(w, '=');
+                        if (value)
+                                *(value++) = 0;
+
+                        r = parse_proc_cmdline_item(w, value);
+                        if (r < 0) {
+                                log_error("Failed on cmdline argument %s: %s", *a, strerror(-r));
+                                return r;
+                        }
+                }
         }
 
         return 0;
@@ -952,7 +994,6 @@ static int help(void) {
                "Starts up and maintains the system or user services.\n\n"
                "  -h --help                      Show this help\n"
                "     --test                      Determine startup sequence, dump it and exit\n"
-               "     --no-pager                  Do not pipe output into a pager\n"
                "     --dump-configuration-items  Dump understood unit configuration items\n"
                "     --unit=UNIT                 Set default unit\n"
                "     --system                    Run a system instance, even if PID != 1\n"
@@ -961,7 +1002,7 @@ static int help(void) {
                "     --crash-shell[=0|1]         Run shell on crash\n"
                "     --confirm-spawn[=0|1]       Ask for confirmation when spawning processes\n"
                "     --show-status[=0|1]         Show status updates on the console during bootup\n"
-               "     --log-target=TARGET         Set log target (console, journal, kmsg, journal-or-kmsg, null)\n"
+               "     --log-target=TARGET         Set log target (console, journal, syslog, kmsg, journal-or-kmsg, syslog-or-kmsg, null)\n"
                "     --log-level=LEVEL           Set log level (debug, info, notice, warning, err, crit, alert, emerg)\n"
                "     --log-color[=0|1]           Highlight important log messages\n"
                "     --log-location[=0|1]        Include code location in log messages\n"
@@ -990,7 +1031,7 @@ static int prepare_reexecute(Manager *m, FILE **_f, FDSet **_fds, bool switching
 
         r = manager_open_serialization(m, &f);
         if (r < 0) {
-                log_error_errno(r, "Failed to create serialization file: %m");
+                log_error("Failed to create serialization file: %s", strerror(-r));
                 goto fail;
         }
 
@@ -1001,30 +1042,30 @@ static int prepare_reexecute(Manager *m, FILE **_f, FDSet **_fds, bool switching
         fds = fdset_new();
         if (!fds) {
                 r = -ENOMEM;
-                log_error_errno(r, "Failed to allocate fd set: %m");
+                log_error("Failed to allocate fd set: %s", strerror(-r));
                 goto fail;
         }
 
         r = manager_serialize(m, f, fds, switching_root);
         if (r < 0) {
-                log_error_errno(r, "Failed to serialize state: %m");
+                log_error("Failed to serialize state: %s", strerror(-r));
                 goto fail;
         }
 
         if (fseeko(f, 0, SEEK_SET) < 0) {
-                log_error_errno(errno, "Failed to rewind serialization fd: %m");
+                log_error("Failed to rewind serialization fd: %m");
                 goto fail;
         }
 
         r = fd_cloexec(fileno(f), false);
         if (r < 0) {
-                log_error_errno(r, "Failed to disable O_CLOEXEC for serialization: %m");
+                log_error("Failed to disable O_CLOEXEC for serialization: %s", strerror(-r));
                 goto fail;
         }
 
         r = fdset_cloexec(fds, false);
         if (r < 0) {
-                log_error_errno(r, "Failed to disable O_CLOEXEC for serialization fds: %m");
+                log_error("Failed to disable O_CLOEXEC for serialization fds: %s", strerror(-r));
                 goto fail;
         }
 
@@ -1051,8 +1092,10 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
         /* Save the original RLIMIT_NOFILE so that we can reset it
          * later when transitioning from the initrd to the main
          * systemd or suchlike. */
-        if (getrlimit(RLIMIT_NOFILE, saved_rlimit) < 0)
-                return log_error_errno(errno, "Reading RLIMIT_NOFILE failed: %m");
+        if (getrlimit(RLIMIT_NOFILE, saved_rlimit) < 0) {
+                log_error("Reading RLIMIT_NOFILE failed: %m");
+                return -errno;
+        }
 
         /* Make sure forked processes get the default kernel setting */
         if (!arg_default_rlimit[RLIMIT_NOFILE]) {
@@ -1068,8 +1111,10 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
         /* Bump up the resource limit for ourselves substantially */
         nl.rlim_cur = nl.rlim_max = 64*1024;
         r = setrlimit_closest(RLIMIT_NOFILE, &nl);
-        if (r < 0)
-                return log_error_errno(r, "Setting RLIMIT_NOFILE failed: %m");
+        if (r < 0) {
+                log_error("Setting RLIMIT_NOFILE failed: %s", strerror(-r));
+                return r;
+        }
 
         return 0;
 }
@@ -1107,7 +1152,7 @@ static void test_usr(void) {
         if (dir_is_empty("/usr") <= 0)
                 return;
 
-        log_warning("/usr appears to be on its own filesystem and is not already mounted. This is not a supported setup. "
+        log_warning("/usr appears to be on its own filesytem and is not already mounted. This is not a supported setup. "
                     "Some things will probably break (sometimes even silently) in mysterious ways. "
                     "Consult http://freedesktop.org/wiki/Software/systemd/separate-usr-is-broken for more information.");
 }
@@ -1115,7 +1160,7 @@ static void test_usr(void) {
 static int initialize_join_controllers(void) {
         /* By default, mount "cpu" + "cpuacct" together, and "net_cls"
          * + "net_prio". We'd like to add "cpuset" to the mix, but
-         * "cpuset" doesn't really work for groups with no initialized
+         * "cpuset" does't really work for groups with no initialized
          * attributes. */
 
         arg_join_controllers = new(char**, 3);
@@ -1150,20 +1195,20 @@ static int enforce_syscall_archs(Set *archs) {
                 if (r == -EEXIST)
                         continue;
                 if (r < 0) {
-                        log_error_errno(r, "Failed to add architecture to seccomp: %m");
+                        log_error("Failed to add architecture to seccomp: %s", strerror(-r));
                         goto finish;
                 }
         }
 
         r = seccomp_attr_set(seccomp, SCMP_FLTATR_CTL_NNP, 0);
         if (r < 0) {
-                log_error_errno(r, "Failed to unset NO_NEW_PRIVS: %m");
+                log_error("Failed to unset NO_NEW_PRIVS: %s", strerror(-r));
                 goto finish;
         }
 
         r = seccomp_load(seccomp);
         if (r < 0)
-                log_error_errno(r, "Failed to add install architecture seccomp: %m");
+                log_error("Failed to add install architecture seccomp: %s", strerror(-r));
 
 finish:
         seccomp_release(seccomp);
@@ -1189,7 +1234,7 @@ static int status_welcome(void) {
         }
 
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to read os-release file: %m");
+                log_warning("Failed to read os-release file: %s", strerror(-r));
 
         return status_printf(NULL, false, false,
                              "\nWelcome to \x1B[%sm%s\x1B[0m!\n",
@@ -1215,11 +1260,11 @@ int main(int argc, char *argv[]) {
         FDSet *fds = NULL;
         bool reexecute = false;
         const char *shutdown_verb = NULL;
-        dual_timestamp initrd_timestamp = DUAL_TIMESTAMP_NULL;
-        dual_timestamp userspace_timestamp = DUAL_TIMESTAMP_NULL;
-        dual_timestamp kernel_timestamp = DUAL_TIMESTAMP_NULL;
-        dual_timestamp security_start_timestamp = DUAL_TIMESTAMP_NULL;
-        dual_timestamp security_finish_timestamp = DUAL_TIMESTAMP_NULL;
+        dual_timestamp initrd_timestamp = { 0ULL, 0ULL };
+        dual_timestamp userspace_timestamp = { 0ULL, 0ULL };
+        dual_timestamp kernel_timestamp = { 0ULL, 0ULL };
+        dual_timestamp security_start_timestamp = { 0ULL, 0ULL };
+        dual_timestamp security_finish_timestamp = { 0ULL, 0ULL };
         static char systemd[] = "systemd";
         bool skip_setup = false;
         unsigned j;
@@ -1228,8 +1273,7 @@ int main(int argc, char *argv[]) {
         bool queue_default_job = false;
         bool empty_etc = false;
         char *switch_root_dir = NULL, *switch_root_init = NULL;
-        struct rlimit saved_rlimit_nofile = RLIMIT_MAKE_CONST(0);
-        const char *error_message = NULL;
+        static struct rlimit saved_rlimit_nofile = { 0, 0 };
 
 #ifdef HAVE_SYSV_COMPAT
         if (getpid() != 1 && strstr(program_invocation_short_name, "init")) {
@@ -1238,7 +1282,7 @@ int main(int argc, char *argv[]) {
 
                 errno = -ENOENT;
                 execv(SYSTEMCTL_BINARY_PATH, argv);
-                log_error_errno(errno, "Failed to exec " SYSTEMCTL_BINARY_PATH ": %m");
+                log_error("Failed to exec " SYSTEMCTL_BINARY_PATH ": %m");
                 return 1;
         }
 #endif
@@ -1268,7 +1312,6 @@ int main(int argc, char *argv[]) {
         saved_argc = argc;
 
         log_show_color(isatty(STDERR_FILENO) > 0);
-        log_set_upgrade_syslog_to_journal(true);
 
         /* Disable the umask logic */
         if (getpid() == 1)
@@ -1288,56 +1331,43 @@ int main(int argc, char *argv[]) {
                 if (!skip_setup) {
                         mount_setup_early();
                         dual_timestamp_get(&security_start_timestamp);
-                        if (mac_selinux_setup(&loaded_policy) < 0) {
-                                error_message = "Failed to load SELinux policy";
+                        if (selinux_setup(&loaded_policy) < 0)
                                 goto finish;
-                        } else if (ima_setup() < 0) {
-                                error_message = "Failed to load IMA policy";
+                        if (ima_setup() < 0)
                                 goto finish;
-                        } else if (mac_smack_setup(&loaded_policy) < 0) {
-                                error_message = "Failed to load SMACK policy";
+                        if (smack_setup(&loaded_policy) < 0)
                                 goto finish;
-                        }
                         dual_timestamp_get(&security_finish_timestamp);
                 }
 
-                if (mac_selinux_init(NULL) < 0) {
-                        error_message = "Failed to initialize SELinux policy";
+                if (label_init(NULL) < 0)
                         goto finish;
-                }
 
                 if (!skip_setup) {
                         if (clock_is_localtime() > 0) {
                                 int min;
 
-                                /*
-                                 * The very first call of settimeofday() also does a time warp in the kernel.
-                                 *
-                                 * In the rtc-in-local time mode, we set the kernel's timezone, and rely on
-                                 * external tools to take care of maintaining the RTC and do all adjustments.
-                                 * This matches the behavior of Windows, which leaves the RTC alone if the
-                                 * registry tells that the RTC runs in UTC.
-                                 */
+                                /* The first-time call to settimeofday() does a time warp in the kernel */
                                 r = clock_set_timezone(&min);
                                 if (r < 0)
-                                        log_error_errno(r, "Failed to apply local time delta, ignoring: %m");
+                                        log_error("Failed to apply local time delta, ignoring: %s", strerror(-r));
                                 else
                                         log_info("RTC configured in localtime, applying delta of %i minutes to system time.", min);
                         } else if (!in_initrd()) {
                                 /*
-                                 * Do a dummy very first call to seal the kernel's time warp magic.
+                                 * Do dummy first-time call to seal the kernel's time warp magic
                                  *
                                  * Do not call this this from inside the initrd. The initrd might not
                                  * carry /etc/adjtime with LOCAL, but the real system could be set up
                                  * that way. In such case, we need to delay the time-warp or the sealing
                                  * until we reach the real system.
-                                 *
-                                 * Do no set the kernel's timezone. The concept of local time cannot
-                                 * be supported reliably, the time will jump or be incorrect at every daylight
-                                 * saving time change. All kernel local time concepts will be treated
-                                 * as UTC that way.
                                  */
-                                clock_reset_timewarp();
+                                clock_reset_timezone();
+
+                                /* Tell the kernel our timezone */
+                                r = clock_set_timezone(NULL);
+                                if (r < 0)
+                                        log_error("Failed to set the kernel's timezone, ignoring: %s", strerror(-r));
                         }
                 }
 
@@ -1379,30 +1409,20 @@ int main(int argc, char *argv[]) {
         /* Initialize default unit */
         r = set_default_unit(SPECIAL_DEFAULT_TARGET);
         if (r < 0) {
-                log_emergency_errno(r, "Failed to set default unit %s: %m", SPECIAL_DEFAULT_TARGET);
-                error_message = "Failed to set default unit";
+                log_error("Failed to set default unit %s: %s", SPECIAL_DEFAULT_TARGET, strerror(-r));
                 goto finish;
         }
 
         r = initialize_join_controllers();
-        if (r < 0) {
-                error_message = "Failed to initalize cgroup controllers";
+        if (r < 0)
                 goto finish;
-        }
 
         /* Mount /proc, /sys and friends, so that /proc/cmdline and
          * /proc/$PID/fd is available. */
         if (getpid() == 1) {
-
-                /* Load the kernel modules early, so that we kdbus.ko is loaded before kdbusfs shall be mounted */
-                if (!skip_setup)
-                        kmod_setup();
-
                 r = mount_setup(loaded_policy);
-                if (r < 0) {
-                        error_message = "Failed to mount API filesystems";
+                if (r < 0)
                         goto finish;
-                }
         }
 
         /* Reset all signal handlers. */
@@ -1410,25 +1430,17 @@ int main(int argc, char *argv[]) {
 
         ignore_signals(SIGNALS_IGNORE, -1);
 
-        if (parse_config_file() < 0) {
-                error_message = "Failed to parse config file";
+        if (parse_config_file() < 0)
                 goto finish;
-        }
 
-        if (arg_running_as == SYSTEMD_SYSTEM) {
-                r = parse_proc_cmdline(parse_proc_cmdline_item);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
-        }
+        if (arg_running_as == SYSTEMD_SYSTEM)
+                if (parse_proc_cmdline(parse_proc_cmdline_item) < 0)
+                        goto finish;
 
-        /* Note that this also parses bits from the kernel command
-         * line, including "debug". */
         log_parse_environment();
 
-        if (parse_argv(argc, argv) < 0) {
-                error_message = "Failed to parse commandline arguments";
+        if (parse_argv(argc, argv) < 0)
                 goto finish;
-        }
 
         if (arg_action == ACTION_TEST &&
             geteuid() == 0) {
@@ -1449,11 +1461,6 @@ int main(int argc, char *argv[]) {
                 log_error("Cannot be run in a chroot() environment.");
                 goto finish;
         }
-
-        if (arg_action == ACTION_TEST)
-                skip_setup = true;
-
-        pager_open_if_enabled();
 
         if (arg_action == ACTION_HELP) {
                 retval = help();
@@ -1484,8 +1491,7 @@ int main(int argc, char *argv[]) {
         /* Remember open file descriptors for later deserialization */
         r = fdset_new_fill(&fds);
         if (r < 0) {
-                log_emergency_errno(r, "Failed to allocate fd set: %m");
-                error_message = "Failed to allocate fd set";
+                log_error("Failed to allocate fd set: %s", strerror(-r));
                 goto finish;
         } else
                 fdset_cloexec(fds, true);
@@ -1502,16 +1508,8 @@ int main(int argc, char *argv[]) {
 
         /* Reset the console, but only if this is really init and we
          * are freshly booted */
-        if (arg_running_as == SYSTEMD_SYSTEM && arg_action == ACTION_RUN) {
-
-                /* If we are init, we connect stdin/stdout/stderr to
-                 * /dev/null and make sure we don't have a controlling
-                 * tty. */
-                release_terminal();
-
-                if (getpid() == 1 && !skip_setup)
-                        console_setup();
-        }
+        if (arg_running_as == SYSTEMD_SYSTEM && arg_action == ACTION_RUN)
+                console_setup(getpid() == 1 && !skip_setup);
 
         /* Open the logging devices, if possible and necessary */
         log_open();
@@ -1532,8 +1530,7 @@ int main(int argc, char *argv[]) {
         if (arg_running_as == SYSTEMD_SYSTEM) {
                 const char *virtualization = NULL;
 
-                log_info(PACKAGE_STRING " running in %ssystem mode. (" SYSTEMD_FEATURES ")",
-                         arg_action == ACTION_TEST ? "test " : "" );
+                log_info(PACKAGE_STRING " running in system mode. (" SYSTEMD_FEATURES ")");
 
                 detect_virtualization(&virtualization);
                 if (virtualization)
@@ -1546,29 +1543,23 @@ int main(int argc, char *argv[]) {
                 if (in_initrd())
                         log_info("Running in initial RAM disk.");
 
-                /* Let's check whether /etc is already populated. We
-                 * don't actually really check for that, but use
-                 * /etc/machine-id as flag file. This allows container
-                 * managers and installers to provision a couple of
-                 * files already. If the container manager wants to
-                 * provision the machine ID itself it should pass
-                 * $container_uuid to PID 1. */
-
-                empty_etc = access("/etc/machine-id", F_OK) < 0;
+                empty_etc = dir_is_empty("/etc") > 0;
                 if (empty_etc)
                         log_info("Running with unpopulated /etc.");
         } else {
                 _cleanup_free_ char *t;
 
                 t = uid_to_name(getuid());
-                log_debug(PACKAGE_STRING " running in %suser mode for user "UID_FMT"/%s. (" SYSTEMD_FEATURES ")",
-                          arg_action == ACTION_TEST ? " test" : "", getuid(), t);
+                log_debug(PACKAGE_STRING " running in user mode for user "UID_FMT"/%s. (" SYSTEMD_FEATURES ")", getuid(), strna(t));
         }
 
         if (arg_running_as == SYSTEMD_SYSTEM && !skip_setup) {
                 if (arg_show_status > 0 || plymouth_running())
                         status_welcome();
 
+#ifdef HAVE_KMOD
+                kmod_setup();
+#endif
                 hostname_setup();
                 machine_id_setup(NULL);
                 loopback_setup();
@@ -1580,37 +1571,33 @@ int main(int argc, char *argv[]) {
         if (arg_running_as == SYSTEMD_SYSTEM && arg_runtime_watchdog > 0)
                 watchdog_set_timeout(&arg_runtime_watchdog);
 
-        if (arg_timer_slack_nsec != NSEC_INFINITY)
+        if (arg_timer_slack_nsec != (nsec_t) -1)
                 if (prctl(PR_SET_TIMERSLACK, arg_timer_slack_nsec) < 0)
-                        log_error_errno(errno, "Failed to adjust timer slack: %m");
+                        log_error("Failed to adjust timer slack: %m");
 
         if (arg_capability_bounding_set_drop) {
                 r = capability_bounding_set_drop_usermode(arg_capability_bounding_set_drop);
                 if (r < 0) {
-                        log_emergency_errno(r, "Failed to drop capability bounding set of usermode helpers: %m");
-                        error_message = "Failed to drop capability bounding set of usermode helpers";
+                        log_error("Failed to drop capability bounding set of usermode helpers: %s", strerror(-r));
                         goto finish;
                 }
                 r = capability_bounding_set_drop(arg_capability_bounding_set_drop, true);
                 if (r < 0) {
-                        log_emergency_errno(r, "Failed to drop capability bounding set: %m");
-                        error_message = "Failed to drop capability bounding set";
+                        log_error("Failed to drop capability bounding set: %s", strerror(-r));
                         goto finish;
                 }
         }
 
         if (arg_syscall_archs) {
                 r = enforce_syscall_archs(arg_syscall_archs);
-                if (r < 0) {
-                        error_message = "Failed to set syscall architectures";
+                if (r < 0)
                         goto finish;
-                }
         }
 
         if (arg_running_as == SYSTEMD_USER) {
                 /* Become reaper of our children */
                 if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0) {
-                        log_warning_errno(errno, "Failed to make us a subreaper: %m");
+                        log_warning("Failed to make us a subreaper: %m");
                         if (errno == EINVAL)
                                 log_info("Perhaps the kernel version is too old (< 3.4?)");
                 }
@@ -1622,16 +1609,15 @@ int main(int argc, char *argv[]) {
                 if (empty_etc) {
                         r = unit_file_preset_all(UNIT_FILE_SYSTEM, false, NULL, UNIT_FILE_PRESET_FULL, false, NULL, 0);
                         if (r < 0)
-                                log_warning_errno(r, "Failed to populate /etc with preset unit settings, ignoring: %m");
+                                log_warning("Failed to populate /etc with preset unit settings, ignoring: %s", strerror(-r));
                         else
                                 log_info("Populated /etc with preset unit settings.");
                 }
         }
 
-        r = manager_new(arg_running_as, arg_action == ACTION_TEST, &m);
+        r = manager_new(arg_running_as, &m);
         if (r < 0) {
-                log_emergency_errno(r, "Failed to allocate manager object: %m");
-                error_message = "Failed to allocate manager object";
+                log_error("Failed to allocate manager object: %s", strerror(-r));
                 goto finish;
         }
 
@@ -1649,7 +1635,6 @@ int main(int argc, char *argv[]) {
         m->default_memory_accounting = arg_default_memory_accounting;
         m->runtime_watchdog = arg_runtime_watchdog;
         m->shutdown_watchdog = arg_shutdown_watchdog;
-
         m->userspace_timestamp = userspace_timestamp;
         m->kernel_timestamp = kernel_timestamp;
         m->initrd_timestamp = initrd_timestamp;
@@ -1659,7 +1644,6 @@ int main(int argc, char *argv[]) {
         manager_set_default_rlimits(m, arg_default_rlimit);
         manager_environment_add(m, NULL, arg_default_environment);
         manager_set_show_status(m, arg_show_status);
-        manager_set_first_boot(m, empty_etc);
 
         /* Remember whether we should queue the default job */
         queue_default_job = !arg_serialization || arg_switched_root;
@@ -1668,7 +1652,7 @@ int main(int argc, char *argv[]) {
 
         r = manager_startup(m, arg_serialization, fds);
         if (r < 0)
-                log_error_errno(r, "Failed to fully start up daemon: %m");
+                log_error("Failed to fully start up daemon: %s", strerror(-r));
 
         /* This will close all file descriptors that were opened, but
          * not claimed by any unit. */
@@ -1691,7 +1675,7 @@ int main(int argc, char *argv[]) {
                 if (r < 0)
                         log_error("Failed to load default target: %s", bus_error_message(&error, r));
                 else if (target->load_state == UNIT_ERROR || target->load_state == UNIT_NOT_FOUND)
-                        log_error_errno(target->load_error, "Failed to load default target: %m");
+                        log_error("Failed to load default target: %s", strerror(-target->load_error));
                 else if (target->load_state == UNIT_MASKED)
                         log_error("Default target masked.");
 
@@ -1700,16 +1684,13 @@ int main(int argc, char *argv[]) {
 
                         r = manager_load_unit(m, SPECIAL_RESCUE_TARGET, NULL, &error, &target);
                         if (r < 0) {
-                                log_emergency("Failed to load rescue target: %s", bus_error_message(&error, r));
-                                error_message = "Failed to load rescue target";
+                                log_error("Failed to load rescue target: %s", bus_error_message(&error, r));
                                 goto finish;
                         } else if (target->load_state == UNIT_ERROR || target->load_state == UNIT_NOT_FOUND) {
-                                log_emergency_errno(target->load_error, "Failed to load rescue target: %m");
-                                error_message = "Failed to load rescue target";
+                                log_error("Failed to load rescue target: %s", strerror(-target->load_error));
                                 goto finish;
                         } else if (target->load_state == UNIT_MASKED) {
-                                log_emergency("Rescue target masked.");
-                                error_message = "Rescue target masked";
+                                log_error("Rescue target masked.");
                                 goto finish;
                         }
                 }
@@ -1727,13 +1708,11 @@ int main(int argc, char *argv[]) {
 
                         r = manager_add_job(m, JOB_START, target, JOB_REPLACE, false, &error, &default_unit_job);
                         if (r < 0) {
-                                log_emergency("Failed to start default target: %s", bus_error_message(&error, r));
-                                error_message = "Failed to start default target";
+                                log_error("Failed to start default target: %s", bus_error_message(&error, r));
                                 goto finish;
                         }
                 } else if (r < 0) {
-                        log_emergency("Failed to isolate default target: %s", bus_error_message(&error, r));
-                        error_message = "Failed to isolate default target";
+                        log_error("Failed to isolate default target: %s", bus_error_message(&error, r));
                         goto finish;
                 }
 
@@ -1742,7 +1721,7 @@ int main(int argc, char *argv[]) {
                 after_startup = now(CLOCK_MONOTONIC);
                 log_full(arg_action == ACTION_TEST ? LOG_INFO : LOG_DEBUG,
                          "Loaded units and determined initial transaction in %s.",
-                         format_timespan(timespan, sizeof(timespan), after_startup - before_startup, 100 * USEC_PER_MSEC));
+                         format_timespan(timespan, sizeof(timespan), after_startup - before_startup, 0));
 
                 if (arg_action == ACTION_TEST) {
                         printf("-> By jobs:\n");
@@ -1755,8 +1734,7 @@ int main(int argc, char *argv[]) {
         for (;;) {
                 r = manager_loop(m);
                 if (r < 0) {
-                        log_emergency_errno(r, "Failed to run main loop: %m");
-                        error_message = "Failed to run main loop";
+                        log_error("Failed to run mainloop: %s", strerror(-r));
                         goto finish;
                 }
 
@@ -1771,15 +1749,13 @@ int main(int argc, char *argv[]) {
                         log_info("Reloading.");
                         r = manager_reload(m);
                         if (r < 0)
-                                log_error_errno(r, "Failed to reload: %m");
+                                log_error("Failed to reload: %s", strerror(-r));
                         break;
 
                 case MANAGER_REEXECUTE:
 
-                        if (prepare_reexecute(m, &arg_serialization, &fds, false) < 0) {
-                                error_message = "Failed to prepare for reexection";
+                        if (prepare_reexecute(m, &arg_serialization, &fds, false) < 0)
                                 goto finish;
-                        }
 
                         reexecute = true;
                         log_notice("Reexecuting.");
@@ -1792,10 +1768,8 @@ int main(int argc, char *argv[]) {
                         m->switch_root = m->switch_root_init = NULL;
 
                         if (!switch_root_init)
-                                if (prepare_reexecute(m, &arg_serialization, &fds, true) < 0) {
-                                        error_message = "Failed to prepare for reexection";
+                                if (prepare_reexecute(m, &arg_serialization, &fds, true) < 0)
                                         goto finish;
-                                }
 
                         reexecute = true;
                         log_notice("Switching root.");
@@ -1825,11 +1799,10 @@ int main(int argc, char *argv[]) {
         }
 
 finish:
-        pager_close();
-
-        if (m)
-                arg_shutdown_watchdog = m->shutdown_watchdog;
-        m = manager_free(m);
+        if (m) {
+                manager_free(m);
+                m = NULL;
+        }
 
         for (j = 0; j < ELEMENTSOF(arg_default_rlimit); j++) {
                 free(arg_default_rlimit[j]);
@@ -1847,11 +1820,12 @@ finish:
         set_free(arg_syscall_archs);
         arg_syscall_archs = NULL;
 
-        mac_selinux_finish();
+        label_finish();
 
         if (reexecute) {
                 const char **args;
                 unsigned i, args_size;
+                sigset_t ss;
 
                 /* Close and disarm the watchdog, so that the new
                  * instance can reinitialize it, but doesn't get
@@ -1871,17 +1845,17 @@ finish:
                          * deserializing. */
                         broadcast_signal(SIGTERM, false, true);
 
-                        /* And switch root with MS_MOVE, because we remove the old directory afterwards and detach it. */
-                        r = switch_root(switch_root_dir, "/mnt", true, MS_MOVE);
+                        /* And switch root */
+                        r = switch_root(switch_root_dir);
                         if (r < 0)
-                                log_error_errno(r, "Failed to switch root, trying to continue: %m");
+                                log_error("Failed to switch root, ignoring: %s", strerror(-r));
                 }
 
                 args_size = MAX(6, argc+1);
                 args = newa(const char*, args_size);
 
                 if (!switch_root_init) {
-                        char sfd[DECIMAL_STR_MAX(int) + 1];
+                        char sfd[16];
 
                         /* First try to spawn ourselves with the right
                          * path, and with full serialization. We do
@@ -1891,7 +1865,8 @@ finish:
                         assert(arg_serialization);
                         assert(fds);
 
-                        xsprintf(sfd, "%i", fileno(arg_serialization));
+                        snprintf(sfd, sizeof(sfd), "%i", fileno(arg_serialization));
+                        char_array_0(sfd);
 
                         i = 0;
                         args[i++] = SYSTEMD_BINARY_PATH;
@@ -1934,15 +1909,17 @@ finish:
                 args[i++] = NULL;
                 assert(i <= args_size);
 
-                /* Reenable any blocked signals, especially important
+                /* reenable any blocked signals, especially important
                  * if we switch from initial ramdisk to init=... */
                 reset_all_signal_handlers();
-                reset_signal_mask();
+
+                assert_se(sigemptyset(&ss) == 0);
+                assert_se(sigprocmask(SIG_SETMASK, &ss, NULL) == 0);
 
                 if (switch_root_init) {
                         args[0] = switch_root_init;
                         execv(args[0], (char* const*) args);
-                        log_warning_errno(errno, "Failed to execute configured init, trying fallback: %m");
+                        log_warning("Failed to execute configured init, trying fallback: %m");
                 }
 
                 args[0] = "/sbin/init";
@@ -1954,9 +1931,9 @@ finish:
                         args[0] = "/bin/sh";
                         args[1] = NULL;
                         execv(args[0], (char* const*) args);
-                        log_error_errno(errno, "Failed to execute /bin/sh, giving up: %m");
+                        log_error("Failed to execute /bin/sh, giving up: %m");
                 } else
-                        log_warning_errno(errno, "Failed to execute /sbin/init, giving up: %m");
+                        log_warning("Failed to execute /sbin/init, giving up: %m");
         }
 
         if (arg_serialization) {
@@ -1992,7 +1969,7 @@ finish:
                 assert(command_line[pos] == NULL);
                 env_block = strv_copy(environ);
 
-                xsprintf(log_level, "%d", log_get_max_level());
+                snprintf(log_level, sizeof(log_level), "%d", log_get_max_level());
 
                 switch (log_get_target()) {
                 case LOG_TARGET_KMSG:
@@ -2021,8 +1998,8 @@ finish:
                         /* If we reboot let's set the shutdown
                          * watchdog and tell the shutdown binary to
                          * repeatedly ping it */
-                        r = watchdog_set_timeout(&arg_shutdown_watchdog);
-                        watchdog_close(r < 0);
+                        watchdog_set_timeout(&arg_shutdown_watchdog);
+                        watchdog_close(false);
 
                         /* Tell the binary how often to ping, ignore failure */
                         if (asprintf(&e, "WATCHDOG_USEC="USEC_FMT, arg_shutdown_watchdog) > 0)
@@ -2037,17 +2014,12 @@ finish:
                         cg_uninstall_release_agent(SYSTEMD_CGROUP_CONTROLLER);
 
                 execve(SYSTEMD_SHUTDOWN_BINARY_PATH, (char **) command_line, env_block);
-                log_error_errno(errno, "Failed to execute shutdown binary, %s: %m",
+                log_error("Failed to execute shutdown binary, %s: %m",
                           getpid() == 1 ? "freezing" : "quitting");
         }
 
-        if (getpid() == 1) {
-                if (error_message)
-                        manager_status_printf(NULL, STATUS_TYPE_EMERGENCY,
-                                              ANSI_HIGHLIGHT_RED_ON "!!!!!!" ANSI_HIGHLIGHT_OFF,
-                                              "%s, freezing.", error_message);
+        if (getpid() == 1)
                 freeze();
-        }
 
         return retval;
 }

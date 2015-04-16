@@ -49,11 +49,11 @@ static void test_import(Hashmap *h, struct strbuf *sb,
         _cleanup_close_ int fd;
 
         fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
+        assert(fd >= 0);
         assert_se(write(fd, contents, size) == size);
 
         r = catalog_import_file(h, sb, name);
-        assert_se(r == code);
+        assert(r == code);
 
         unlink(name);
 }
@@ -62,13 +62,13 @@ static void test_catalog_importing(void) {
         Hashmap *h;
         struct strbuf *sb;
 
-        assert_se(h = hashmap_new(&catalog_hash_ops));
+        assert_se(h = hashmap_new(catalog_hash_func, catalog_compare_func));
         assert_se(sb = strbuf_new());
 
 #define BUF "xxx"
         test_import(h, sb, BUF, sizeof(BUF), -EINVAL);
 #undef BUF
-        assert_se(hashmap_isempty(h));
+        assert(hashmap_isempty(h));
         log_debug("----------------------------------------");
 
 #define BUF \
@@ -89,7 +89,7 @@ static void test_catalog_importing(void) {
         test_import(h, sb, BUF, sizeof(BUF), 0);
 #undef BUF
 
-        assert_se(hashmap_size(h) == 1);
+        assert(hashmap_size(h) == 1);
 
         log_debug("----------------------------------------");
 
@@ -105,22 +105,22 @@ static void test_catalog_update(void) {
         int r;
 
         r = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         database = name;
 
         /* Test what happens if there are no files. */
         r = catalog_update(database, NULL, NULL);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         /* Test what happens if there are no files in the directory. */
         r = catalog_update(database, NULL, no_catalog_dirs);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         /* Make sure that we at least have some files loaded or the
            catalog_list below will fail. */
         r = catalog_update(database, NULL, catalog_dirs);
-        assert_se(r >= 0);
+        assert(r >= 0);
 }
 
 static void test_catalog_file_lang(void) {

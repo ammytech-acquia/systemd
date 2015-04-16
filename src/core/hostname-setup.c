@@ -64,7 +64,7 @@ int hostname_setup(void) {
                 if (r == -ENOENT)
                         enoent = true;
                 else
-                        log_warning_errno(r, "Failed to read configured hostname: %m");
+                        log_warning("Failed to read configured hostname: %s", strerror(-r));
 
                 hn = NULL;
         } else
@@ -82,8 +82,10 @@ int hostname_setup(void) {
                 hn = "localhost";
         }
 
-        if (sethostname_idempotent(hn) < 0)
-                return log_warning_errno(errno, "Failed to set hostname to <%s>: %m", hn);
+        if (sethostname(hn, strlen(hn)) < 0) {
+                log_warning("Failed to set hostname to <%s>: %m", hn);
+                return -errno;
+        }
 
         log_info("Set hostname to <%s>.", hn);
         return 0;

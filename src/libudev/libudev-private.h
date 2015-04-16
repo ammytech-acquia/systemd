@@ -20,6 +20,7 @@
 #ifndef _LIBUDEV_PRIVATE_H_
 #define _LIBUDEV_PRIVATE_H_
 
+#include <syslog.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,16 +34,32 @@
 #define READ_END  0
 #define WRITE_END 1
 
+/* avoid (sometimes expensive) calculations of parameters for debug output */
+#define udev_log_cond(udev, prio, arg...) \
+  do { \
+    if (udev_get_log_priority(udev) >= prio) \
+      udev_log(udev, prio, __FILE__, __LINE__, __FUNCTION__, ## arg); \
+  } while (0)
+
+#define udev_dbg(udev, arg...) udev_log_cond(udev, LOG_DEBUG, ## arg)
+#define udev_info(udev, arg...) udev_log_cond(udev, LOG_INFO, ## arg)
+#define udev_err(udev, arg...) udev_log_cond(udev, LOG_ERR, ## arg)
+
 /* libudev.c */
+void udev_log(struct udev *udev,
+              int priority, const char *file, int line, const char *fn,
+              const char *format, ...) _printf_(6, 7);
 int udev_get_rules_path(struct udev *udev, char **path[], usec_t *ts_usec[]);
+struct udev_list_entry *udev_add_property(struct udev *udev, const char *key, const char *value);
+struct udev_list_entry *udev_get_properties_list_entry(struct udev *udev);
 
 /* libudev-device.c */
-struct udev_device *udev_device_new_from_nulstr(struct udev *udev, char *nulstr, ssize_t buflen);
-struct udev_device *udev_device_shallow_clone(struct udev_device *old_device);
+struct udev_device *udev_device_new(struct udev *udev);
 mode_t udev_device_get_devnode_mode(struct udev_device *udev_device);
 uid_t udev_device_get_devnode_uid(struct udev_device *udev_device);
 gid_t udev_device_get_devnode_gid(struct udev_device *udev_device);
-int udev_device_rename(struct udev_device *udev_device, const char *new_name);
+int udev_device_set_subsystem(struct udev_device *udev_device, const char *subsystem);
+int udev_device_set_syspath(struct udev_device *udev_device, const char *syspath);
 int udev_device_add_devlink(struct udev_device *udev_device, const char *devlink);
 void udev_device_cleanup_devlinks_list(struct udev_device *udev_device);
 struct udev_list_entry *udev_device_add_property(struct udev_device *udev_device, const char *key, const char *value);
@@ -57,7 +74,6 @@ const char *udev_device_get_devpath_old(struct udev_device *udev_device);
 const char *udev_device_get_id_filename(struct udev_device *udev_device);
 void udev_device_set_is_initialized(struct udev_device *udev_device);
 int udev_device_add_tag(struct udev_device *udev_device, const char *tag);
-void udev_device_remove_tag(struct udev_device *udev_device, const char *tag);
 void udev_device_cleanup_tags_list(struct udev_device *udev_device);
 usec_t udev_device_get_usec_initialized(struct udev_device *udev_device);
 void udev_device_set_usec_initialized(struct udev_device *udev_device, usec_t usec_initialized);
@@ -132,6 +148,9 @@ void udev_queue_export_cleanup(struct udev_queue_export *udev_queue_export);
 int udev_queue_export_device_queued(struct udev_queue_export *udev_queue_export, struct udev_device *udev_device);
 int udev_queue_export_device_finished(struct udev_queue_export *udev_queue_export, struct udev_device *udev_device);
 
+/* libudev-hwdb.c */
+bool udev_hwdb_validate(struct udev_hwdb *hwdb);
+
 /* libudev-util.c */
 #define UTIL_PATH_SIZE                      1024
 #define UTIL_NAME_SIZE                       512
@@ -148,6 +167,10 @@ unsigned int util_string_hash32(const char *key);
 uint64_t util_string_bloom64(const char *str);
 
 /* libudev-util-private.c */
+int util_delete_path(struct udev *udev, const char *path);
+uid_t util_lookup_user(struct udev *udev, const char *user);
+gid_t util_lookup_group(struct udev *udev, const char *group);
 int util_resolve_subsys_kernel(struct udev *udev, const char *string, char *result, size_t maxsize, int read_value);
+ssize_t print_kmsg(const char *fmt, ...) _printf_(1, 2);
 
 #endif

@@ -22,7 +22,6 @@
 #include "path-util.h"
 #include "strv.h"
 #include "sd-path.h"
-#include "missing.h"
 
 static int from_environment(const char *envname, const char *fallback, const char **ret) {
         assert(ret);
@@ -326,7 +325,7 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
         return -ENOTSUP;
 }
 
-_public_ int sd_path_home(uint64_t type, const char *suffix, char **path) {
+int sd_path_home(uint64_t type, const char *suffix, char **path) {
         char *buffer = NULL, *cc;
         const char *ret;
         int r;
@@ -555,7 +554,7 @@ static int get_search(uint64_t type, char ***list) {
         return -ENOTSUP;
 }
 
-_public_ int sd_path_search(uint64_t type, const char *suffix, char ***paths) {
+int sd_path_search(uint64_t type, const char *suffix, char ***paths) {
         char **l, **i, **j, **n;
         int r;
 

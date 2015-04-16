@@ -104,16 +104,10 @@ static int mount_points_list_get(MountPoint **head) {
 
                 /* Ignore mount points we can't unmount because they
                  * are API or because we are keeping them open (like
-                 * /dev/console). Also, ignore all mounts below API
-                 * file systems, since they are likely virtual too,
-                 * and hence not worth spending time on. Also, in
-                 * unprivileged containers we might lack the rights to
-                 * unmount these things, hence don't bother. */
+                 * /dev/console) */
                 if (mount_point_is_api(p) ||
                     mount_point_ignore(p) ||
-                    path_startswith(p, "/dev") ||
-                    path_startswith(p, "/sys") ||
-                    path_startswith(p, "/proc")) {
+                    path_equal(p, "/dev/console")) {
                         free(p);
                         continue;
                 }
@@ -407,7 +401,7 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
 
                         mount_point_free(head, m);
                 } else if (log_error) {
-                        log_warning_errno(errno, "Could not unmount %s: %m", m->path);
+                        log_warning("Could not unmount %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -429,7 +423,7 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not deactivate swap %s: %m", m->path);
+                        log_warning("Could not deactivate swap %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -466,7 +460,7 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not detach loopback %s: %m", m->path);
+                        log_warning("Could not detach loopback %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -501,7 +495,7 @@ static int dm_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not detach DM %s: %m", m->path);
+                        log_warning("Could not detach DM %s: %m", m->path);
                         n_failed++;
                 }
         }

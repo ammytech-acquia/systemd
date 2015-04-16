@@ -1,5 +1,5 @@
 '\" t
-.TH "SYSTEMD\&.NETDEV" "5" "" "systemd 219" "systemd.network"
+.TH "SYSTEMD\&.NETDEV" "5" "" "systemd 215" "systemd.network"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -30,7 +30,7 @@ Network setup is performed by
 \fBsystemd-networkd\fR(8)\&.
 .PP
 Virtual Network Device files must have the extension
-\&.netdev; other extensions are ignored\&. Virtual network devices are created as soon as networkd is started\&. If a netdev with the specified name already exists, networkd will use that as\-is rather than create its own\&. Note that the settings of the pre\-existing netdev will not be changed by networkd\&.
+\&.netdev; other extensions are ignored\&. Virtual network devices are created as soon as networkd is started\&.
 .PP
 The
 \&.netdev
@@ -48,136 +48,6 @@ take precedence over files with the same name in
 with the same name as a configuration file in
 /usr/lib, pointing to
 /dev/null, disables the configuration file entirely\&.
-.SH "SUPPORTED NETDEV KINDS"
-.PP
-The following kinds of virtual network devices may be configured in
-\&.netdev
-files:
-.sp
-.it 1 an-trap
-.nr an-no-space-flag 1
-.nr an-break-flag 1
-.br
-.B Table\ \&1.\ \&Supported kinds of virtual network devices
-.TS
-allbox tab(:);
-lB lB.
-T{
-Kind
-T}:T{
-Description
-T}
-.T&
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l
-l l.
-T{
-\fIbond\fR
-T}:T{
-A bond device is an aggregation of all its slave devices\&. See \m[blue]\fBLinux Ethernet Bonding Driver HOWTO\fR\m[]\&\s-2\u[1]\d\s+2 for details\&.Local configuration
-T}
-T{
-\fIbridge\fR
-T}:T{
-A bridge devcie is a software switch, each of its slave devices and the bridge itself are ports of the switch\&.
-T}
-T{
-\fIdummy\fR
-T}:T{
-A dummy device drops all packets sent to it\&.
-T}
-T{
-\fIgre\fR
-T}:T{
-A Level 3 GRE tunnel over IPv4\&. See \m[blue]\fBRFC 2784\fR\m[]\&\s-2\u[2]\d\s+2 for details\&.
-T}
-T{
-\fIgretap\fR
-T}:T{
-A Level 2 GRE tunnel over IPv4\&.
-T}
-T{
-\fIip6gre\fR
-T}:T{
-A Level 3 GRE tunnel over IPv6\&.
-T}
-T{
-\fIip6tnl\fR
-T}:T{
-An IPv4 or IPv6 tunnel over IPv6
-T}
-T{
-\fIip6gretap\fR
-T}:T{
-An Level 2 GRE tunnel over IPv6\&.
-T}
-T{
-\fIipip\fR
-T}:T{
-An IPv4 over IPv4 tunnel\&.
-T}
-T{
-\fIipvlan\fR
-T}:T{
-An ipvlan device is a stacked device which receives packets from its underlying device based on IP address filtering\&.
-T}
-T{
-\fImacvlan\fR
-T}:T{
-A macvlan device is a stacked device which receives packets from its underlying device based on MAC address filtering\&.
-T}
-T{
-\fIsit\fR
-T}:T{
-An IPv6 over IPv4 tunnel\&.
-T}
-T{
-\fItap\fR
-T}:T{
-A persistent Level 2 tunnel between a network device and a device node\&.
-T}
-T{
-\fItun\fR
-T}:T{
-A persistent Level 3 tunnel between a network device and a device node\&.
-T}
-T{
-\fIveth\fR
-T}:T{
-An ethernet tunnel between a pair of network devices\&.
-T}
-T{
-\fIvlan\fR
-T}:T{
-A VLAN is a stacked device which receives packets from its underlying device based on VLAN tagging\&. See \m[blue]\fBIEEE 802\&.1Q\fR\m[]\&\s-2\u[3]\d\s+2 for details\&.
-T}
-T{
-\fIvti\fR
-T}:T{
-An IPv4 over IPSec tunnel\&.
-T}
-T{
-\fIvxlan\fR
-T}:T{
-A virtual extensible LAN (vxlan), for connecting Cloud computing deployments\&.
-T}
-.TE
-.sp 1
 .SH "[MATCH] SECTION OPTIONS"
 .PP
 A virtual network device is only created if the
@@ -237,28 +107,30 @@ The interface name used when creating the netdev\&. This option is compulsory\&.
 .PP
 \fIKind=\fR
 .RS 4
-The netdev kind\&. This option is compulsory\&. See the
-"Supported netdev kinds"
-section for the valid keys\&.
+The netdev kind\&. Currently,
+"bridge",
+"bond",
+"vlan",
+"macvlan",
+"vxlan",
+"ipip",
+"gre",
+"sit",
+"vti",
+"veth", and
+"dummy"
+are supported\&. This option is compulsory\&.
 .RE
 .PP
 \fIMTUBytes=\fR
 .RS 4
-The maximum transmission unit in bytes to set for the device\&. The usual suffixes K, M, G, are supported and are understood to the base of 1024\&. This key is not currently suported for
-"tun"
-or
-"tap"
-devices\&.
+The maximum transmission unit in bytes to set for the device\&. The usual suffixes K, M, G, are supported and are understood to the base of 1024\&.
 .RE
 .PP
 \fIMACAddress=\fR
 .RS 4
 The MAC address to use for the device\&. If none is given, one is generated based on the interface name and the
-\fBmachine-id\fR(5)\&. This key is not currently suported for
-"tun"
-or
-"tap"
-devices\&.
+\fBmachine-id\fR(5)\&.
 .RE
 .SH "[VLAN] SECTION OPTIONS"
 .PP
@@ -283,29 +155,16 @@ section only applies for netdevs of kind
 The MACVLAN mode to use\&. The supported options are
 "private",
 "vepa",
-"bridge", and
-"passthru"\&.
-.RE
-.SH "[IPVLAN] SECTION OPTIONS"
-.PP
-The
-"[IPVLAN]"
-section only applies for netdevs of kind
-"ipvlan", and accepts the following key:
-.PP
-\fIMode=\fR
-.RS 4
-The IPVLAN mode to use\&. The supported options are
-"L2"
+"bridge"
 and
-"L3"\&.
+"passthru"\&.
 .RE
 .SH "[VXLAN] SECTION OPTIONS"
 .PP
 The
 "[VXLAN]"
 section only applies for netdevs of kind
-"vxlan", and accepts the following keys:
+"vxlan", and accepts the following key:
 .PP
 \fIId=\fR
 .RS 4
@@ -331,31 +190,6 @@ A fixed Time To Live N on Virtual eXtensible Local Area Network packets\&. N is 
 .RS 4
 A boolean\&. When true, enables dynamic MAC learning to discover remote MAC addresses\&.
 .RE
-.PP
-\fIFDBAgeingSec=\fR
-.RS 4
-The lifetime of Forwarding Database entry learnt by the kernel in seconds\&.
-.RE
-.PP
-\fIARPProxy=\fR
-.RS 4
-A boolean\&. When true, enables ARP proxy\&.
-.RE
-.PP
-\fIL2MissNotification=\fR
-.RS 4
-A boolean\&. When true, enables netlink LLADDR miss notifications\&.
-.RE
-.PP
-\fIL3MissNotification=\fR
-.RS 4
-A boolean\&. When true, enables netlink IP ADDR miss notifications\&.
-.RE
-.PP
-\fIRouteShortCircuit=\fR
-.RS 4
-A boolean\&. When true route short circuit is turned on\&.
-.RE
 .SH "[TUNNEL] SECTION OPTIONS"
 .PP
 The
@@ -363,12 +197,9 @@ The
 section only applies for netdevs of kind
 "ipip",
 "sit",
-"gre",
-"gretap",
-"ip6gre",
-"ip6gretap",
-"vti", and
-"ip6tnl"
+"gre"
+and
+"vti"
 and accepts the following keys:
 .PP
 \fILocal=\fR
@@ -384,7 +215,7 @@ The remote endpoint of the tunnel\&.
 \fITOS=\fR
 .RS 4
 The Type Of Service byte value for a tunnel interface\&. For details about the TOS see the
-\m[blue]\fBType of Service in the Internet Protocol Suite\fR\m[]\&\s-2\u[4]\d\s+2
+\m[blue]\fBType of Service in the Internet Protocol Suite\fR\m[]\&\s-2\u[1]\d\s+2
 document\&.
 .RE
 .PP
@@ -396,19 +227,6 @@ A fixed Time To Live N on tunneled packets\&. N is a number in the range 1\-255\
 \fIDiscoverPathMTU=\fR
 .RS 4
 A boolean\&. When true, enables Path MTU Discovery on the tunnel\&.
-.RE
-.PP
-\fIMode=\fR
-.RS 4
-An
-"ip6tnl"
-tunnels can have three modes
-"ip6ip6"
-for IPv6 over IPv6,
-"ipip6"
-for IPv4 over IPv6 or
-"any"
-for either\&.
 .RE
 .SH "[PEER] SECTION OPTIONS"
 .PP
@@ -474,59 +292,6 @@ section only applies for netdevs of kind
 "tap", and accepts the same keys as the
 "[Tun]"
 section\&.
-.SH "[BOND] SECTION OPTIONS"
-.PP
-The
-"[Bond]"
-section accepts the following key:
-.PP
-\fIMode=\fR
-.RS 4
-Specifies one of the bonding policies\&. The default is
-"balance\-rr"
-(round robin)\&. Possible values are
-"balance\-rr",
-"active\-backup",
-"balance\-xor",
-"broadcast",
-"802\&.3ad",
-"balance\-tlb", and
-"balance\-alb"\&.
-.RE
-.PP
-\fITransmitHashPolicy=\fR
-.RS 4
-Selects the transmit hash policy to use for slave selection in balance\-xor, 802\&.3ad, and tlb modes\&. Possible values are
-"layer2",
-"layer3+4",
-"layer2+3",
-"encap2+3",
-"802\&.3ad", and
-"encap3+4"\&.
-.RE
-.PP
-\fILACPTransmitRate=\fR
-.RS 4
-Specifies the rate with which link partner transmits Link Aggregation Control Protocol Data Unit packets in 802\&.3ad mode\&. Possible values are
-"slow", which requests partner to transmit LACPDUs every 30 seconds, and
-"fast", which requests partner to transmit LACPDUs every second\&. The default value is
-"slow"\&.
-.RE
-.PP
-\fIMIIMonitorSec=\fR
-.RS 4
-Specifies the frequency that Media Independent Interface link monitoring will occur\&. A value of zero disables MII link monitoring\&. This values is rounded down to the nearest millisecond\&. The default value is 0\&.
-.RE
-.PP
-\fIUpDelaySec=\fR
-.RS 4
-Specifies the delay before a link is enabled after a link up status has been detected\&. This value is rounded down to a multiple of MIIMonitorSec\&. The default value is 0\&.
-.RE
-.PP
-\fIDownDelaySec=\fR
-.RS 4
-Specifies the delay before a link is disabled after a link down status has been detected\&. This value is rounded down to a multiple of MIIMonitorSec\&. The default value is 0\&.
-.RE
 .SH "EXAMPLE"
 .PP
 \fBExample\ \&1.\ \&/etc/systemd/network/bridge.netdev\fR
@@ -693,25 +458,9 @@ MACAddress=12:34:56:78:9a:bc
 .PP
 \fBsystemd\fR(1),
 \fBsystemd-networkd\fR(8),
-\fBsystemd.link\fR(5),
 \fBsystemd.network\fR(5)
 .SH "NOTES"
 .IP " 1." 4
-Linux Ethernet Bonding Driver HOWTO
-.RS 4
-\%https://www.kernel.org/doc/Documentation/networking/bonding.txt
-.RE
-.IP " 2." 4
-RFC 2784
-.RS 4
-\%https://tools.ietf.org/html/rfc2784
-.RE
-.IP " 3." 4
-IEEE 802.1Q
-.RS 4
-\%http://www.ieee802.org/1/pages/802.1Q.html
-.RE
-.IP " 4." 4
 Type of Service in the Internet Protocol Suite
 .RS 4
 \%http://tools.ietf.org/html/rfc1349

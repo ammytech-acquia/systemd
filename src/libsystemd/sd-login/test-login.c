@@ -19,10 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <poll.h>
+#include <sys/poll.h>
 #include <string.h>
 
-#include "systemd/sd-login.h"
+#include <systemd/sd-login.h>
 
 #include "util.h"
 #include "strv.h"

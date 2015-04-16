@@ -24,8 +24,6 @@
 
 #include "calendarspec.h"
 
-#define BITS_WEEKDAYS   127
-
 static void free_chain(CalendarComponent *c) {
         CalendarComponent *n;
 
@@ -37,9 +35,7 @@ static void free_chain(CalendarComponent *c) {
 }
 
 void calendar_spec_free(CalendarSpec *c) {
-
-        if (!c)
-                return;
+        assert(c);
 
         free_chain(c->year);
         free_chain(c->month);
@@ -122,7 +118,7 @@ static void fix_year(CalendarComponent *c) {
 int calendar_spec_normalize(CalendarSpec *c) {
         assert(c);
 
-        if (c->weekdays_bits <= 0 || c->weekdays_bits >= BITS_WEEKDAYS)
+        if (c->weekdays_bits <= 0 || c->weekdays_bits >= 127)
                 c->weekdays_bits = -1;
 
         fix_year(c->year);
@@ -156,7 +152,7 @@ _pure_ static bool chain_valid(CalendarComponent *c, int from, int to) {
 _pure_ bool calendar_spec_valid(CalendarSpec *c) {
         assert(c);
 
-        if (c->weekdays_bits > BITS_WEEKDAYS)
+        if (c->weekdays_bits > 127)
                 return false;
 
         if (!chain_valid(c->year, 1970, 2199))
@@ -196,7 +192,7 @@ static void format_weekdays(FILE *f, const CalendarSpec *c) {
 
         assert(f);
         assert(c);
-        assert(c->weekdays_bits > 0 && c->weekdays_bits <= BITS_WEEKDAYS);
+        assert(c->weekdays_bits > 0 && c->weekdays_bits <= 127);
 
         for (x = 0, l = -1; x < (int) ELEMENTSOF(days); x++) {
 
@@ -261,7 +257,7 @@ int calendar_spec_to_string(const CalendarSpec *c, char **p) {
         if (!f)
                 return -ENOMEM;
 
-        if (c->weekdays_bits > 0 && c->weekdays_bits <= BITS_WEEKDAYS) {
+        if (c->weekdays_bits > 0 && c->weekdays_bits <= 127) {
                 format_weekdays(f, c);
                 fputc(' ', f);
         }
@@ -476,7 +472,7 @@ static int const_chain(int value, CalendarComponent **c) {
 
         cc->value = value;
         cc->repeat = 0;
-        cc->next = *c;
+        cc->next = NULL;
 
         *c = cc;
 
@@ -657,12 +653,7 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
         if (!c)
                 return -ENOMEM;
 
-        if (strcaseeq(p, "minutely")) {
-                r = const_chain(0, &c->second);
-                if (r < 0)
-                        goto fail;
-
-        } else if (strcaseeq(p, "hourly")) {
+        if (strcaseeq(p, "hourly")) {
                 r = const_chain(0, &c->minute);
                 if (r < 0)
                         goto fail;
@@ -695,10 +686,7 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
                 if (r < 0)
                         goto fail;
 
-        } else if (strcaseeq(p, "annually") ||
-                   strcaseeq(p, "yearly") ||
-                   strcaseeq(p, "anually") /* backwards compatibility */ ) {
-
+        } else if (strcaseeq(p, "anually") || strcaseeq(p, "yearly")) {
                 r = const_chain(1, &c->month);
                 if (r < 0)
                         goto fail;
@@ -719,57 +707,6 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
 
                 c->weekdays_bits = 1;
 
-                r = const_chain(0, &c->hour);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(0, &c->minute);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(0, &c->second);
-                if (r < 0)
-                        goto fail;
-
-        } else if (strcaseeq(p, "quarterly")) {
-
-                r = const_chain(1, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(4, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(7, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(10, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(1, &c->day);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(0, &c->hour);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(0, &c->minute);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(0, &c->second);
-                if (r < 0)
-                        goto fail;
-
-        } else if (strcaseeq(p, "biannually") ||
-                   strcaseeq(p, "bi-annually") ||
-                   strcaseeq(p, "semiannually") ||
-                   strcaseeq(p, "semi-annually")) {
-
-                r = const_chain(1, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(7, &c->month);
-                if (r < 0)
-                        goto fail;
-                r = const_chain(1, &c->day);
-                if (r < 0)
-                        goto fail;
                 r = const_chain(0, &c->hour);
                 if (r < 0)
                         goto fail;
@@ -882,7 +819,7 @@ static bool matches_weekday(int weekdays_bits, const struct tm *tm) {
         struct tm t;
         int k;
 
-        if (weekdays_bits < 0 || weekdays_bits >= BITS_WEEKDAYS)
+        if (weekdays_bits < 0 || weekdays_bits >= 127)
                 return true;
 
         t = *tm;

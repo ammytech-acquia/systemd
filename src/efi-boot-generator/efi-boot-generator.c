@@ -80,14 +80,14 @@ int main(int argc, char *argv[]) {
                 log_debug("EFI loader partition unknown, exiting.");
                 return EXIT_SUCCESS;
         } else if (r < 0) {
-                log_error_errno(r, "Failed to read ESP partition UUID: %m");
+                log_error("Failed to read ESP partition UUID: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/boot.mount");
+        name = strappenda(arg_dest, "/boot.mount");
         f = fopen(name, "wxe");
         if (!f) {
-                log_error_errno(errno, "Failed to create mount unit file %s: %m", name);
+                log_error("Failed to create mount unit file %s: %m", name);
                 return EXIT_FAILURE;
         }
 
@@ -120,15 +120,15 @@ int main(int argc, char *argv[]) {
 
         fflush(f);
         if (ferror(f)) {
-                log_error_errno(errno, "Failed to write mount unit file: %m");
+                log_error("Failed to write mount unit file: %m");
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/boot.automount");
+        name = strappenda(arg_dest, "/boot.automount");
         fclose(f);
         f = fopen(name, "wxe");
         if (!f) {
-                log_error_errno(errno, "Failed to create automount unit file %s: %m", name);
+                log_error("Failed to create automount unit file %s: %m", name);
                 return EXIT_FAILURE;
         }
 
@@ -140,15 +140,15 @@ int main(int argc, char *argv[]) {
 
         fflush(f);
         if (ferror(f)) {
-                log_error_errno(errno, "Failed to write automount unit file: %m");
+                log_error("Failed to write automount unit file: %m");
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/" SPECIAL_LOCAL_FS_TARGET ".wants/boot.automount");
+        name = strappenda(arg_dest, "/" SPECIAL_LOCAL_FS_TARGET ".wants/boot.automount");
         mkdir_parents(name, 0755);
 
         if (symlink("../boot.automount", name) < 0) {
-                log_error_errno(errno, "Failed to create symlink %s: %m", name);
+                log_error("Failed to create symlink %s: %m", name);
                 return EXIT_FAILURE;
         }
 

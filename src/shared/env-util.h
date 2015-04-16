@@ -24,15 +24,13 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
-#include "macro.h"
-
 bool env_name_is_valid(const char *e);
 bool env_value_is_valid(const char *e);
 bool env_assignment_is_valid(const char *e);
 
 bool strv_env_is_valid(char **e);
-#define strv_env_clean(l) strv_env_clean_with_callback(l, NULL, NULL)
-char **strv_env_clean_with_callback(char **l, void (*invalid_callback)(const char *p, void *userdata), void *userdata);
+char **strv_env_clean(char **l);
+char **strv_env_clean_log(char **e, const char *message);
 
 bool strv_env_name_or_assignment_is_valid(char **l);
 

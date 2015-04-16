@@ -93,7 +93,6 @@ static void test_path_get_user_unit(void) {
         check_p_g_u_u("/meh.service", -ENOENT, NULL);
         check_p_g_u_u("/session-3.scope/_cpu.service", 0, "cpu.service");
         check_p_g_u_u("/user.slice/user-1000.slice/user@1000.service/server.service", 0, "server.service");
-        check_p_g_u_u("/user.slice/user-1000.slice/user@1000.service/foobar.slice/foobar@pie.service", 0, "foobar@pie.service");
         check_p_g_u_u("/user.slice/user-1000.slice/user@.service/server.service", -ENOENT, NULL);
 }
 
@@ -107,8 +106,7 @@ static void check_p_g_s(const char *path, int code, const char *result) {
 static void test_path_get_session(void) {
         check_p_g_s("/user.slice/user-1000.slice/session-2.scope/foobar.service", 0, "2");
         check_p_g_s("/session-3.scope", 0, "3");
-        check_p_g_s("/session-.scope", -ENOENT, NULL);
-        check_p_g_s("", -ENOENT, NULL);
+        check_p_g_s("", -ENOENT, 0);
 }
 
 static void check_p_g_o_u(const char *path, int code, uid_t result) {
@@ -142,7 +140,7 @@ static void test_proc(void) {
         FOREACH_DIRENT(de, d, break) {
                 _cleanup_free_ char *path = NULL, *path_shifted = NULL, *session = NULL, *unit = NULL, *user_unit = NULL, *machine = NULL, *slice = NULL;
                 pid_t pid;
-                uid_t uid = UID_INVALID;
+                uid_t uid = (uid_t) -1;
 
                 if (de->d_type != DT_DIR &&
                     de->d_type != DT_UNKNOWN)

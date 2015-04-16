@@ -19,7 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "sd-id128.h"
+#include "systemd/sd-id128.h"
 #include "unit.h"
 #include "specifier.h"
 #include "path-util.h"
@@ -182,7 +182,7 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
         char *printed = NULL;
         Unit *u = userdata;
         ExecContext *c;
-        int r = 0;
+        int r;
 
         assert(u);
 
@@ -208,7 +208,7 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
                                 if (r < 0)
                                         return -ENODATA;
 
-                                r = asprintf(&printed, UID_FMT, uid);
+                                asprintf(&printed, UID_FMT, uid);
                         }
                 }
 
@@ -231,10 +231,10 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
                 if (specifier == 'u')
                         printed = strdup(username);
                 else
-                        r = asprintf(&printed, UID_FMT, uid);
+                        asprintf(&printed, UID_FMT, uid);
         }
 
-        if (r < 0 || !printed)
+        if (!printed)
                 return -ENOMEM;
 
         *ret = printed;

@@ -1,42 +1,21 @@
-Tests: timedated, hostnamed, localed-locale, localed-x11-keymap
-Depends: systemd, libpam-systemd, acl, locales
-Restrictions: needs-root, isolation-container
-
-Tests: logind
-Depends: systemd, libpam-systemd, acl, locales, evemu-tools
+Tests: timedated hostnamed localed-locale localed-x11-keymap logind
+Depends: systemd, libpam-systemd, acl
 Restrictions: needs-root, isolation-machine
-
-Tests: bootchart
-Depends: systemd, libpam-systemd, acl, locales
-Restrictions: needs-root, isolation-machine, breaks-testbed
 
 Tests: unit-config
 Depends: systemd, python3
 Restrictions: needs-root, allow-stderr
 
 Tests: build-login
-Depends: libsystemd-dev, build-essential, pkg-config
-Restrictions: isolation-container
+Depends: libsystemd-login-dev, build-essential, pkg-config
 
 Tests: python3
 Depends: python3-systemd
 
 Tests: boot-and-services
-Depends: systemd-sysv, lightdm, cron, network-manager, busybox-static, apparmor, python3
+Depends: lightdm, cron, network-manager, busybox-static, python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
-Tests: cmdline-upstart-boot
-Depends: systemd-sysv, cron, network-manager, python3
-Restrictions: needs-root, isolation-machine, breaks-testbed
-
 Tests: display-managers
-Depends: systemd-sysv, lightdm, python3
-Restrictions: needs-root, isolation-machine, breaks-testbed
-
-Tests: boot-smoke
-Depends: systemd-sysv, network-manager, policykit-1, lightdm
-Restrictions: needs-recommends, needs-root, isolation-container, allow-stderr
-
-Tests: systemd-fsckd
-Depends: systemd, systemd-sysv, python3, lightdm
+Depends: systemd, lightdm, python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed

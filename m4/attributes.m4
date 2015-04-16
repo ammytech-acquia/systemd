@@ -42,7 +42,7 @@ AC_DEFUN([CC_CHECK_FLAG_APPEND], [
                  AS_TR_SH([cc_cv_$2_$3]),
           [eval "AS_TR_SH([cc_save_$2])='${$2}'"
            eval "AS_TR_SH([$2])='-Werror $3'"
-           AC_LINK_IFELSE([AC_LANG_SOURCE([int main(void) { return 0; } ])],
+           AC_LINK_IFELSE([AC_LANG_SOURCE([int a = 0; int main(void) { return a; } ])],
                           [eval "AS_TR_SH([cc_cv_$2_$3])='yes'"],
                           [eval "AS_TR_SH([cc_cv_$2_$3])='no'"])
            eval "AS_TR_SH([$2])='$cc_save_$2'"])
@@ -89,7 +89,7 @@ AC_DEFUN([CC_NOUNDEFINED], [
      *-freebsd* | *-openbsd*) ;;
      *)
         dnl First of all check for the --no-undefined variant of GNU ld. This allows
-        dnl for a much more readable command line, so that people can understand what
+        dnl for a much more readable commandline, so that people can understand what
         dnl it does without going to look for what the heck -z defs does.
         for possible_flags in "-Wl,--no-undefined" "-Wl,-z,defs"; do
            CC_CHECK_LDFLAGS([$possible_flags], [LDFLAGS_NOUNDEFINED="$possible_flags"])

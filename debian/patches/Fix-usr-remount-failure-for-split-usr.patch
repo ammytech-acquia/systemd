@@ -14,7 +14,7 @@ Bug-Debian: https://bugs.debian.org/742048
  1 file changed, 31 insertions(+)
 
 diff --git a/src/remount-fs/remount-fs.c b/src/remount-fs/remount-fs.c
-index 57b4702..3872f33 100644
+index 847637a..82a1596 100644
 --- a/src/remount-fs/remount-fs.c
 +++ b/src/remount-fs/remount-fs.c
 @@ -34,6 +34,32 @@

@@ -12,11 +12,11 @@ should be removed in jessie+1.
 
 Closes: #762041
 ---
- src/login/logind-user.c | 8 ++++++++
- 1 file changed, 8 insertions(+)
+ src/login/logind-user.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
 
 diff --git a/src/login/logind-user.c b/src/login/logind-user.c
-index f4c4490..961b579 100644
+index fdbccb3..2f29905 100644
 --- a/src/login/logind-user.c
 +++ b/src/login/logind-user.c
 @@ -20,6 +20,7 @@
@@ -27,7 +27,7 @@ index f4c4490..961b579 100644
  #include <string.h>
  #include <unistd.h>
  #include <errno.h>
-@@ -306,6 +307,7 @@ int user_load(User *u) {
+@@ -305,6 +306,7 @@ int user_load(User *u) {
  static int user_mkdir_runtime_path(User *u) {
          char *p;
          int r;
@@ -35,7 +35,7 @@ index f4c4490..961b579 100644
  
          assert(u);
  
-@@ -319,6 +321,12 @@ static int user_mkdir_runtime_path(User *u) {
+@@ -320,6 +322,12 @@ static int user_mkdir_runtime_path(User *u) {
          } else
                  p = u->runtime_path;
  
@@ -48,3 +48,12 @@ index f4c4490..961b579 100644
          if (path_is_mount_point(p, false) <= 0) {
                  _cleanup_free_ char *t = NULL;
  
+@@ -506,7 +514,7 @@ static int user_remove_runtime_path(User *u) {
+         if (r < 0)
+                 log_error("Failed to remove runtime directory %s: %s", u->runtime_path, strerror(-r));
+ 
+-        if (umount2(u->runtime_path, MNT_DETACH) < 0)
++        if (path_is_mount_point(u->runtime_path, false) && umount2(u->runtime_path, MNT_DETACH) < 0)
+                 log_error("Failed to unmount user runtime directory %s: %m", u->runtime_path);
+ 
+         r = rm_rf(u->runtime_path, false, true, false);

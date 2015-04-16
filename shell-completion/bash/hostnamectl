@@ -28,7 +28,7 @@ _hostnamectl() {
         local i verb comps
         local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
         local OPTS='-h --help --version --transient --static --pretty
-                    --no-ask-password -H --host --machine'
+                    --no-ask-password -H --host'
 
         if [[ $cur = -* ]]; then
                 COMPREPLY=( $(compgen -W '${OPTS[*]}' -- "$cur") )
@@ -38,8 +38,7 @@ _hostnamectl() {
         local -A VERBS=(
                 [STANDALONE]='status'
                      [ICONS]='set-icon-name'
-                      [NAME]='set-hostname set-deployment'
-                   [CHASSIS]='set-chassis'
+                      [NAME]='set-hostname'
         )
 
         for ((i=0; i < COMP_CWORD; i++)); do
@@ -51,8 +50,6 @@ _hostnamectl() {
 
         if [[ -z $verb ]]; then
                 comps=${VERBS[*]}
-        elif __contains_word "$verb" ${VERBS[CHASSIS]}; then
-                comps='desktop laptop server tablet handset watch embedded vm container'
         elif __contains_word "$verb" ${VERBS[STANDALONE]} ${VERBS[ICONS]} ${VERBS[NAME]}; then
                 comps=''
         fi

@@ -22,7 +22,6 @@
 ***/
 
 #include "hashmap.h"
-#include "unit-name.h"
 
 typedef enum UnitFileScope {
         UNIT_FILE_SYSTEM,
@@ -41,7 +40,6 @@ typedef enum UnitFileState {
         UNIT_FILE_MASKED_RUNTIME,
         UNIT_FILE_STATIC,
         UNIT_FILE_DISABLED,
-        UNIT_FILE_INDIRECT,
         UNIT_FILE_INVALID,
         _UNIT_FILE_STATE_MAX,
         _UNIT_FILE_STATE_INVALID = -1
@@ -51,7 +49,7 @@ typedef enum UnitFilePresetMode {
         UNIT_FILE_PRESET_FULL,
         UNIT_FILE_PRESET_ENABLE_ONLY,
         UNIT_FILE_PRESET_DISABLE_ONLY,
-        _UNIT_FILE_PRESET_MAX,
+        _UNIT_FILE_PRESET_MODE_MAX,
         _UNIT_FILE_PRESET_INVALID = -1
 } UnitFilePresetMode;
 
@@ -81,7 +79,6 @@ typedef struct {
         char **aliases;
         char **wanted_by;
         char **required_by;
-        char **also;
 
         char *default_instance;
 } InstallInfo;
@@ -96,7 +93,6 @@ int unit_file_mask(UnitFileScope scope, bool runtime, const char *root_dir, char
 int unit_file_unmask(UnitFileScope scope, bool runtime, const char *root_dir, char **files, UnitFileChange **changes, unsigned *n_changes);
 int unit_file_set_default(UnitFileScope scope, const char *root_dir, const char *file, bool force, UnitFileChange **changes, unsigned *n_changes);
 int unit_file_get_default(UnitFileScope scope, const char *root_dir, char **name);
-int unit_file_add_dependency(UnitFileScope scope, bool runtime, const char *root_dir, char **files, char *target, UnitDependency dep, bool force, UnitFileChange **changes, unsigned *n_changes);
 
 UnitFileState unit_file_get_state(UnitFileScope scope, const char *root_dir, const char *filename);
 

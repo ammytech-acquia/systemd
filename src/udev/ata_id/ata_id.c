@@ -34,12 +34,15 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <linux/types.h>
 #include <linux/hdreg.h>
+#include <linux/fs.h>
+#include <linux/cdrom.h>
 #include <linux/bsg.h>
+#include <arpa/inet.h>
 
 #include "libudev.h"
 #include "libudev-private.h"
-#include "udev-util.h"
 #include "log.h"
 
 #define COMMAND_TIMEOUT_MSEC (30 * 1000)
@@ -402,23 +405,29 @@ out:
         return ret;
 }
 
+_printf_(6,0)
+static void log_fn(struct udev *udev, int priority,
+                   const char *file, int line, const char *fn,
+                   const char *format, va_list args)
+{
+        vsyslog(priority, format, args);
+}
+
 int main(int argc, char *argv[])
 {
-        _cleanup_udev_unref_ struct udev *udev = NULL;
+        struct udev *udev;
         struct hd_driveid id;
-        union {
-                uint8_t  byte[512];
-                uint16_t wyde[256];
-                uint64_t octa[64];
-        } identify;
+        uint8_t identify[512];
+        uint16_t *identify_words;
         char model[41];
         char model_enc[256];
         char serial[21];
         char revision[9];
         const char *node = NULL;
         int export = 0;
-        _cleanup_close_ int fd = -1;
+        int fd;
         uint16_t word;
+        int rc = 0;
         int is_packet_device = 0;
         static const struct option options[] = {
                 { "export", no_argument, NULL, 'x' },
@@ -426,12 +435,12 @@ int main(int argc, char *argv[])
                 {}
         };
 
-        log_parse_environment();
-        log_open();
-
         udev = udev_new();
         if (udev == NULL)
-                return 0;
+                goto exit;
+
+        log_open();
+        udev_set_log_fn(udev, log_fn);
 
         while (1) {
                 int option;
@@ -446,55 +455,59 @@ int main(int argc, char *argv[])
                         break;
                 case 'h':
                         printf("Usage: ata_id [--export] [--help] <device>\n"
-                               "  -x,--export    print values as environment keys\n"
-                               "  -h,--help      print this help text\n\n");
-                        return 0;
+                               "  --export    print values as environment keys\n"
+                               "  --help      print this help text\n\n");
+                        goto exit;
                 }
         }
 
         node = argv[optind];
         if (node == NULL) {
                 log_error("no node specified");
-                return 1;
+                rc = 1;
+                goto exit;
         }
 
         fd = open(node, O_RDONLY|O_NONBLOCK|O_CLOEXEC);
         if (fd < 0) {
                 log_error("unable to open '%s'", node);
-                return 1;
+                rc = 1;
+                goto exit;
         }
 
-        if (disk_identify(udev, fd, identify.byte, &is_packet_device) == 0) {
+        if (disk_identify(udev, fd, identify, &is_packet_device) == 0) {
                 /*
                  * fix up only the fields from the IDENTIFY data that we are going to
                  * use and copy it into the hd_driveid struct for convenience
                  */
-                disk_identify_fixup_string(identify.byte,  10, 20); /* serial */
-                disk_identify_fixup_string(identify.byte,  23,  8); /* fwrev */
-                disk_identify_fixup_string(identify.byte,  27, 40); /* model */
-                disk_identify_fixup_uint16(identify.byte,  0);      /* configuration */
-                disk_identify_fixup_uint16(identify.byte,  75);     /* queue depth */
-                disk_identify_fixup_uint16(identify.byte,  75);     /* SATA capabilities */
-                disk_identify_fixup_uint16(identify.byte,  82);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  83);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  84);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  85);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  86);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  87);     /* command set supported */
-                disk_identify_fixup_uint16(identify.byte,  89);     /* time required for SECURITY ERASE UNIT */
-                disk_identify_fixup_uint16(identify.byte,  90);     /* time required for enhanced SECURITY ERASE UNIT */
-                disk_identify_fixup_uint16(identify.byte,  91);     /* current APM values */
-                disk_identify_fixup_uint16(identify.byte,  94);     /* current AAM value */
-                disk_identify_fixup_uint16(identify.byte, 128);     /* device lock function */
-                disk_identify_fixup_uint16(identify.byte, 217);     /* nominal media rotation rate */
-                memcpy(&id, identify.byte, sizeof id);
+                disk_identify_fixup_string(identify,  10, 20); /* serial */
+                disk_identify_fixup_string(identify,  23,  8); /* fwrev */
+                disk_identify_fixup_string(identify,  27, 40); /* model */
+                disk_identify_fixup_uint16(identify,  0);      /* configuration */
+                disk_identify_fixup_uint16(identify,  75);     /* queue depth */
+                disk_identify_fixup_uint16(identify,  75);     /* SATA capabilities */
+                disk_identify_fixup_uint16(identify,  82);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  83);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  84);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  85);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  86);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  87);     /* command set supported */
+                disk_identify_fixup_uint16(identify,  89);     /* time required for SECURITY ERASE UNIT */
+                disk_identify_fixup_uint16(identify,  90);     /* time required for enhanced SECURITY ERASE UNIT */
+                disk_identify_fixup_uint16(identify,  91);     /* current APM values */
+                disk_identify_fixup_uint16(identify,  94);     /* current AAM value */
+                disk_identify_fixup_uint16(identify, 128);     /* device lock function */
+                disk_identify_fixup_uint16(identify, 217);     /* nominal media rotation rate */
+                memcpy(&id, identify, sizeof id);
         } else {
                 /* If this fails, then try HDIO_GET_IDENTITY */
                 if (ioctl(fd, HDIO_GET_IDENTITY, &id) != 0) {
-                        log_debug_errno(errno, "HDIO_GET_IDENTITY failed for '%s': %m", node);
-                        return 2;
+                        log_debug("HDIO_GET_IDENTITY failed for '%s': %m", node);
+                        rc = 2;
+                        goto close;
                 }
         }
+        identify_words = (uint16_t *) identify;
 
         memcpy (model, id.model, 40);
         model[40] = '\0';
@@ -544,8 +557,8 @@ int main(int argc, char *argv[])
                 }
 
                 if (id.command_set_1 & (1<<5)) {
-                        printf("ID_ATA_WRITE_CACHE=1\n");
-                        printf("ID_ATA_WRITE_CACHE_ENABLED=%d\n", (id.cfs_enable_1 & (1<<5)) ? 1 : 0);
+                        printf ("ID_ATA_WRITE_CACHE=1\n");
+                        printf ("ID_ATA_WRITE_CACHE_ENABLED=%d\n", (id.cfs_enable_1 & (1<<5)) ? 1 : 0);
                 }
                 if (id.command_set_1 & (1<<10)) {
                         printf("ID_ATA_FEATURE_SET_HPA=1\n");
@@ -608,8 +621,7 @@ int main(int argc, char *argv[])
                  * the device does not claim compliance with the Serial ATA specification and words
                  * 76 through 79 are not valid and shall be ignored.
                  */
-
-                word = identify.wyde[76];
+                word = *((uint16_t *) identify + 76);
                 if (word != 0x0000 && word != 0xffff) {
                         printf("ID_ATA_SATA=1\n");
                         /*
@@ -626,34 +638,54 @@ int main(int argc, char *argv[])
                 }
 
                 /* Word 217 indicates the nominal media rotation rate of the device */
-                word = identify.wyde[217];
-                if (word == 0x0001)
-                        printf ("ID_ATA_ROTATION_RATE_RPM=0\n"); /* non-rotating e.g. SSD */
-                else if (word >= 0x0401 && word <= 0xfffe)
-                        printf ("ID_ATA_ROTATION_RATE_RPM=%d\n", word);
+                word = *((uint16_t *) identify + 217);
+                if (word != 0x0000) {
+                        if (word == 0x0001) {
+                                printf ("ID_ATA_ROTATION_RATE_RPM=0\n"); /* non-rotating e.g. SSD */
+                        } else if (word >= 0x0401 && word <= 0xfffe) {
+                                printf ("ID_ATA_ROTATION_RATE_RPM=%d\n", word);
+                        }
+                }
 
                 /*
                  * Words 108-111 contain a mandatory World Wide Name (WWN) in the NAA IEEE Registered identifier
                  * format. Word 108 bits (15:12) shall contain 5h, indicating that the naming authority is IEEE.
                  * All other values are reserved.
                  */
-                word = identify.wyde[108];
-                if ((word & 0xf000) == 0x5000)
-                        printf("ID_WWN=0x%1$"PRIu64"x\n"
-                               "ID_WWN_WITH_EXTENSION=0x%1$"PRIu64"x\n",
-                               identify.octa[108/4]);
+                word = *((uint16_t *) identify + 108);
+                if ((word & 0xf000) == 0x5000) {
+                        uint64_t wwwn;
+
+                        wwwn   = *((uint16_t *) identify + 108);
+                        wwwn <<= 16;
+                        wwwn  |= *((uint16_t *) identify + 109);
+                        wwwn <<= 16;
+                        wwwn  |= *((uint16_t *) identify + 110);
+                        wwwn <<= 16;
+                        wwwn  |= *((uint16_t *) identify + 111);
+                        printf("ID_WWN=0x%llx\n", (unsigned long long int) wwwn);
+                        /* ATA devices have no vendor extension */
+                        printf("ID_WWN_WITH_EXTENSION=0x%llx\n", (unsigned long long int) wwwn);
+                }
 
                 /* from Linux's include/linux/ata.h */
-                if (identify.wyde[0] == 0x848a ||
-                    identify.wyde[0] == 0x844a ||
-                    (identify.wyde[83] & 0xc004) == 0x4004)
+                if (identify_words[0] == 0x848a || identify_words[0] == 0x844a) {
                         printf("ID_ATA_CFA=1\n");
+                } else {
+                        if ((identify_words[83] & 0xc004) == 0x4004) {
+                                printf("ID_ATA_CFA=1\n");
+                        }
+                }
         } else {
                 if (serial[0] != '\0')
                         printf("%s_%s\n", model, serial);
                 else
                         printf("%s\n", model);
         }
-
-        return 0;
+close:
+        close(fd);
+exit:
+        udev_unref(udev);
+        log_close();
+        return rc;
 }

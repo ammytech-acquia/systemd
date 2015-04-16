@@ -44,8 +44,8 @@ static int test_unit_file_get_set(void) {
         Iterator i;
         UnitFileList *p;
 
-        h = hashmap_new(&string_hash_ops);
-        assert_se(h);
+        h = hashmap_new(string_hash_func, string_compare_func);
+        assert(h);
 
         r = unit_file_get_list(UNIT_FILE_SYSTEM, NULL, h);
 
@@ -71,117 +71,89 @@ static void check_execcommand(ExecCommand *c,
                               const char* path,
                               const char* argv0,
                               const char* argv1,
-                              const char* argv2,
                               bool ignore) {
-        size_t n;
-
         assert_se(c);
-        log_info("expect: \"%s\" [\"%s\" \"%s\" \"%s\"]",
-                 path, argv0 ?: path, argv1, argv2);
-        n = strv_length(c->argv);
-        log_info("actual: \"%s\" [\"%s\" \"%s\" \"%s\"]",
-                 c->path, c->argv[0], n > 0 ? c->argv[1] : NULL, n > 1 ? c->argv[2] : NULL);
+        log_info("%s %s %s %s",
+                 c->path, c->argv[0], c->argv[1], c->argv[2]);
         assert_se(streq(c->path, path));
-        assert_se(streq(c->argv[0], argv0 ?: path));
-        if (n > 0)
-                assert_se(streq_ptr(c->argv[1], argv1));
-        if (n > 1)
-                assert_se(streq_ptr(c->argv[2], argv2));
+        assert_se(streq(c->argv[0], argv0));
+        assert_se(streq(c->argv[1], argv1));
+        assert_se(c->argv[2] == NULL);
         assert_se(c->ignore == ignore);
 }
 
 static void test_config_parse_exec(void) {
-        /* int config_parse_exec(
-                 const char *filename,
-                 unsigned line,
-                 const char *section,
-                 unsigned section_line,
-                 const char *lvalue,
-                 int ltype,
-                 const char *rvalue,
-                 void *data,
-                 void *userdata) */
+        /* int config_parse_exec( */
+        /*         const char *filename, */
+        /*         unsigned line, */
+        /*         const char *section, */
+        /*         unsigned section_line, */
+        /*         const char *lvalue, */
+        /*         int ltype, */
+        /*         const char *rvalue, */
+        /*         void *data, */
+        /*         void *userdata) */
         int r;
 
         ExecCommand *c = NULL, *c1;
-        const char *ccc;
 
-        log_info("/* basic test */");
+        /* basic test */
         r = config_parse_exec(NULL, "fake", 1, "section", 1,
                               "LValue", 0, "/RValue r1",
                               &c, NULL);
         assert_se(r >= 0);
-        check_execcommand(c, "/RValue", "/RValue", "r1", NULL, false);
+        check_execcommand(c, "/RValue", "/RValue", "r1", false);
 
         r = config_parse_exec(NULL, "fake", 2, "section", 1,
-                              "LValue", 0, "/RValue///slashes r1///",
+                              "LValue", 0, "/RValue///slashes/// r1",
                               &c, NULL);
-
-        log_info("/* test slashes */");
+       /* test slashes */
         assert_se(r >= 0);
         c1 = c->command_next;
-        check_execcommand(c1, "/RValue/slashes", "/RValue///slashes", "r1///", NULL, false);
+        check_execcommand(c1, "/RValue/slashes", "/RValue///slashes///",
+                          "r1", false);
 
-        log_info("/* trailing slash */");
-        r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                              "LValue", 0, "/RValue/ argv0 r1",
-                              &c, NULL);
-        assert_se(r == 0);
-        assert_se(c1->command_next == NULL);
-
-        log_info("/* honour_argv0 */");
+        /* honour_argv0 */
         r = config_parse_exec(NULL, "fake", 3, "section", 1,
-                              "LValue", 0, "@/RValue///slashes2 ///argv0 r1",
+                              "LValue", 0, "@/RValue///slashes2/// argv0 r1",
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
-        check_execcommand(c1, "/RValue/slashes2", "///argv0", "r1", NULL, false);
+        check_execcommand(c1, "/RValue/slashes2", "argv0", "r1", false);
 
-        log_info("/* honour_argv0, no args */");
-        r = config_parse_exec(NULL, "fake", 3, "section", 1,
-                              "LValue", 0, "@/RValue",
-                              &c, NULL);
-        assert_se(r == 0);
-        assert_se(c1->command_next == NULL);
-
-        log_info("/* no command, check for bad memory access */");
-        r = config_parse_exec(NULL, "fake", 3, "section", 1,
-                              "LValue", 0, "    ",
-                              &c, NULL);
-        assert_se(r == 0);
-        assert_se(c1->command_next == NULL);
-
-        log_info("/* ignore && honour_argv0 */");
+        /* ignore && honour_argv0 */
         r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                              "LValue", 0, "-@/RValue///slashes3 argv0a r1",
+                              "LValue", 0, "-@/RValue///slashes3/// argv0a r1",
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
-        check_execcommand(c1, "/RValue/slashes3", "argv0a", "r1", NULL, true);
+        check_execcommand(c1,
+                          "/RValue/slashes3", "argv0a", "r1", true);
 
-        log_info("/* ignore && honour_argv0 */");
+        /* ignore && honour_argv0 */
         r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                              "LValue", 0, "@-/RValue///slashes4 argv0b r1",
+                              "LValue", 0, "@-/RValue///slashes4/// argv0b r1",
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
-        check_execcommand(c1, "/RValue/slashes4", "argv0b", "r1", NULL, true);
+        check_execcommand(c1,
+                          "/RValue/slashes4", "argv0b", "r1", true);
 
-        log_info("/* ignore && ignore */");
+        /* ignore && ignore */
         r = config_parse_exec(NULL, "fake", 4, "section", 1,
                               "LValue", 0, "--/RValue argv0 r1",
                               &c, NULL);
         assert_se(r == 0);
         assert_se(c1->command_next == NULL);
 
-        log_info("/* ignore && ignore (2) */");
+        /* ignore && ignore */
         r = config_parse_exec(NULL, "fake", 4, "section", 1,
                               "LValue", 0, "-@-/RValue argv0 r1",
                               &c, NULL);
         assert_se(r == 0);
         assert_se(c1->command_next == NULL);
 
-        log_info("/* semicolon */");
+        /* semicolon */
         r = config_parse_exec(NULL, "fake", 5, "section", 1,
                               "LValue", 0,
                               "-@/RValue argv0 r1 ; "
@@ -189,119 +161,34 @@ static void test_config_parse_exec(void) {
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
-        check_execcommand(c1, "/RValue", "argv0", "r1", NULL, true);
+        check_execcommand(c1,
+                          "/RValue", "argv0", "r1", true);
 
         c1 = c1->command_next;
-        check_execcommand(c1, "/goo/goo", NULL, "boo", NULL, false);
+        check_execcommand(c1,
+                          "/goo/goo", "/goo/goo", "boo", false);
 
-        log_info("/* trailing semicolon */");
+        /* trailing semicolon */
         r = config_parse_exec(NULL, "fake", 5, "section", 1,
                               "LValue", 0,
                               "-@/RValue argv0 r1 ; ",
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
-        check_execcommand(c1, "/RValue", "argv0", "r1", NULL, true);
+        check_execcommand(c1,
+                          "/RValue", "argv0", "r1", true);
 
         assert_se(c1->command_next == NULL);
 
-        log_info("/* escaped semicolon */");
+        /* escaped semicolon */
         r = config_parse_exec(NULL, "fake", 5, "section", 1,
                               "LValue", 0,
-                              "/bin/find \\;",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1, "/bin/find", NULL, ";", NULL, false);
-
-        log_info("/* escaped semicolon with following arg */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "/sbin/find \\; x",
+                              "/usr/bin/find \\;",
                               &c, NULL);
         assert_se(r >= 0);
         c1 = c1->command_next;
         check_execcommand(c1,
-                          "/sbin/find", NULL, ";", "x", false);
-
-        log_info("/* spaces in the filename */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "\"/PATH WITH SPACES/daemon\" -1 -2",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1,
-                          "/PATH WITH SPACES/daemon", NULL, "-1", "-2", false);
-
-        log_info("/* spaces in the filename, no args */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "\"/PATH WITH SPACES/daemon -1 -2\"",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1,
-                          "/PATH WITH SPACES/daemon -1 -2", NULL, NULL, NULL, false);
-
-        log_info("/* spaces in the filename, everything quoted */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "\"/PATH WITH SPACES/daemon\" \"-1\" '-2'",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1,
-                          "/PATH WITH SPACES/daemon", NULL, "-1", "-2", false);
-
-        log_info("/* escaped spaces in the filename */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "\"/PATH\\sWITH\\sSPACES/daemon\" '-1 -2'",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1,
-                          "/PATH WITH SPACES/daemon", NULL, "-1 -2", NULL, false);
-
-        log_info("/* escaped spaces in the filename (2) */");
-        r = config_parse_exec(NULL, "fake", 5, "section", 1,
-                              "LValue", 0,
-                              "\"/PATH\\x20WITH\\x20SPACES/daemon\" \"-1 -2\"",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1,
-                          "/PATH WITH SPACES/daemon", NULL, "-1 -2", NULL, false);
-
-        for (ccc = "abfnrtv\\\'\"x"; *ccc; ccc++) {
-                /* \\x is an incomplete hexadecimal sequence, invalid because of the slash */
-                char path[] = "/path\\X";
-                path[sizeof(path) - 2] = *ccc;
-
-                log_info("/* invalid character: \\%c */", *ccc);
-                r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                                      "LValue", 0, path,
-                                      &c, NULL);
-                assert_se(r == 0);
-                assert_se(c1->command_next == NULL);
-        }
-
-        log_info("/* valid character: \\s */");
-        r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                              "LValue", 0, "/path\\s",
-                              &c, NULL);
-        assert_se(r >= 0);
-        c1 = c1->command_next;
-        check_execcommand(c1, "/path ", NULL, NULL, NULL, false);
-
-        log_info("/* trailing backslash: \\ */");
-        /* backslash is invalid */
-        r = config_parse_exec(NULL, "fake", 4, "section", 1,
-                              "LValue", 0, "/path\\",
-                              &c, NULL);
-        assert_se(r == 0);
-        assert_se(c1->command_next == NULL);
+                          "/usr/bin/find", "/usr/bin/find", ";", false);
 
         exec_command_free_list(c);
 }
@@ -335,9 +222,6 @@ static void test_config_parse_exec(void) {
        "MODULE_0=coretemp\n" \
        "MODULE_1=f71882fg"
 
-#define env_file_5                              \
-        "a=\n"                                 \
-        "b="
 
 static void test_load_env_file_1(void) {
         _cleanup_strv_free_ char **data = NULL;
@@ -347,18 +231,18 @@ static void test_load_env_file_1(void) {
         _cleanup_close_ int fd;
 
         fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
+        assert(fd >= 0);
         assert_se(write(fd, env_file_1, sizeof(env_file_1)) == sizeof(env_file_1));
 
         r = load_env_file(NULL, name, NULL, &data);
-        assert_se(r == 0);
-        assert_se(streq(data[0], "a=a"));
-        assert_se(streq(data[1], "b=bc"));
-        assert_se(streq(data[2], "d=def"));
-        assert_se(streq(data[3], "g=g "));
-        assert_se(streq(data[4], "h=h"));
-        assert_se(streq(data[5], "i=i"));
-        assert_se(data[6] == NULL);
+        assert(r == 0);
+        assert(streq(data[0], "a=a"));
+        assert(streq(data[1], "b=bc"));
+        assert(streq(data[2], "d=def"));
+        assert(streq(data[3], "g=g "));
+        assert(streq(data[4], "h=h"));
+        assert(streq(data[5], "i=i"));
+        assert(data[6] == NULL);
         unlink(name);
 }
 
@@ -370,13 +254,13 @@ static void test_load_env_file_2(void) {
         _cleanup_close_ int fd;
 
         fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
+        assert(fd >= 0);
         assert_se(write(fd, env_file_2, sizeof(env_file_2)) == sizeof(env_file_2));
 
         r = load_env_file(NULL, name, NULL, &data);
-        assert_se(r == 0);
-        assert_se(streq(data[0], "a=a"));
-        assert_se(data[1] == NULL);
+        assert(r == 0);
+        assert(streq(data[0], "a=a"));
+        assert(data[1] == NULL);
         unlink(name);
 }
 
@@ -388,12 +272,12 @@ static void test_load_env_file_3(void) {
         _cleanup_close_ int fd;
 
         fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
+        assert(fd >= 0);
         assert_se(write(fd, env_file_3, sizeof(env_file_3)) == sizeof(env_file_3));
 
         r = load_env_file(NULL, name, NULL, &data);
-        assert_se(r == 0);
-        assert_se(data == NULL);
+        assert(r == 0);
+        assert(data == NULL);
         unlink(name);
 }
 
@@ -404,36 +288,18 @@ static void test_load_env_file_4(void) {
         int r;
 
         fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
+        assert(fd >= 0);
         assert_se(write(fd, env_file_4, sizeof(env_file_4)) == sizeof(env_file_4));
 
         r = load_env_file(NULL, name, NULL, &data);
-        assert_se(r == 0);
-        assert_se(streq(data[0], "HWMON_MODULES=coretemp f71882fg"));
-        assert_se(streq(data[1], "MODULE_0=coretemp"));
-        assert_se(streq(data[2], "MODULE_1=f71882fg"));
-        assert_se(data[3] == NULL);
+        assert(r == 0);
+        assert(streq(data[0], "HWMON_MODULES=coretemp f71882fg"));
+        assert(streq(data[1], "MODULE_0=coretemp"));
+        assert(streq(data[2], "MODULE_1=f71882fg"));
+        assert(data[3] == NULL);
         unlink(name);
 }
 
-static void test_load_env_file_5(void) {
-        _cleanup_strv_free_ char **data = NULL;
-        int r;
-
-        char name[] = "/tmp/test-load-env-file.XXXXXX";
-        _cleanup_close_ int fd;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-        assert_se(write(fd, env_file_5, sizeof(env_file_5)) == sizeof(env_file_5));
-
-        r = load_env_file(NULL, name, NULL, &data);
-        assert_se(r == 0);
-        assert_se(streq(data[0], "a="));
-        assert_se(streq(data[1], "b="));
-        assert_se(data[2] == NULL);
-        unlink(name);
-}
 
 static void test_install_printf(void) {
         char    name[] = "name.service",
@@ -463,11 +329,11 @@ static void test_install_printf(void) {
                 memzero(i.name, strlen(i.name));                        \
                 memzero(i.path, strlen(i.path));                        \
                 memzero(i.user, strlen(i.user));                        \
-                assert_se(d1 && d2 && d3);                                 \
+                assert(d1 && d2 && d3);                                 \
                 if (result) {                                           \
                         printf("%s\n", t);                              \
-                        assert_se(streq(t, result));                       \
-                } else assert_se(t == NULL);                               \
+                        assert(streq(t, result));                       \
+                } else assert(t == NULL);                               \
                 strcpy(i.name, d1);                                     \
                 strcpy(i.path, d2);                                     \
                 strcpy(i.user, d3);                                     \
@@ -521,7 +387,6 @@ int main(int argc, char *argv[]) {
         test_load_env_file_2();
         test_load_env_file_3();
         test_load_env_file_4();
-        test_load_env_file_5();
         TEST_REQ_RUNNING_SYSTEMD(test_install_printf());
 
         return r;

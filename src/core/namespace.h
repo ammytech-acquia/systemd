@@ -44,13 +44,12 @@ typedef enum ProtectSystem {
 int setup_namespace(char **read_write_dirs,
                     char **read_only_dirs,
                     char **inaccessible_dirs,
-                    const char *tmp_dir,
-                    const char *var_tmp_dir,
-                    const char *endpoint_path,
+                    char *tmp_dir,
+                    char *var_tmp_dir,
                     bool private_dev,
                     ProtectHome protect_home,
                     ProtectSystem protect_system,
-                    unsigned long mount_flags);
+                    unsigned mount_flags);
 
 int setup_tmp_dirs(const char *id,
                   char **tmp_dir,

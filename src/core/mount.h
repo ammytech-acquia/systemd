@@ -112,8 +112,6 @@ struct Mount {
         pid_t control_pid;
 
         sd_event_source *timer_event_source;
-
-        unsigned n_retry_umount;
 };
 
 extern const UnitVTable mount_vtable;

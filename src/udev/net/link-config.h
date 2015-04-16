@@ -22,10 +22,11 @@
 #pragma once
 
 #include "ethtool-util.h"
-#include "condition.h"
+
+#include "condition-util.h"
+#include "libudev.h"
 #include "util.h"
 #include "list.h"
-#include "libudev.h"
 
 typedef struct link_config_ctx link_config_ctx;
 typedef struct link_config link_config;
@@ -38,7 +39,6 @@ typedef enum MACPolicy {
 } MACPolicy;
 
 typedef enum NamePolicy {
-        NAMEPOLICY_KERNEL,
         NAMEPOLICY_DATABASE,
         NAMEPOLICY_ONBOARD,
         NAMEPOLICY_SLOT,
@@ -52,10 +52,9 @@ struct link_config {
         char *filename;
 
         struct ether_addr *match_mac;
-        char **match_path;
-        char **match_driver;
-        char **match_type;
-        char **match_name;
+        char *match_path;
+        char *match_driver;
+        char *match_type;
         Condition *match_host;
         Condition *match_virt;
         Condition *match_kernel;

@@ -183,14 +183,11 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
         for (j = 0, p = buf; j < 16; j++) {
                 int a, b;
 
-                if (p >= buf + k - 1)
+                if (p >= buf + k)
                         return -EIO;
 
-                if (*p == '-') {
+                if (*p == '-')
                         p++;
-                        if (p >= buf + k - 1)
-                                return -EIO;
-                }
 
                 a = unhexchar(p[0]);
                 b = unhexchar(p[1]);
@@ -222,7 +219,7 @@ _public_ int sd_id128_randomize(sd_id128_t *ret) {
 
         /* Turn this into a valid v4 UUID, to be nice. Note that we
          * only guarantee this for newly generated UUIDs, not for
-         * pre-existing ones. */
+         * pre-existing ones.*/
 
         *ret = make_v4_uuid(t);
         return 0;
