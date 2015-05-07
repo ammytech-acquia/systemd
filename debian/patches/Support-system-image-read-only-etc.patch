@@ -7,7 +7,7 @@ On Ubuntu Phone with readonly /etc we symlink
 we need to update those files instead if the original files are symlinks into
 /etc/writable/.
 
-Forwarded: OMGno, this is a rather nasty hack until we get a clean solution for an /etc overlay
+Forwarded: OMGno, this is a rather nasty hack until we fix system-image to get a writable /etc
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
  src/hostname/hostnamed.c | 27 +++++++++++++++++++++++----

@@ -1,31 +1,4 @@
-systemd (219-7ubuntu4) vivid; urgency=medium
-
-  * hwdb: Fix wireless switch on Dell Latitude (LP: #1441849)
-  * Fix assertion crash when reading a service file with missing ' and
-    trailing space. (LP: #1447243)
-  * Fix double free crash in "systemctl enable" when calling update-rc.d and
-    the latter fails. (LP: #1426588)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 23 Apr 2015 11:14:16 +0100
-
-systemd (219-7ubuntu3) vivid; urgency=medium
-
-  * logind autopkgtest: Add test for suspending on lid switch close.
-    This reproduces LP #1444166 (lid switch not working in the first few
-    minutes after boot).
-  * Reduce the initial suspend supression time from 3 minutes to 30 seconds,
-    and make it configurable. (LP: #1444166)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sat, 18 Apr 2015 17:06:08 +0100
-
-systemd (219-7ubuntu2) vivid; urgency=medium
-
-  * cryptsetup: Implement offset and skip options. (Closes: #751707,
-    LP: #953875)
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 16 Apr 2015 14:59:39 -0500
-
-systemd (219-7ubuntu1) vivid; urgency=medium
+systemd (219-8ubuntu1) wily; urgency=medium
 
   * Merge with Debian experimental branch. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
@@ -71,7 +44,7 @@ systemd (219-7ubuntu1) vivid; urgency=medium
       be dropped again with initramfs-tools 0.117.
     - Lower Breaks: to plymouth version which has the udev inotify fix in
       Ubuntu.
-    - Lower libappamor1 dep to the Ubuntu version where it moved to /lib.
+    - Lower libappamor dep to the Ubuntu version where it moved to /lib.
     - Change systemd-sysv's conflicts to upstart-sysv. (LP: #1422681)
     - Make failure of boot-and-services NSpawn.test_boot non-fatal for now.
       This currently fails when being triggered by Jenkins, but is totally
@@ -82,7 +55,58 @@ systemd (219-7ubuntu1) vivid; urgency=medium
     - Remove obsolete systemd-logind upstart job.
     - Clean up obsolete /etc/udev/rules.d/README.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Fri, 10 Apr 2015 13:08:39 +0200
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 07 May 2015 12:16:36 +0200
+
+systemd (219-9) UNRELEASED; urgency=medium
+
+  * 75-persistent-net-generator.rules: Fix rules for ibmveth (it's a driver,
+    not a subsystem). (LP: #1437375)
+  * debian/tests/unit-config: Add tests for systemctl enable/disable on a
+    SysV-only unit. Reproduces LP #1447807.
+  * Fix systemctl enable for SysV scripts without a native unit. We must not
+    try and enable the nonexisting unit then. (LP: #1447807)
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 05 May 2015 15:14:03 +0200
+
+systemd (219-8) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Skip filesystem check if already done by the initramfs. (Closes: #782522)
+  * Drop hard-coded versioned dependency on libapparmor1. Bump the
+    Build-Depends on libapparmor-dev instead. This ensures a proper versioned
+    dependency via Build-Depends-Package.
+  * Revert "Make apparmor run before networking". This causes dependency
+    cycles while apparmor still depends on $remote_fs.
+  * Cleanup hwclock-save.service symlinks when upgrading from the jessie
+    version.
+
+  [ Martin Pitt ]
+  * cryptsetup: Implement offset and skip options. (Closes: #751707,
+    LP: #953875)
+  * logind autopkgtest: Add test for suspending on lid switch close.
+    This reproduces LP #1444166 (lid switch not working in the first few
+    minutes after boot).
+  * Reduce the initial suspend supression time from 3 minutes to 30 seconds,
+    and make it configurable. (LP: #1444166)
+  * Fix double free crash in "systemctl enable" when calling update-rc.d and
+    the latter fails. (Closes: #764613, LP: #1426588)
+  * hwdb: Fix wireless switch on Dell Latitude (LP: #1441849)
+  * Fix assertion crash when reading a service file with missing ' and
+    trailing space. (LP: #1447243)
+  * ifup@.service: Set IgnoreOnIsolate, so that "systemctl default" does not
+    shut down network interfaces. (Closes: #762953, LP: #1449380).
+    Add PartOf=network.target, so that stopping network.target also stops
+    network interfaces (so that isolating emergency.target and similar work as
+    before).
+  * Revert upstream commit 743970d which immediately SIGKILLs units during
+    shutdown. This leads to problems like bash not being able to write its
+    history, mosh not saving its state, and similar failed cleanup actions.
+    (LP: #1448259)
+  * Drop the reversion of "journald: allow restarting journald without losing
+    stream connections", and replace with proper upstream fix for
+    sd_pid_notify_with_fds(). (See Debian #778970, LP #1423811; LP: #1437896)
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 29 Apr 2015 17:13:41 +0200
 
 systemd (219-7) experimental; urgency=medium
 
