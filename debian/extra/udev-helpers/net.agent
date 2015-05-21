@@ -20,9 +20,10 @@ check_program() {
 
 wait_for_interface() {
     local interface=$1
+    local state
 
     while :; do
-	local state="$(cat /sys/class/net/$interface/operstate 2>/dev/null || true)"
+	read state /sys/class/net/$interface/operstate 2>/dev/null || true
 	if [ "$state" != down ]; then
 		return 0
 	fi
@@ -33,8 +34,8 @@ wait_for_interface() {
 net_ifup() {
     check_program /sbin/ifup
 
-    # exit if the interface is not configured as allow-hotplug
-    if ! ifquery --allow hotplug -l | grep -q "^${INTERFACE}\$"; then
+    # exit if the interface is not configured as allow-hotplug or auto
+    if ! (ifquery --allow hotplug -l; ifquery --allow auto -l) | grep -q "^${INTERFACE}\$"; then
         exit 0
     fi
 
@@ -42,7 +43,8 @@ net_ifup() {
         exec systemctl --no-block start $(systemd-escape --template ifup@.service $INTERFACE)
     fi
 
-    if ps -C ifup ho args | grep -q "$INTERFACE"; then
+    local out=$(ps -C ifup ho args)
+    if [ "${out%$INTERFACE*}" != "$out" ]; then
         debug_mesg "Already ifup-ing interface $INTERFACE"
         exit 0
     fi
@@ -61,7 +63,8 @@ net_ifdown() {
         exit 0
     fi
 
-    if ps -C ifdown ho args | grep -q $INTERFACE; then
+    local out=$(ps -C ifdown ho args)
+    if [ "${out%$INTERFACE*}" != "$out" ]; then
 	debug_mesg "Already ifdown-ing interface $INTERFACE"
 	exit 0
     fi
