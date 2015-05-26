@@ -1,24 +1,24 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-  This file is part of systemd.
+This file is part of systemd.
 
-  Copyright 2013 Zbigniew Jędrzejewski-Szmek
+Copyright 2013 Zbigniew Jędrzejewski-Szmek
 
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
+systemd is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
 
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
+systemd is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Lesser General Public License for more details.
 
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Lesser General Public License
+along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemd-activate"
@@ -61,12 +61,12 @@
     <title>Description</title>
 
     <para><command>systemd-activate</command> can be used to
-    launch a socket activated daemon from the command line for
+    launch a socket activated daemon from the command-line for
     testing purposes. It can also be used to launch single instances
     of the daemon per connection (inetd-style).
     </para>
 
-    <para>The daemon to launch and its options should be specified
+    <para>The daemon to launch and its options should be specifed
     after options intended for <command>systemd-activate</command>.
     </para>
 
@@ -76,7 +76,7 @@
     inherited, and sockets will be passed through file descriptors 3
     and higher. Sockets passed through <varname>$LISTEN_FDS</varname>
     to <command>systemd-activate</command> will be passed through to
-    the daemon, in the original positions. Other sockets specified
+    the dameon, in the original positions. Other sockets specified
     with <option>--listen</option> will use consecutive descriptors.
     </para>
   </refsect1>
@@ -144,19 +144,20 @@
   </refsect1>
 
   <refsect1>
-    <title>Examples</title>
+    <title>Example 1</title>
 
-    <example>
-      <title>Run an echo server on port 2000</title>
+    <programlisting>$ /usr/lib/systemd/systemd-activate -l 2000 -a cat</programlisting>
 
-      <programlisting>$ /usr/lib/systemd/systemd-activate -l 2000 -a cat</programlisting>
-    </example>
+    <para>This runs an echo server on port 2000.</para>
+  </refsect1>
 
-    <example>
-      <title>Run a socket activated instance of <citerefentry><refentrytitle>systemd-journal-gatewayd</refentrytitle><manvolnum>8</manvolnum></citerefentry></title>
+  <refsect1>
+    <title>Example 2</title>
 
-      <programlisting>$ /usr/lib/systemd/systemd-activate -l 19531 /usr/lib/systemd/systemd-journal-gatewayd</programlisting>
-    </example>
+    <programlisting>$ /usr/lib/systemd/systemd-activate -l 19531 /usr/lib/systemd/systemd-journal-gatewayd</programlisting>
+
+    <para>This runs a socket activated instance of
+    <citerefentry><refentrytitle>systemd-journal-gatewayd</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
   </refsect1>
 
   <refsect1>
@@ -165,7 +166,7 @@
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>cat</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+      <citerefentry><refentrytitle>cat</refentrytitle><manvolnum>1</manvolnum></citerefentry>
     </para>
   </refsect1>
 </refentry>

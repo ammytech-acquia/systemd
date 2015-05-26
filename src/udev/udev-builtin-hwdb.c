@@ -18,39 +18,45 @@
 ***/
 
 #include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <inttypes.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <fnmatch.h>
 #include <getopt.h>
 
 #include "udev.h"
-#include "sd-hwdb.h"
 
-#include "hwdb-util.h"
-
-static sd_hwdb *hwdb;
+static struct udev_hwdb *hwdb;
 
 int udev_builtin_hwdb_lookup(struct udev_device *dev,
                              const char *prefix, const char *modalias,
                              const char *filter, bool test) {
-        _cleanup_free_ const char *lookup = NULL;
-        const char *key, *value;
+        struct udev_list_entry *list;
+        struct udev_list_entry *entry;
         int n = 0;
 
         if (!hwdb)
                 return -ENOENT;
 
         if (prefix) {
+                _cleanup_free_ const char *lookup;
+
                 lookup = strjoin(prefix, modalias, NULL);
                 if (!lookup)
                         return -ENOMEM;
-                modalias = lookup;
-        }
+                list = udev_hwdb_get_properties_list_entry(hwdb, lookup, 0);
+        } else
+                list = udev_hwdb_get_properties_list_entry(hwdb, modalias, 0);
 
-        SD_HWDB_FOREACH_PROPERTY(hwdb, modalias, key, value) {
-                if (filter && fnmatch(filter, key, FNM_NOESCAPE) != 0)
+        udev_list_entry_foreach(entry, list) {
+                if (filter && fnmatch(filter, udev_list_entry_get_name(entry), FNM_NOESCAPE) != 0)
                         continue;
 
-                if (udev_builtin_add_property(dev, test, key, value) < 0)
+                if (udev_builtin_add_property(dev, test,
+                                              udev_list_entry_get_name(entry),
+                                              udev_list_entry_get_value(entry)) < 0)
                         return -ENOMEM;
                 n++;
         }
@@ -82,10 +88,9 @@ static int udev_builtin_hwdb_search(struct udev_device *dev, struct udev_device 
                                     const char *filter, bool test) {
         struct udev_device *d;
         char s[16];
-        bool last = false;
-        int r = 0;
+        int n = 0;
 
-        for (d = srcdev; d && !last; d = udev_device_get_parent(d)) {
+        for (d = srcdev; d; d = udev_device_get_parent(d)) {
                 const char *dsubsys;
                 const char *modalias = NULL;
 
@@ -99,24 +104,19 @@ static int udev_builtin_hwdb_search(struct udev_device *dev, struct udev_device 
 
                 modalias = udev_device_get_property_value(d, "MODALIAS");
 
-                if (streq(dsubsys, "usb") && streq_ptr(udev_device_get_devtype(d), "usb_device")) {
-                        /* if the usb_device does not have a modalias, compose one */
-                        if (!modalias)
-                                modalias = modalias_usb(d, s, sizeof(s));
-
-                        /* avoid looking at any parent device, they are usually just a USB hub */
-                        last = true;
-                }
+                /* the usb_device does not have a modalias, compose one */
+                if (!modalias && streq(dsubsys, "usb"))
+                        modalias = modalias_usb(d, s, sizeof(s));
 
                 if (!modalias)
                         continue;
 
-                r = udev_builtin_hwdb_lookup(dev, prefix, modalias, filter, test);
-                if (r > 0)
+                n = udev_builtin_hwdb_lookup(dev, prefix, modalias, filter, test);
+                if (n > 0)
                         break;
         }
 
-        return r;
+        return n;
 }
 
 static int builtin_hwdb(struct udev_device *dev, int argc, char *argv[], bool test) {
@@ -183,27 +183,26 @@ static int builtin_hwdb(struct udev_device *dev, int argc, char *argv[], bool te
 }
 
 /* called at udev startup and reload */
-static int builtin_hwdb_init(struct udev *udev) {
-        int r;
-
+static int builtin_hwdb_init(struct udev *udev)
+{
         if (hwdb)
                 return 0;
-
-        r = sd_hwdb_new(&hwdb);
-        if (r < 0)
-                return r;
-
+        hwdb = udev_hwdb_new(udev);
+        if (!hwdb)
+                return -ENOMEM;
         return 0;
 }
 
 /* called on udev shutdown and reload request */
-static void builtin_hwdb_exit(struct udev *udev) {
-        hwdb = sd_hwdb_unref(hwdb);
+static void builtin_hwdb_exit(struct udev *udev)
+{
+        hwdb = udev_hwdb_unref(hwdb);
 }
 
 /* called every couple of seconds during event activity; 'true' if config has changed */
-static bool builtin_hwdb_validate(struct udev *udev) {
-        return hwdb_validate(hwdb);
+static bool builtin_hwdb_validate(struct udev *udev)
+{
+        return udev_hwdb_validate(hwdb);
 }
 
 const struct udev_builtin udev_builtin_hwdb = {
@@ -212,5 +211,5 @@ const struct udev_builtin udev_builtin_hwdb = {
         .init = builtin_hwdb_init,
         .exit = builtin_hwdb_exit,
         .validate = builtin_hwdb_validate,
-        .help = "Hardware database",
+        .help = "hardware database",
 };

@@ -26,15 +26,14 @@
 #include <sys/statvfs.h>
 #include <fcntl.h>
 #include <stddef.h>
-#include <linux/fs.h>
+#include <sys/xattr.h>
 
-#include "btrfs-util.h"
 #include "journal-def.h"
 #include "journal-file.h"
 #include "journal-authenticate.h"
 #include "lookup3.h"
 #include "compress.h"
-#include "random-util.h"
+#include "fsprg.h"
 
 #define DEFAULT_DATA_HASH_TABLE_SIZE (2047ULL*sizeof(HashItem))
 #define DEFAULT_FIELD_HASH_TABLE_SIZE (333ULL*sizeof(HashItem))
@@ -69,12 +68,6 @@
 /* How much to increase the journal file size at once each time we allocate something new. */
 #define FILE_SIZE_INCREASE (8ULL*1024ULL*1024ULL)              /* 8MB */
 
-/* Reread fstat() of the file for detecting deletions at least this often */
-#define LAST_STAT_REFRESH_USEC (5*USEC_PER_SEC)
-
-/* The mmap context to use for the header we pick as one above the last defined typed */
-#define CONTEXT_HEADER _OBJECT_TYPE_MAX
-
 static int journal_file_set_online(JournalFile *f) {
         assert(f);
 
@@ -83,9 +76,6 @@ static int journal_file_set_online(JournalFile *f) {
 
         if (!(f->fd >= 0 && f->header))
                 return -EINVAL;
-
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
-                return -EIO;
 
         switch(f->header->state) {
                 case STATE_ONLINE:
@@ -115,13 +105,7 @@ int journal_file_set_offline(JournalFile *f) {
 
         fsync(f->fd);
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
-                return -EIO;
-
         f->header->state = STATE_OFFLINE;
-
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
-                return -EIO;
 
         fsync(f->fd);
 
@@ -137,22 +121,14 @@ void journal_file_close(JournalFile *f) {
                 journal_file_append_tag(f);
 #endif
 
-        journal_file_set_offline(f);
-
+        /* Sync everything to disk, before we mark the file offline */
         if (f->mmap && f->fd >= 0)
                 mmap_cache_close_fd(f->mmap, f->fd);
 
-        if (f->fd >= 0 && f->defrag_on_close) {
+        journal_file_set_offline(f);
 
-                /* Be friendly to btrfs: turn COW back on again now,
-                 * and defragment the file. We won't write to the file
-                 * ever again, hence remove all fragmentation, and
-                 * reenable all the good bits COW usually provides
-                 * (such as data checksumming). */
-
-                (void) chattr_fd(f->fd, 0, FS_NOCOW_FL);
-                (void) btrfs_defrag_fd(f->fd);
-        }
+        if (f->header)
+                munmap(f->header, PAGE_ALIGN(sizeof(Header)));
 
         safe_close(f->fd);
         free(f->path);
@@ -160,9 +136,9 @@ void journal_file_close(JournalFile *f) {
         if (f->mmap)
                 mmap_cache_unref(f->mmap);
 
-        ordered_hashmap_free_free(f->chain_cache);
+        hashmap_free_free(f->chain_cache);
 
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
+#ifdef HAVE_XZ
         free(f->compress_buffer);
 #endif
 
@@ -182,21 +158,21 @@ void journal_file_close(JournalFile *f) {
 }
 
 static int journal_file_init_header(JournalFile *f, JournalFile *template) {
-        Header h = {};
+        Header h;
         ssize_t k;
         int r;
 
         assert(f);
 
+        zero(h);
         memcpy(h.signature, HEADER_SIGNATURE, 8);
         h.header_size = htole64(ALIGN64(sizeof(h)));
 
-        h.incompatible_flags |= htole32(
-                f->compress_xz * HEADER_INCOMPATIBLE_COMPRESSED_XZ |
-                f->compress_lz4 * HEADER_INCOMPATIBLE_COMPRESSED_LZ4);
+        h.incompatible_flags =
+                htole32(f->compress ? HEADER_INCOMPATIBLE_COMPRESSED : 0);
 
-        h.compatible_flags = htole32(
-                f->seal * HEADER_COMPATIBLE_SEALED);
+        h.compatible_flags =
+                htole32(f->seal ? HEADER_COMPATIBLE_SEALED : 0);
 
         r = sd_id128_randomize(&h.file_id);
         if (r < 0)
@@ -219,8 +195,8 @@ static int journal_file_init_header(JournalFile *f, JournalFile *template) {
 }
 
 static int journal_file_refresh_header(JournalFile *f) {
-        sd_id128_t boot_id;
         int r;
+        sd_id128_t boot_id;
 
         assert(f);
 
@@ -237,17 +213,15 @@ static int journal_file_refresh_header(JournalFile *f) {
 
         f->header->boot_id = boot_id;
 
-        r = journal_file_set_online(f);
+        journal_file_set_online(f);
 
         /* Sync the online state to disk */
         fsync(f->fd);
 
-        return r;
+        return 0;
 }
 
 static int journal_file_verify_header(JournalFile *f) {
-        uint32_t flags;
-
         assert(f);
 
         if (memcmp(f->header->signature, HEADER_SIGNATURE, 8))
@@ -255,30 +229,24 @@ static int journal_file_verify_header(JournalFile *f) {
 
         /* In both read and write mode we refuse to open files with
          * incompatible flags we don't know */
-        flags = le32toh(f->header->incompatible_flags);
-        if (flags & ~HEADER_INCOMPATIBLE_SUPPORTED) {
-                if (flags & ~HEADER_INCOMPATIBLE_ANY)
-                        log_debug("Journal file %s has unknown incompatible flags %"PRIx32,
-                                  f->path, flags & ~HEADER_INCOMPATIBLE_ANY);
-                flags = (flags & HEADER_INCOMPATIBLE_ANY) & ~HEADER_INCOMPATIBLE_SUPPORTED;
-                if (flags)
-                        log_debug("Journal file %s uses incompatible flags %"PRIx32
-                                  " disabled at compilation time.", f->path, flags);
+#ifdef HAVE_XZ
+        if ((le32toh(f->header->incompatible_flags) & ~HEADER_INCOMPATIBLE_COMPRESSED) != 0)
                 return -EPROTONOSUPPORT;
-        }
+#else
+        if (f->header->incompatible_flags != 0)
+                return -EPROTONOSUPPORT;
+#endif
 
         /* When open for writing we refuse to open files with
          * compatible flags, too */
-        flags = le32toh(f->header->compatible_flags);
-        if (f->writable && (flags & ~HEADER_COMPATIBLE_SUPPORTED)) {
-                if (flags & ~HEADER_COMPATIBLE_ANY)
-                        log_debug("Journal file %s has unknown compatible flags %"PRIx32,
-                                  f->path, flags & ~HEADER_COMPATIBLE_ANY);
-                flags = (flags & HEADER_COMPATIBLE_ANY) & ~HEADER_COMPATIBLE_SUPPORTED;
-                if (flags)
-                        log_debug("Journal file %s uses compatible flags %"PRIx32
-                                  " disabled at compilation time.", f->path, flags);
-                return -EPROTONOSUPPORT;
+        if (f->writable) {
+#ifdef HAVE_GCRYPT
+                if ((le32toh(f->header->compatible_flags) & ~HEADER_COMPATIBLE_SEALED) != 0)
+                        return -EPROTONOSUPPORT;
+#else
+                if (f->header->compatible_flags != 0)
+                        return -EPROTONOSUPPORT;
+#endif
         }
 
         if (f->header->state >= _STATE_MAX)
@@ -303,6 +271,12 @@ static int journal_file_verify_header(JournalFile *f) {
             !VALID64(le64toh(f->header->entry_array_offset)))
                 return -ENODATA;
 
+        if (le64toh(f->header->data_hash_table_offset) < le64toh(f->header->header_size) ||
+            le64toh(f->header->field_hash_table_offset) < le64toh(f->header->header_size) ||
+            le64toh(f->header->tail_object_offset) < le64toh(f->header->header_size) ||
+            le64toh(f->header->entry_array_offset) < le64toh(f->header->header_size))
+                return -ENODATA;
+
         if (f->writable) {
                 uint8_t state;
                 sd_id128_t machine_id;
@@ -323,31 +297,14 @@ static int journal_file_verify_header(JournalFile *f) {
                 } else if (state == STATE_ARCHIVED)
                         return -ESHUTDOWN;
                 else if (state != STATE_OFFLINE) {
-                        log_debug("Journal file %s has unknown state %i.", f->path, state);
+                        log_debug("Journal file %s has unknown state %u.", f->path, state);
                         return -EBUSY;
                 }
         }
 
-        f->compress_xz = JOURNAL_HEADER_COMPRESSED_XZ(f->header);
-        f->compress_lz4 = JOURNAL_HEADER_COMPRESSED_LZ4(f->header);
+        f->compress = JOURNAL_HEADER_COMPRESSED(f->header);
 
         f->seal = JOURNAL_HEADER_SEALED(f->header);
-
-        return 0;
-}
-
-static int journal_file_fstat(JournalFile *f) {
-        assert(f);
-        assert(f->fd >= 0);
-
-        if (fstat(f->fd, &f->last_stat) < 0)
-                return -errno;
-
-        f->last_stat_usec = now(CLOCK_MONOTONIC);
-
-        /* Refuse appending to files that are already deleted */
-        if (f->last_stat.st_nlink <= 0)
-                return -EIDRM;
 
         return 0;
 }
@@ -362,9 +319,6 @@ static int journal_file_allocate(JournalFile *f, uint64_t offset, uint64_t size)
          * for sure, since we always call posix_fallocate()
          * ourselves */
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
-                return -EIO;
-
         old_size =
                 le64toh(f->header->header_size) +
                 le64toh(f->header->arena_size);
@@ -373,21 +327,8 @@ static int journal_file_allocate(JournalFile *f, uint64_t offset, uint64_t size)
         if (new_size < le64toh(f->header->header_size))
                 new_size = le64toh(f->header->header_size);
 
-        if (new_size <= old_size) {
-
-                /* We already pre-allocated enough space, but before
-                 * we write to it, let's check with fstat() if the
-                 * file got deleted, in order make sure we don't throw
-                 * away the data immediately. Don't check fstat() for
-                 * all writes though, but only once ever 10s. */
-
-                if (f->last_stat_usec + LAST_STAT_REFRESH_USEC > now(CLOCK_MONOTONIC))
-                        return 0;
-
-                return journal_file_fstat(f);
-        }
-
-        /* Allocate more space. */
+        if (new_size <= old_size)
+                return 0;
 
         if (f->metrics.max_size > 0 && new_size > f->metrics.max_size)
                 return -E2BIG;
@@ -422,21 +363,15 @@ static int journal_file_allocate(JournalFile *f, uint64_t offset, uint64_t size)
         if (r != 0)
                 return -r;
 
+        if (fstat(f->fd, &f->last_stat) < 0)
+                return -errno;
+
         f->header->arena_size = htole64(new_size - le64toh(f->header->header_size));
 
-        return journal_file_fstat(f);
+        return 0;
 }
 
-static unsigned type_to_context(ObjectType type) {
-        /* One context for each type, plus one catch-all for the rest */
-        assert_cc(_OBJECT_TYPE_MAX <= MMAP_CACHE_MAX_CONTEXTS);
-        assert_cc(CONTEXT_HEADER < MMAP_CACHE_MAX_CONTEXTS);
-        return type > OBJECT_UNUSED && type < _OBJECT_TYPE_MAX ? type : 0;
-}
-
-static int journal_file_move_to(JournalFile *f, ObjectType type, bool keep_always, uint64_t offset, uint64_t size, void **ret) {
-        int r;
-
+static int journal_file_move_to(JournalFile *f, int context, bool keep_always, uint64_t offset, uint64_t size, void **ret) {
         assert(f);
         assert(ret);
 
@@ -448,15 +383,12 @@ static int journal_file_move_to(JournalFile *f, ObjectType type, bool keep_alway
                 /* Hmm, out of range? Let's refresh the fstat() data
                  * first, before we trust that check. */
 
-                r = journal_file_fstat(f);
-                if (r < 0)
-                        return r;
-
-                if (offset + size > (uint64_t) f->last_stat.st_size)
+                if (fstat(f->fd, &f->last_stat) < 0 ||
+                    offset + size > (uint64_t) f->last_stat.st_size)
                         return -EADDRNOTAVAIL;
         }
 
-        return mmap_cache_get(f->mmap, f->fd, f->prot, type_to_context(type), keep_always, offset, size, &f->last_stat, ret);
+        return mmap_cache_get(f->mmap, f->fd, f->prot, context, keep_always, offset, size, &f->last_stat, ret);
 }
 
 static uint64_t minimum_header_size(Object *o) {
@@ -477,7 +409,7 @@ static uint64_t minimum_header_size(Object *o) {
         return table[o->object.type];
 }
 
-int journal_file_move_to_object(JournalFile *f, ObjectType type, uint64_t offset, Object **ret) {
+int journal_file_move_to_object(JournalFile *f, int type, uint64_t offset, Object **ret) {
         int r;
         void *t;
         Object *o;
@@ -490,7 +422,8 @@ int journal_file_move_to_object(JournalFile *f, ObjectType type, uint64_t offset
         if (!VALID64(offset))
                 return -EFAULT;
 
-        r = journal_file_move_to(f, type, false, offset, sizeof(ObjectHeader), &t);
+
+        r = journal_file_move_to(f, type_to_context(type), false, offset, sizeof(ObjectHeader), &t);
         if (r < 0)
                 return r;
 
@@ -506,11 +439,11 @@ int journal_file_move_to_object(JournalFile *f, ObjectType type, uint64_t offset
         if (s < minimum_header_size(o))
                 return -EBADMSG;
 
-        if (type > OBJECT_UNUSED && o->object.type != type)
+        if (type > 0 && o->object.type != type)
                 return -EBADMSG;
 
         if (s > sizeof(ObjectHeader)) {
-                r = journal_file_move_to(f, type, false, offset, s, &t);
+                r = journal_file_move_to(f, o->object.type, false, offset, s, &t);
                 if (r < 0)
                         return r;
 
@@ -547,14 +480,14 @@ static uint64_t journal_file_entry_seqnum(JournalFile *f, uint64_t *seqnum) {
         return r;
 }
 
-int journal_file_append_object(JournalFile *f, ObjectType type, uint64_t size, Object **ret, uint64_t *offset) {
+int journal_file_append_object(JournalFile *f, int type, uint64_t size, Object **ret, uint64_t *offset) {
         int r;
         uint64_t p;
         Object *tail, *o;
         void *t;
 
         assert(f);
-        assert(type > OBJECT_UNUSED && type < _OBJECT_TYPE_MAX);
+        assert(type > 0 && type < _OBJECT_TYPE_MAX);
         assert(size >= sizeof(ObjectHeader));
         assert(offset);
         assert(ret);
@@ -567,7 +500,7 @@ int journal_file_append_object(JournalFile *f, ObjectType type, uint64_t size, O
         if (p == 0)
                 p = le64toh(f->header->header_size);
         else {
-                r = journal_file_move_to_object(f, OBJECT_UNUSED, p, &tail);
+                r = journal_file_move_to_object(f, -1, p, &tail);
                 if (r < 0)
                         return r;
 
@@ -706,7 +639,7 @@ static int journal_file_link_field(
                 uint64_t offset,
                 uint64_t hash) {
 
-        uint64_t p, h, m;
+        uint64_t p, h;
         int r;
 
         assert(f);
@@ -716,14 +649,11 @@ static int journal_file_link_field(
         if (o->object.type != OBJECT_FIELD)
                 return -EINVAL;
 
-        m = le64toh(f->header->field_hash_table_size) / sizeof(HashItem);
-        if (m <= 0)
-                return -EBADMSG;
-
         /* This might alter the window we are looking at */
+
         o->field.next_hash_offset = o->field.head_data_offset = 0;
 
-        h = hash % m;
+        h = hash % (le64toh(f->header->field_hash_table_size) / sizeof(HashItem));
         p = le64toh(f->field_hash_table[h].tail_hash_offset);
         if (p == 0)
                 f->field_hash_table[h].head_hash_offset = htole64(offset);
@@ -749,7 +679,7 @@ static int journal_file_link_data(
                 uint64_t offset,
                 uint64_t hash) {
 
-        uint64_t p, h, m;
+        uint64_t p, h;
         int r;
 
         assert(f);
@@ -759,16 +689,13 @@ static int journal_file_link_data(
         if (o->object.type != OBJECT_DATA)
                 return -EINVAL;
 
-        m = le64toh(f->header->data_hash_table_size) / sizeof(HashItem);
-        if (m <= 0)
-                return -EBADMSG;
-
         /* This might alter the window we are looking at */
+
         o->data.next_hash_offset = o->data.next_field_offset = 0;
         o->data.entry_offset = o->data.entry_array_offset = 0;
         o->data.n_entries = 0;
 
-        h = hash % m;
+        h = hash % (le64toh(f->header->data_hash_table_size) / sizeof(HashItem));
         p = le64toh(f->data_hash_table[h].tail_hash_offset);
         if (p == 0)
                 /* Only entry in the hash table is easy */
@@ -797,7 +724,7 @@ int journal_file_find_field_object_with_hash(
                 const void *field, uint64_t size, uint64_t hash,
                 Object **ret, uint64_t *offset) {
 
-        uint64_t p, osize, h, m;
+        uint64_t p, osize, h;
         int r;
 
         assert(f);
@@ -805,12 +732,10 @@ int journal_file_find_field_object_with_hash(
 
         osize = offsetof(Object, field.payload) + size;
 
-        m = le64toh(f->header->field_hash_table_size) / sizeof(HashItem);
-
-        if (m <= 0)
+        if (f->header->field_hash_table_size == 0)
                 return -EBADMSG;
 
-        h = hash % m;
+        h = hash % (le64toh(f->header->field_hash_table_size) / sizeof(HashItem));
         p = le64toh(f->field_hash_table[h].head_hash_offset);
 
         while (p > 0) {
@@ -860,7 +785,7 @@ int journal_file_find_data_object_with_hash(
                 const void *data, uint64_t size, uint64_t hash,
                 Object **ret, uint64_t *offset) {
 
-        uint64_t p, osize, h, m;
+        uint64_t p, osize, h;
         int r;
 
         assert(f);
@@ -868,11 +793,10 @@ int journal_file_find_data_object_with_hash(
 
         osize = offsetof(Object, data.payload) + size;
 
-        m = le64toh(f->header->data_hash_table_size) / sizeof(HashItem);
-        if (m <= 0)
+        if (f->header->data_hash_table_size == 0)
                 return -EBADMSG;
 
-        h = hash % m;
+        h = hash % (le64toh(f->header->data_hash_table_size) / sizeof(HashItem));
         p = le64toh(f->data_hash_table[h].head_hash_offset);
 
         while (p > 0) {
@@ -885,10 +809,9 @@ int journal_file_find_data_object_with_hash(
                 if (le64toh(o->data.hash) != hash)
                         goto next;
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK) {
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
-                        uint64_t l;
-                        size_t rsize = 0;
+                if (o->object.flags & OBJECT_COMPRESSED) {
+#ifdef HAVE_XZ
+                        uint64_t l, rsize;
 
                         l = le64toh(o->object.size);
                         if (l <= offsetof(Object, data.payload))
@@ -896,10 +819,8 @@ int journal_file_find_data_object_with_hash(
 
                         l -= offsetof(Object, data.payload);
 
-                        r = decompress_blob(o->object.flags & OBJECT_COMPRESSION_MASK,
-                                            o->data.payload, l, &f->compress_buffer, &f->compress_buffer_size, &rsize, 0);
-                        if (r < 0)
-                                return r;
+                        if (!uncompress_blob(o->data.payload, l, &f->compress_buffer, &f->compress_buffer_size, &rsize, 0))
+                                return -EBADMSG;
 
                         if (rsize == size &&
                             memcmp(f->compress_buffer, data, size) == 0) {
@@ -915,6 +836,7 @@ int journal_file_find_data_object_with_hash(
 #else
                         return -EPROTONOSUPPORT;
 #endif
+
                 } else if (le64toh(o->object.size) == osize &&
                            memcmp(o->data.payload, data, size) == 0) {
 
@@ -1021,7 +943,8 @@ static int journal_file_append_data(
         uint64_t hash, p;
         uint64_t osize;
         Object *o;
-        int r, compression = 0;
+        int r;
+        bool compressed = false;
         const void *eq;
 
         assert(f);
@@ -1050,24 +973,23 @@ static int journal_file_append_data(
 
         o->data.hash = htole64(hash);
 
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
-        if (f->compress_xz &&
+#ifdef HAVE_XZ
+        if (f->compress &&
             size >= COMPRESSION_SIZE_THRESHOLD) {
-                size_t rsize = 0;
+                uint64_t rsize;
 
-                compression = compress_blob(data, size, o->data.payload, &rsize);
+                compressed = compress_blob(data, size, o->data.payload, &rsize);
 
-                if (compression) {
+                if (compressed) {
                         o->object.size = htole64(offsetof(Object, data.payload) + rsize);
-                        o->object.flags |= compression;
+                        o->object.flags |= OBJECT_COMPRESSED;
 
-                        log_debug("Compressed data object %"PRIu64" -> %zu using %s",
-                                  size, rsize, object_compressed_to_string(compression));
+                        log_debug("Compressed data object %"PRIu64" -> %"PRIu64, size, rsize);
                 }
         }
 #endif
 
-        if (!compression && size > 0)
+        if (!compressed && size > 0)
                 memcpy(o->data.payload, data, size);
 
         r = journal_file_link_data(f, o, p, hash);
@@ -1366,7 +1288,7 @@ void journal_file_post_change(JournalFile *f) {
         __sync_synchronize();
 
         if (ftruncate(f->fd, f->last_stat.st_size) < 0)
-                log_error_errno(errno, "Failed to truncate file to its own size: %m");
+                log_error("Failed to truncate file to its own size: %m");
 }
 
 static int entry_item_cmp(const void *_a, const void *_b) {
@@ -1426,14 +1348,6 @@ int journal_file_append_entry(JournalFile *f, const dual_timestamp *ts, const st
 
         r = journal_file_append_entry_internal(f, ts, xor_hash, items, n_iovec, seqnum, ret, offset);
 
-        /* If the memory mapping triggered a SIGBUS then we return an
-         * IO error and ignore the error code passed down to us, since
-         * it is very likely just an effect of a nullified replacement
-         * mapping page */
-
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
-                r = -EIO;
-
         journal_file_post_change(f);
 
         return r;
@@ -1448,7 +1362,7 @@ typedef struct ChainCacheItem {
 } ChainCacheItem;
 
 static void chain_cache_put(
-                OrderedHashmap *h,
+                Hashmap *h,
                 ChainCacheItem *ci,
                 uint64_t first,
                 uint64_t array,
@@ -1462,10 +1376,9 @@ static void chain_cache_put(
                 if (array == first)
                         return;
 
-                if (ordered_hashmap_size(h) >= CHAIN_CACHE_MAX) {
-                        ci = ordered_hashmap_steal_first(h);
-                        assert(ci);
-                } else {
+                if (hashmap_size(h) >= CHAIN_CACHE_MAX)
+                        ci = hashmap_steal_first(h);
+                else {
                         ci = new(ChainCacheItem, 1);
                         if (!ci)
                                 return;
@@ -1473,7 +1386,7 @@ static void chain_cache_put(
 
                 ci->first = first;
 
-                if (ordered_hashmap_put(h, &ci->first, ci) < 0) {
+                if (hashmap_put(h, &ci->first, ci) < 0) {
                         free(ci);
                         return;
                 }
@@ -1502,7 +1415,7 @@ static int generic_array_get(
         a = first;
 
         /* Try the chain cache first */
-        ci = ordered_hashmap_get(f->chain_cache, &first);
+        ci = hashmap_get(f->chain_cache, &first);
         if (ci && i > ci->total) {
                 a = ci->array;
                 i -= ci->total;
@@ -1605,7 +1518,7 @@ static int generic_array_bisect(
         /* Start with the first array in the chain */
         a = first;
 
-        ci = ordered_hashmap_get(f->chain_cache, &first);
+        ci = hashmap_get(f->chain_cache, &first);
         if (ci && n > ci->total) {
                 /* Ah, we have iterated this bisection array chain
                  * previously! Let's see if we can skip ahead in the
@@ -1739,7 +1652,7 @@ static int generic_array_bisect(
                         }
                 }
 
-                if (k >= n) {
+                if (k > n) {
                         if (direction == DIRECTION_UP) {
                                 i = n;
                                 subtract_one = true;
@@ -1788,6 +1701,7 @@ found:
 
         return 1;
 }
+
 
 static int generic_array_bisect_plus_one(
                 JournalFile *f,
@@ -1873,6 +1787,23 @@ _pure_ static int test_object_offset(JournalFile *f, uint64_t p, uint64_t needle
         else
                 return TEST_RIGHT;
 }
+
+int journal_file_move_to_entry_by_offset(
+                JournalFile *f,
+                uint64_t p,
+                direction_t direction,
+                Object **ret,
+                uint64_t *offset) {
+
+        return generic_array_bisect(f,
+                                    le64toh(f->header->entry_array_offset),
+                                    le64toh(f->header->n_entries),
+                                    p,
+                                    test_object_offset,
+                                    direction,
+                                    ret, offset, NULL);
+}
+
 
 static int test_object_seqnum(JournalFile *f, uint64_t p, uint64_t needle) {
         Object *o;
@@ -1963,12 +1894,11 @@ static int test_object_monotonic(JournalFile *f, uint64_t p, uint64_t needle) {
                 return TEST_RIGHT;
 }
 
-static int find_data_object_by_boot_id(
+static inline int find_data_object_by_boot_id(
                 JournalFile *f,
                 sd_id128_t boot_id,
                 Object **o,
                 uint64_t *b) {
-
         char t[sizeof("_BOOT_ID=")-1 + 32 + 1] = "_BOOT_ID=";
 
         sd_id128_to_string(boot_id, t + 9);
@@ -2004,81 +1934,9 @@ int journal_file_move_to_entry_by_monotonic(
                                              ret, offset, NULL);
 }
 
-void journal_file_reset_location(JournalFile *f) {
-        f->location_type = LOCATION_HEAD;
-        f->current_offset = 0;
-        f->current_seqnum = 0;
-        f->current_realtime = 0;
-        f->current_monotonic = 0;
-        zero(f->current_boot_id);
-        f->current_xor_hash = 0;
-}
-
-void journal_file_save_location(JournalFile *f, Object *o, uint64_t offset) {
-        f->location_type = LOCATION_SEEK;
-        f->current_offset = offset;
-        f->current_seqnum = le64toh(o->entry.seqnum);
-        f->current_realtime = le64toh(o->entry.realtime);
-        f->current_monotonic = le64toh(o->entry.monotonic);
-        f->current_boot_id = o->entry.boot_id;
-        f->current_xor_hash = le64toh(o->entry.xor_hash);
-}
-
-int journal_file_compare_locations(JournalFile *af, JournalFile *bf) {
-        assert(af);
-        assert(bf);
-        assert(af->location_type == LOCATION_SEEK);
-        assert(bf->location_type == LOCATION_SEEK);
-
-        /* If contents and timestamps match, these entries are
-         * identical, even if the seqnum does not match */
-        if (sd_id128_equal(af->current_boot_id, bf->current_boot_id) &&
-            af->current_monotonic == bf->current_monotonic &&
-            af->current_realtime == bf->current_realtime &&
-            af->current_xor_hash == bf->current_xor_hash)
-                return 0;
-
-        if (sd_id128_equal(af->header->seqnum_id, bf->header->seqnum_id)) {
-
-                /* If this is from the same seqnum source, compare
-                 * seqnums */
-                if (af->current_seqnum < bf->current_seqnum)
-                        return -1;
-                if (af->current_seqnum > bf->current_seqnum)
-                        return 1;
-
-                /* Wow! This is weird, different data but the same
-                 * seqnums? Something is borked, but let's make the
-                 * best of it and compare by time. */
-        }
-
-        if (sd_id128_equal(af->current_boot_id, bf->current_boot_id)) {
-
-                /* If the boot id matches, compare monotonic time */
-                if (af->current_monotonic < bf->current_monotonic)
-                        return -1;
-                if (af->current_monotonic > bf->current_monotonic)
-                        return 1;
-        }
-
-        /* Otherwise, compare UTC time */
-        if (af->current_realtime < bf->current_realtime)
-                return -1;
-        if (af->current_realtime > bf->current_realtime)
-                return 1;
-
-        /* Finally, compare by contents */
-        if (af->current_xor_hash < bf->current_xor_hash)
-                return -1;
-        if (af->current_xor_hash > bf->current_xor_hash)
-                return 1;
-
-        return 0;
-}
-
 int journal_file_next_entry(
                 JournalFile *f,
-                uint64_t p,
+                Object *o, uint64_t p,
                 direction_t direction,
                 Object **ret, uint64_t *offset) {
 
@@ -2086,14 +1944,18 @@ int journal_file_next_entry(
         int r;
 
         assert(f);
+        assert(p > 0 || !o);
 
         n = le64toh(f->header->n_entries);
         if (n <= 0)
                 return 0;
 
-        if (p == 0)
+        if (!o)
                 i = direction == DIRECTION_DOWN ? 0 : n - 1;
         else {
+                if (o->object.type != OBJECT_ENTRY)
+                        return -EINVAL;
+
                 r = generic_array_bisect(f,
                                          le64toh(f->header->entry_array_offset),
                                          le64toh(f->header->n_entries),
@@ -2137,6 +1999,55 @@ int journal_file_next_entry(
                 *offset = ofs;
 
         return 1;
+}
+
+int journal_file_skip_entry(
+                JournalFile *f,
+                Object *o, uint64_t p,
+                int64_t skip,
+                Object **ret, uint64_t *offset) {
+
+        uint64_t i, n;
+        int r;
+
+        assert(f);
+        assert(o);
+        assert(p > 0);
+
+        if (o->object.type != OBJECT_ENTRY)
+                return -EINVAL;
+
+        r = generic_array_bisect(f,
+                                 le64toh(f->header->entry_array_offset),
+                                 le64toh(f->header->n_entries),
+                                 p,
+                                 test_object_offset,
+                                 DIRECTION_DOWN,
+                                 NULL, NULL,
+                                 &i);
+        if (r <= 0)
+                return r;
+
+        /* Calculate new index */
+        if (skip < 0) {
+                if ((uint64_t) -skip >= i)
+                        i = 0;
+                else
+                        i = i - (uint64_t) -skip;
+        } else
+                i  += (uint64_t) skip;
+
+        n = le64toh(f->header->n_entries);
+        if (n <= 0)
+                return -EBADMSG;
+
+        if (i >= n)
+                i = n-1;
+
+        return generic_array_get(f,
+                                 le64toh(f->header->entry_array_offset),
+                                 i,
+                                 ret, offset);
 }
 
 int journal_file_next_entry_for_data(
@@ -2373,7 +2284,7 @@ void journal_file_dump(JournalFile *f) {
 
         p = le64toh(f->header->header_size);
         while (p != 0) {
-                r = journal_file_move_to_object(f, OBJECT_UNUSED, p, &o);
+                r = journal_file_move_to_object(f, -1, p, &o);
                 if (r < 0)
                         goto fail;
 
@@ -2417,13 +2328,12 @@ void journal_file_dump(JournalFile *f) {
                         break;
 
                 default:
-                        printf("Type: unknown (%i)\n", o->object.type);
+                        printf("Type: unknown (%u)\n", o->object.type);
                         break;
                 }
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK)
-                        printf("Flags: %s\n",
-                               object_compressed_to_string(o->object.flags & OBJECT_COMPRESSION_MASK));
+                if (o->object.flags & OBJECT_COMPRESSED)
+                        printf("Flags: COMPRESSED\n");
 
                 if (p == le64toh(f->header->tail_object_offset))
                         p = 0;
@@ -2460,7 +2370,7 @@ void journal_file_print_header(JournalFile *f) {
                "Sequential Number ID: %s\n"
                "State: %s\n"
                "Compatible Flags:%s%s\n"
-               "Incompatible Flags:%s%s%s\n"
+               "Incompatible Flags:%s%s\n"
                "Header size: %"PRIu64"\n"
                "Arena size: %"PRIu64"\n"
                "Data Hash Table Size: %"PRIu64"\n"
@@ -2482,10 +2392,9 @@ void journal_file_print_header(JournalFile *f) {
                f->header->state == STATE_ONLINE ? "ONLINE" :
                f->header->state == STATE_ARCHIVED ? "ARCHIVED" : "UNKNOWN",
                JOURNAL_HEADER_SEALED(f->header) ? " SEALED" : "",
-               (le32toh(f->header->compatible_flags) & ~HEADER_COMPATIBLE_ANY) ? " ???" : "",
-               JOURNAL_HEADER_COMPRESSED_XZ(f->header) ? " COMPRESSED-XZ" : "",
-               JOURNAL_HEADER_COMPRESSED_LZ4(f->header) ? " COMPRESSED-LZ4" : "",
-               (le32toh(f->header->incompatible_flags) & ~HEADER_INCOMPATIBLE_ANY) ? " ???" : "",
+               (le32toh(f->header->compatible_flags) & ~HEADER_COMPATIBLE_SEALED) ? " ???" : "",
+               JOURNAL_HEADER_COMPRESSED(f->header) ? " COMPRESSED" : "",
+               (le32toh(f->header->incompatible_flags) & ~HEADER_INCOMPATIBLE_COMPRESSED) ? " ???" : "",
                le64toh(f->header->header_size),
                le64toh(f->header->arena_size),
                le64toh(f->header->data_hash_table_size) / sizeof(HashItem),
@@ -2522,41 +2431,6 @@ void journal_file_print_header(JournalFile *f) {
                 printf("Disk usage: %s\n", format_bytes(bytes, sizeof(bytes), (off_t) st.st_blocks * 512ULL));
 }
 
-static int journal_file_warn_btrfs(JournalFile *f) {
-        unsigned attrs;
-        int r;
-
-        assert(f);
-
-        /* Before we write anything, check if the COW logic is turned
-         * off on btrfs. Given our write pattern that is quite
-         * unfriendly to COW file systems this should greatly improve
-         * performance on COW file systems, such as btrfs, at the
-         * expense of data integrity features (which shouldn't be too
-         * bad, given that we do our own checksumming). */
-
-        r = btrfs_is_filesystem(f->fd);
-        if (r < 0)
-                return log_warning_errno(r, "Failed to determine if journal is on btrfs: %m");
-        if (!r)
-                return 0;
-
-        r = read_attr_fd(f->fd, &attrs);
-        if (r < 0)
-                return log_warning_errno(r, "Failed to read file attributes: %m");
-
-        if (attrs & FS_NOCOW_FL) {
-                log_debug("Detected btrfs file system with copy-on-write disabled, all is good.");
-                return 0;
-        }
-
-        log_notice("Creating journal file %s on a btrfs file system, and copy-on-write is enabled. "
-                   "This is likely to slow down journal access substantially, please consider turning "
-                   "off the copy-on-write file attribute on the journal directory, using chattr +C.", f->path);
-
-        return 1;
-}
-
 int journal_file_open(
                 const char *fname,
                 int flags,
@@ -2568,10 +2442,9 @@ int journal_file_open(
                 JournalFile *template,
                 JournalFile **ret) {
 
-        bool newly_created = false;
         JournalFile *f;
-        void *h;
         int r;
+        bool newly_created = false;
 
         assert(fname);
         assert(ret);
@@ -2594,10 +2467,8 @@ int journal_file_open(
         f->flags = flags;
         f->prot = prot_from_flags(flags);
         f->writable = (flags & O_ACCMODE) != O_RDONLY;
-#if defined(HAVE_LZ4)
-        f->compress_lz4 = compress;
-#elif defined(HAVE_XZ)
-        f->compress_xz = compress;
+#ifdef HAVE_XZ
+        f->compress = compress;
 #endif
 #ifdef HAVE_GCRYPT
         f->seal = seal;
@@ -2619,7 +2490,7 @@ int journal_file_open(
                 goto fail;
         }
 
-        f->chain_cache = ordered_hashmap_new(&uint64_hash_ops);
+        f->chain_cache = hashmap_new(uint64_hash_func, uint64_compare_func);
         if (!f->chain_cache) {
                 r = -ENOMEM;
                 goto fail;
@@ -2631,13 +2502,13 @@ int journal_file_open(
                 goto fail;
         }
 
-        r = journal_file_fstat(f);
-        if (r < 0)
+        if (fstat(f->fd, &f->last_stat) < 0) {
+                r = -errno;
                 goto fail;
+        }
 
         if (f->last_stat.st_size == 0 && f->writable) {
-
-                (void) journal_file_warn_btrfs(f);
+                uint64_t crtime;
 
                 /* Let's attach the creation time to the journal file,
                  * so that the vacuuming code knows the age of this
@@ -2647,9 +2518,10 @@ int journal_file_open(
                  * currently no usable API to query this, hence let's
                  * emulate this via extended attributes. If extended
                  * attributes are not supported we'll just skip this,
-                 * and rely solely on mtime/atime/ctime of the file. */
+                 * and rely solely on mtime/atime/ctime of the file.*/
 
-                fd_setcrtime(f->fd, 0);
+                crtime = htole64((uint64_t) now(CLOCK_REALTIME));
+                fsetxattr(f->fd, "user.crtime_usec", &crtime, sizeof(crtime), XATTR_CREATE);
 
 #ifdef HAVE_GCRYPT
                 /* Try to load the FSPRG state, and if we can't, then
@@ -2665,9 +2537,10 @@ int journal_file_open(
                 if (r < 0)
                         goto fail;
 
-                r = journal_file_fstat(f);
-                if (r < 0)
+                if (fstat(f->fd, &f->last_stat) < 0) {
+                        r = -errno;
                         goto fail;
+                }
 
                 newly_created = true;
         }
@@ -2677,11 +2550,12 @@ int journal_file_open(
                 goto fail;
         }
 
-        r = mmap_cache_get(f->mmap, f->fd, f->prot, CONTEXT_HEADER, true, 0, PAGE_ALIGN(sizeof(Header)), &f->last_stat, &h);
-        if (r < 0)
+        f->header = mmap(NULL, PAGE_ALIGN(sizeof(Header)), prot_from_flags(flags), MAP_SHARED, f->fd, 0);
+        if (f->header == MAP_FAILED) {
+                f->header = NULL;
+                r = -errno;
                 goto fail;
-
-        f->header = h;
+        }
 
         if (!newly_created) {
                 r = journal_file_verify_header(f);
@@ -2739,18 +2613,10 @@ int journal_file_open(
         if (r < 0)
                 goto fail;
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd)) {
-                r = -EIO;
-                goto fail;
-        }
-
         *ret = f;
         return 0;
 
 fail:
-        if (f->fd >= 0 && mmap_cache_got_sigbus(f->mmap, f->fd))
-                r = -EIO;
-
         journal_file_close(f);
 
         return r;
@@ -2782,19 +2648,11 @@ int journal_file_rotate(JournalFile **f, bool compress, bool seal) {
         if (r < 0)
                 return -ENOMEM;
 
-        /* Try to rename the file to the archived version. If the file
-         * already was deleted, we'll get ENOENT, let's ignore that
-         * case. */
         r = rename(old_file->path, p);
-        if (r < 0 && errno != ENOENT)
+        if (r < 0)
                 return -errno;
 
         old_file->header->state = STATE_ARCHIVED;
-
-        /* Currently, btrfs is not very good with out write patterns
-         * and fragments heavily. Let's defrag our journal files when
-         * we archive them */
-        old_file->defrag_on_close = true;
 
         r = journal_file_open(old_file->path, old_file->flags, old_file->mode, compress, seal, NULL, old_file->mmap, old_file, &new_file);
         journal_file_close(old_file);
@@ -2820,15 +2678,12 @@ int journal_file_open_reliably(
 
         r = journal_file_open(fname, flags, mode, compress, seal,
                               metrics, mmap_cache, template, ret);
-        if (!IN_SET(r,
-                    -EBADMSG,           /* corrupted */
-                    -ENODATA,           /* truncated */
-                    -EHOSTDOWN,         /* other machine */
-                    -EPROTONOSUPPORT,   /* incompatible feature */
-                    -EBUSY,             /* unclean shutdown */
-                    -ESHUTDOWN,         /* already archived */
-                    -EIO,               /* IO error, including SIGBUS on mmap */
-                    -EIDRM              /* File has been deleted */))
+        if (r != -EBADMSG && /* corrupted */
+            r != -ENODATA && /* truncated */
+            r != -EHOSTDOWN && /* other machine */
+            r != -EPROTONOSUPPORT && /* incompatible feature */
+            r != -EBUSY && /* unclean shutdown */
+            r != -ESHUTDOWN /* already archived */)
                 return r;
 
         if ((flags & O_ACCMODE) == O_RDONLY)
@@ -2843,21 +2698,15 @@ int journal_file_open_reliably(
         /* The file is corrupted. Rotate it away and try it again (but only once) */
 
         l = strlen(fname);
-        if (asprintf(&p, "%.*s@%016"PRIx64 "-%016"PRIx64 ".journal~",
+        if (asprintf(&p, "%.*s@%016llx-%016" PRIx64 ".journal~",
                      (int) l - 8, fname,
-                     now(CLOCK_REALTIME),
+                     (unsigned long long) now(CLOCK_REALTIME),
                      random_u64()) < 0)
                 return -ENOMEM;
 
         r = rename(fname, p);
         if (r < 0)
                 return -errno;
-
-        /* btrfs doesn't cope well with our write pattern and
-         * fragments heavily. Let's defrag all files we rotate */
-
-        (void) chattr_path(p, false, FS_NOCOW_FL);
-        (void) btrfs_defrag(p);
 
         log_warning("File %s corrupted or uncleanly shut down, renaming and replacing.", fname);
 
@@ -2911,14 +2760,12 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                 if ((uint64_t) t != l)
                         return -E2BIG;
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK) {
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
-                        size_t rsize = 0;
+                if (o->object.flags & OBJECT_COMPRESSED) {
+#ifdef HAVE_XZ
+                        uint64_t rsize;
 
-                        r = decompress_blob(o->object.flags & OBJECT_COMPRESSION_MASK,
-                                            o->data.payload, l, &from->compress_buffer, &from->compress_buffer_size, &rsize, 0);
-                        if (r < 0)
-                                return r;
+                        if (!uncompress_blob(o->data.payload, l, &from->compress_buffer, &from->compress_buffer_size, &rsize, 0))
+                                return -EBADMSG;
 
                         data = from->compress_buffer;
                         l = rsize;
@@ -2941,12 +2788,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                         return r;
         }
 
-        r = journal_file_append_entry_internal(to, &ts, xor_hash, items, n, seqnum, ret, offset);
-
-        if (mmap_cache_got_sigbus(to->mmap, to->fd))
-                return -EIO;
-
-        return r;
+        return journal_file_append_entry_internal(to, &ts, xor_hash, items, n, seqnum, ret, offset);
 }
 
 void journal_default_metrics(JournalMetrics *m, int fd) {

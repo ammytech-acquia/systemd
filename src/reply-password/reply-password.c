@@ -20,9 +20,17 @@
 ***/
 
 #include <sys/socket.h>
+#include <sys/poll.h>
+#include <sys/types.h>
+#include <assert.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/un.h>
+#include <sys/stat.h>
+#include <sys/signalfd.h>
+#include <getopt.h>
 #include <stddef.h>
 
 #include "log.h"
@@ -43,8 +51,10 @@ static int send_on_socket(int fd, const char *socket_name, const void *packet, s
 
         strncpy(sa.un.sun_path, socket_name, sizeof(sa.un.sun_path));
 
-        if (sendto(fd, packet, size, MSG_NOSIGNAL, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(socket_name)) < 0)
-                return log_error_errno(errno, "Failed to send: %m");
+        if (sendto(fd, packet, size, MSG_NOSIGNAL, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(socket_name)) < 0) {
+                log_error("Failed to send: %m");
+                return -1;
+        }
 
         return 0;
 }
@@ -67,7 +77,7 @@ int main(int argc, char *argv[]) {
 
                 packet[0] = '+';
                 if (!fgets(packet+1, sizeof(packet)-1, stdin)) {
-                        log_error_errno(errno, "Failed to read password: %m");
+                        log_error("Failed to read password: %m");
                         goto finish;
                 }
 
@@ -83,7 +93,7 @@ int main(int argc, char *argv[]) {
 
         fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
         if (fd < 0) {
-                log_error_errno(errno, "socket() failed: %m");
+                log_error("socket() failed: %m");
                 goto finish;
         }
 

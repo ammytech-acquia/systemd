@@ -19,14 +19,20 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
+#include <string.h>
+#include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #include "macro.h"
 #include "audit.h"
 #include "util.h"
-#include "process-util.h"
+#include "log.h"
 #include "fileio.h"
+#include "virt.h"
 
 int audit_session_from_pid(pid_t pid, uint32_t *id) {
         _cleanup_free_ char *s = NULL;
@@ -46,7 +52,7 @@ int audit_session_from_pid(pid_t pid, uint32_t *id) {
         if (r < 0)
                 return r;
 
-        if (u == AUDIT_SESSION_INVALID || u <= 0)
+        if (u == (uint32_t) -1 || u <= 0)
                 return -ENXIO;
 
         *id = u;
@@ -73,22 +79,4 @@ int audit_loginuid_from_pid(pid_t pid, uid_t *uid) {
 
         *uid = (uid_t) u;
         return 0;
-}
-
-bool use_audit(void) {
-        static int cached_use = -1;
-
-        if (cached_use < 0) {
-                int fd;
-
-                fd = socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK, NETLINK_AUDIT);
-                if (fd < 0)
-                        cached_use = errno != EAFNOSUPPORT && errno != EPROTONOSUPPORT;
-                else {
-                        cached_use = true;
-                        safe_close(fd);
-                }
-        }
-
-        return cached_use;
 }

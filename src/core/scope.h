@@ -23,6 +23,7 @@
 
 typedef struct Scope Scope;
 
+#include "unit.h"
 #include "kill.h"
 
 typedef enum ScopeState {

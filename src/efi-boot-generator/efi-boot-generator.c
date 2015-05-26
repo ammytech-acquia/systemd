@@ -26,6 +26,7 @@
 #include "path-util.h"
 #include "util.h"
 #include "mkdir.h"
+#include "unit-name.h"
 #include "virt.h"
 #include "generator.h"
 #include "special.h"
@@ -68,14 +69,8 @@ int main(int argc, char *argv[]) {
                 return EXIT_SUCCESS;
         }
 
-        r = path_is_mount_point("/boot", true);
-        if (r > 0) {
-                log_debug("/boot is already a mount point, exiting.");
-                return EXIT_SUCCESS;
-        }
-        if (r == -ENOENT)
-                log_debug("/boot does not exist, continuing.");
-        else if (dir_is_empty("/boot") <= 0) {
+        if (path_is_mount_point("/boot", true) <= 0 &&
+            dir_is_empty("/boot") <= 0) {
                 log_debug("/boot already populated, exiting.");
                 return EXIT_SUCCESS;
         }
@@ -85,14 +80,14 @@ int main(int argc, char *argv[]) {
                 log_debug("EFI loader partition unknown, exiting.");
                 return EXIT_SUCCESS;
         } else if (r < 0) {
-                log_error_errno(r, "Failed to read ESP partition UUID: %m");
+                log_error("Failed to read ESP partition UUID: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/boot.mount");
+        name = strappenda(arg_dest, "/boot.mount");
         f = fopen(name, "wxe");
         if (!f) {
-                log_error_errno(errno, "Failed to create mount unit file %s: %m", name);
+                log_error("Failed to create mount unit file %s: %m", name);
                 return EXIT_FAILURE;
         }
 
@@ -123,17 +118,17 @@ int main(int argc, char *argv[]) {
                 "Options=umask=0077,noauto\n",
                 what);
 
-        r = fflush_and_check(f);
-        if (r < 0) {
-                log_error_errno(r, "Failed to write mount unit file: %m");
+        fflush(f);
+        if (ferror(f)) {
+                log_error("Failed to write mount unit file: %m");
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/boot.automount");
+        name = strappenda(arg_dest, "/boot.automount");
         fclose(f);
         f = fopen(name, "wxe");
         if (!f) {
-                log_error_errno(errno, "Failed to create automount unit file %s: %m", name);
+                log_error("Failed to create automount unit file %s: %m", name);
                 return EXIT_FAILURE;
         }
 
@@ -141,20 +136,19 @@ int main(int argc, char *argv[]) {
               "[Unit]\n"
               "Description=EFI System Partition Automount\n\n"
               "[Automount]\n"
-              "Where=/boot\n"
-              "TimeoutIdleSec=120\n", f);
+              "Where=/boot\n", f);
 
-        r = fflush_and_check(f);
-        if (r < 0) {
-                log_error_errno(r, "Failed to write automount unit file: %m");
+        fflush(f);
+        if (ferror(f)) {
+                log_error("Failed to write automount unit file: %m");
                 return EXIT_FAILURE;
         }
 
-        name = strjoina(arg_dest, "/" SPECIAL_LOCAL_FS_TARGET ".wants/boot.automount");
+        name = strappenda(arg_dest, "/" SPECIAL_LOCAL_FS_TARGET ".wants/boot.automount");
         mkdir_parents(name, 0755);
 
         if (symlink("../boot.automount", name) < 0) {
-                log_error_errno(errno, "Failed to create symlink %s: %m", name);
+                log_error("Failed to create symlink %s: %m", name);
                 return EXIT_FAILURE;
         }
 

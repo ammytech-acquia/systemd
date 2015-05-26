@@ -61,26 +61,18 @@
         "/usr/lib/kbd/keymaps/\0"
 #endif
 
-#define UNIX_SYSTEM_BUS_ADDRESS "unix:path=/var/run/dbus/system_bus_socket"
-#define KERNEL_SYSTEM_BUS_ADDRESS "kernel:path=/sys/fs/kdbus/0-system/bus"
+#define UNIX_SYSTEM_BUS_PATH "unix:path=/var/run/dbus/system_bus_socket"
+#define KERNEL_SYSTEM_BUS_PATH "kernel:path=/dev/kdbus/0-system/bus"
 
 #ifdef ENABLE_KDBUS
-#  define DEFAULT_SYSTEM_BUS_ADDRESS KERNEL_SYSTEM_BUS_ADDRESS ";" UNIX_SYSTEM_BUS_ADDRESS
+#  define DEFAULT_SYSTEM_BUS_PATH KERNEL_SYSTEM_BUS_PATH ";" UNIX_SYSTEM_BUS_PATH
 #else
-#  define DEFAULT_SYSTEM_BUS_ADDRESS UNIX_SYSTEM_BUS_ADDRESS
+#  define DEFAULT_SYSTEM_BUS_PATH UNIX_SYSTEM_BUS_PATH
 #endif
 
-#define UNIX_USER_BUS_ADDRESS_FMT "unix:path=%s/bus"
-#define KERNEL_USER_BUS_ADDRESS_FMT "kernel:path=/sys/fs/kdbus/"UID_FMT"-user/bus"
-
-#define PLYMOUTH_SOCKET {                                       \
-                .un.sun_family = AF_UNIX,                       \
-                .un.sun_path = "\0/org/freedesktop/plymouthd",  \
-        }
+#define UNIX_USER_BUS_FMT "unix:path=%s/bus"
+#define KERNEL_USER_BUS_FMT "kernel:path=/dev/kdbus/"UID_FMT"-user/bus"
 
 #ifndef TTY_GID
 #define TTY_GID 5
 #endif
-
-#define NOTIFY_FD_MAX 768
-#define NOTIFY_BUFFER_MAX PIPE_BUF

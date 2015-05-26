@@ -42,8 +42,6 @@
 /* Special boot targets */
 #define SPECIAL_RESCUE_TARGET "rescue.target"
 #define SPECIAL_EMERGENCY_TARGET "emergency.target"
-#define SPECIAL_MULTI_USER_TARGET "multi-user.target"
-#define SPECIAL_GRAPHICAL_TARGET "graphical.target"
 
 /* Early boot targets */
 #define SPECIAL_SYSINIT_TARGET "sysinit.target"
@@ -59,13 +57,13 @@
 #define SPECIAL_REMOTE_FS_PRE_TARGET "remote-fs-pre.target"
 #define SPECIAL_SWAP_TARGET "swap.target"
 #define SPECIAL_NETWORK_ONLINE_TARGET "network-online.target"
-#define SPECIAL_TIME_SYNC_TARGET "time-sync.target"       /* LSB's $time */
 #define SPECIAL_BASIC_TARGET "basic.target"
 
 /* LSB compatibility */
 #define SPECIAL_NETWORK_TARGET "network.target"           /* LSB's $network */
 #define SPECIAL_NSS_LOOKUP_TARGET "nss-lookup.target"     /* LSB's $named */
 #define SPECIAL_RPCBIND_TARGET "rpcbind.target"           /* LSB's $portmap */
+#define SPECIAL_TIME_SYNC_TARGET "time-sync.target"       /* LSB's $time */
 
 /*
  * Rules regarding adding further high level targets like the above:
@@ -109,6 +107,13 @@
 #define SPECIAL_KBREQUEST_TARGET "kbrequest.target"
 #define SPECIAL_SIGPWR_TARGET "sigpwr.target"
 #define SPECIAL_CTRL_ALT_DEL_TARGET "ctrl-alt-del.target"
+
+/* For SysV compatibility. Usually an alias for a saner target. On
+ * SysV-free systems this doesn't exist. */
+#define SPECIAL_RUNLEVEL2_TARGET "runlevel2.target"
+#define SPECIAL_RUNLEVEL3_TARGET "runlevel3.target"
+#define SPECIAL_RUNLEVEL4_TARGET "runlevel4.target"
+#define SPECIAL_RUNLEVEL5_TARGET "runlevel5.target"
 
 /* Where we add all our system units, users and machines by default */
 #define SPECIAL_SYSTEM_SLICE "system.slice"

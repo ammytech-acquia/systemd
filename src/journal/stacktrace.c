@@ -25,7 +25,6 @@
 #include "util.h"
 #include "macro.h"
 #include "stacktrace.h"
-#include "formats-util.h"
 
 #define FRAMES_MAX 64
 #define THREADS_MAX 64

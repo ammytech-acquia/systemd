@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <string.h>
 #include <getopt.h>
 
 #include "util.h"
@@ -35,15 +36,18 @@ static enum {
         ONLY_CONTAINER
 } arg_mode = ANY_VIRTUALIZATION;
 
-static void help(void) {
+static int help(void) {
+
         printf("%s [OPTIONS...]\n\n"
                "Detect execution in a virtualized environment.\n\n"
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
                "  -c --container        Only detect whether we are run in a container\n"
                "  -v --vm               Only detect whether we are run in a VM\n"
-               "  -q --quiet            Don't output anything, just set return value\n"
-               , program_invocation_short_name);
+               "  -q --quiet            Don't output anything, just set return value\n",
+               program_invocation_short_name);
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -66,13 +70,12 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hqcv", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hqcv", options, NULL)) >= 0) {
 
                 switch (c) {
 
                 case 'h':
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -97,10 +100,10 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
+        }
 
         if (optind < argc) {
-                log_error("%s takes no arguments.",
-                          program_invocation_short_name);
+                help();
                 return -EINVAL;
         }
 
@@ -130,7 +133,7 @@ int main(int argc, char *argv[]) {
 
                 v = detect_virtualization(&id);
                 if (v < 0) {
-                        log_error_errno(v, "Failed to check for virtualization: %m");
+                        log_error("Failed to check for virtualization: %s", strerror(-v));
                         return EXIT_FAILURE;
                 }
 
@@ -141,7 +144,7 @@ int main(int argc, char *argv[]) {
         case ONLY_CONTAINER:
                 r = detect_container(&id);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to check for container: %m");
+                        log_error("Failed to check for container: %s", strerror(-r));
                         return EXIT_FAILURE;
                 }
 
@@ -151,7 +154,7 @@ int main(int argc, char *argv[]) {
         case ONLY_VM:
                 r = detect_vm(&id);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to check for vm: %m");
+                        log_error("Failed to check for vm: %s", strerror(-r));
                         return EXIT_FAILURE;
                 }
 

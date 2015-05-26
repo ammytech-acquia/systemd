@@ -24,7 +24,6 @@
 #include <unistd.h>
 
 #include "util.h"
-#include "process-util.h"
 #include "virt.h"
 #include "fileio.h"
 
@@ -102,42 +101,6 @@ static int detect_vm_cpuid(const char **_id) {
         return 0;
 }
 
-static int detect_vm_devicetree(const char **_id) {
-#if defined(__arm__) || defined(__aarch64__) || defined(__powerpc__) || defined(__powerpc64__)
-        _cleanup_free_ char *hvtype = NULL;
-        int r;
-
-        r = read_one_line_file("/proc/device-tree/hypervisor/compatible", &hvtype);
-        if (r >= 0) {
-                if (streq(hvtype, "linux,kvm")) {
-                        *_id = "kvm";
-                        return 1;
-                } else if (strstr(hvtype, "xen")) {
-                        *_id = "xen";
-                        return 1;
-                }
-        } else if (r == -ENOENT) {
-                _cleanup_closedir_ DIR *dir = NULL;
-                struct dirent *dent;
-
-                dir = opendir("/proc/device-tree");
-                if (!dir) {
-                        if (errno == ENOENT)
-                                return 0;
-                        return -errno;
-                }
-
-                FOREACH_DIRENT(dent, dir, return -errno) {
-                        if (strstr(dent->d_name, "fw-cfg")) {
-                                *_id = "qemu";
-                                return 1;
-                        }
-                }
-        }
-#endif
-        return 0;
-}
-
 static int detect_vm_dmi(const char **_id) {
 
         /* Both CPUID and DMI are x86 specific interfaces... */
@@ -210,7 +173,7 @@ int detect_vm(const char **id) {
                         if (streq(cap, "control_d"))
                                 break;
 
-                if (!cap)  {
+                if (!i)  {
                         _id = "xen";
                         r = 1;
                 }
@@ -241,10 +204,6 @@ int detect_vm(const char **id) {
         if (r != 0)
                 goto finish;
 
-        r = detect_vm_devicetree(&_id);
-        if (r != 0)
-                goto finish;
-
         if (_id) {
                 /* "other" */
                 r = 1;
@@ -260,23 +219,6 @@ int detect_vm(const char **id) {
                 r = 1;
                 goto finish;
         }
-
-#if defined(__s390__)
-        {
-                _cleanup_free_ char *t = NULL;
-
-                r = get_status_field("/proc/sysinfo", "VM00 Control Program:", &t);
-                if (r >= 0) {
-                        if (streq(t, "z/VM"))
-                                _id = "zvm";
-                        else
-                                _id = "kvm";
-                        r = 1;
-
-                        goto finish;
-                }
-        }
-#endif
 
         r = 0;
 
@@ -334,26 +276,8 @@ int detect_container(const char **id) {
 
                 r = read_one_line_file("/run/systemd/container", &m);
                 if (r == -ENOENT) {
-
-                        /* Fallback for cases where PID 1 was not
-                         * systemd (for example, cases where
-                         * init=/bin/sh is used. */
-
-                        r = getenv_for_pid(1, "container", &m);
-                        if (r <= 0) {
-
-                                /* If that didn't work, give up,
-                                 * assume no container manager.
-                                 *
-                                 * Note: This means we still cannot
-                                 * detect containers if init=/bin/sh
-                                 * is passed but privileges dropped,
-                                 * as /proc/1/environ is only readable
-                                 * with privileges. */
-
-                                r = 0;
-                                goto finish;
-                        }
+                        r = 0;
+                        goto finish;
                 }
                 if (r < 0)
                         return r;
@@ -369,8 +293,6 @@ int detect_container(const char **id) {
                 _id = "lxc-libvirt";
         else if (streq(e, "systemd-nspawn"))
                 _id = "systemd-nspawn";
-        else if (streq(e, "docker"))
-                _id = "docker";
         else
                 _id = "other";
 

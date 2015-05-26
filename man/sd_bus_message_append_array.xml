@@ -1,24 +1,24 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-  This file is part of systemd.
+This file is part of systemd.
 
-  Copyright 2014 Zbigniew Jędrzejewski-Szmek
+Copyright 2014 Zbigniew Jędrzejewski-Szmek
 
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
+systemd is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
 
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
+systemd is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Lesser General Public License for more details.
 
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Lesser General Public License
+along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="sd_bus_message_append_array" conditional="ENABLE_KDBUS"
@@ -68,7 +68,7 @@
         <funcdef>int sd_bus_message_append_array_memfd</funcdef>
         <paramdef>sd_bus_message *<parameter>m</parameter></paramdef>
         <paramdef>char <parameter>type</parameter></paramdef>
-        <paramdef>int <parameter>memfd</parameter></paramdef>
+        <paramdef>sd_memfd *<parameter>memfd</parameter></paramdef>
       </funcprototype>
 
       <funcprototype>
@@ -104,7 +104,7 @@
     <ulink url="http://dbus.freedesktop.org/doc/dbus-specification.html#basic-types">Basic Types</ulink>
     section of the D-Bus specification, and listed in
     <citerefentry><refentrytitle>sd_bus_message_append_basic</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
-    Pointer <parameter>p</parameter> must point to an array of size
+    Pointer <parameter>p</parameter> must point to an array of of size
     <parameter>size</parameter> bytes containing items of the
     respective type. Size <parameter>size</parameter> must be a
     multiple of the size of the type <parameter>type</parameter>. As a
@@ -171,7 +171,7 @@
     <para><function>sd_bus_append_array()</function> and other
     functions described here are available as a shared library, which
     can be compiled and linked to with the
-    <constant>libsystemd</constant> <citerefentry project='die-net'><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    <constant>libsystemd</constant> <citerefentry><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
     file.</para>
   </refsect1>
 

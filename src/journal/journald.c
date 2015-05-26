@@ -19,18 +19,19 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <errno.h>
 #include <unistd.h>
 
-#include "systemd/sd-messages.h"
-#include "systemd/sd-daemon.h"
+#include <systemd/sd-journal.h>
+#include <systemd/sd-messages.h>
+#include <systemd/sd-daemon.h>
 
 #include "journal-authenticate.h"
 #include "journald-server.h"
 #include "journald-kmsg.h"
 #include "journald-syslog.h"
-
-#include "sigbus.h"
-#include "formats-util.h"
 
 int main(int argc, char *argv[]) {
         Server server;
@@ -48,8 +49,6 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
-        sigbus_install();
-
         r = server_init(&server);
         if (r < 0)
                 goto finish;
@@ -66,7 +65,7 @@ int main(int argc, char *argv[]) {
                   "STATUS=Processing requests...");
 
         for (;;) {
-                usec_t t = USEC_INFINITY, n;
+                usec_t t = (usec_t) -1, n;
 
                 r = sd_event_get_state(server.event);
                 if (r < 0)
@@ -105,7 +104,7 @@ int main(int argc, char *argv[]) {
 
                 r = sd_event_run(server.event, t);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to run event loop: %m");
+                        log_error("Failed to run event loop: %s", strerror(-r));
                         goto finish;
                 }
 
@@ -117,9 +116,7 @@ int main(int argc, char *argv[]) {
         server_driver_message(&server, SD_MESSAGE_JOURNAL_STOP, "Journal stopped");
 
 finish:
-        sd_notify(false,
-                  "STOPPING=1\n"
-                  "STATUS=Shutting down...");
+        sd_notify(false, "STATUS=Shutting down...");
 
         server_done(&server);
 

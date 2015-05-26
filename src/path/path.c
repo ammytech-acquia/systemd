@@ -21,8 +21,11 @@
 
 #include <stdio.h>
 #include <getopt.h>
+#include <error.h>
 #include <errno.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "sd-path.h"
 #include "build.h"
@@ -74,6 +77,18 @@ static const char* const path_table[_SD_PATH_MAX] = {
         [SD_PATH_SEARCH_CONFIGURATION] = "search-configuration",
 };
 
+static int help(void) {
+
+        printf("%s [OPTIONS...] [NAME...]\n\n"
+               "Show system and user paths.\n\n"
+               "  -h --help             Show this help\n"
+               "     --version          Show package version\n"
+               "     --suffix=SUFFIX    Suffix to append to paths\n",
+               program_invocation_short_name);
+
+        return 0;
+}
+
 static int list_homes(void) {
         uint64_t i = 0;
         int r = 0;
@@ -86,7 +101,7 @@ static int list_homes(void) {
                 if (q == -ENXIO)
                         continue;
                 if (q < 0) {
-                        log_error_errno(r, "Failed to query %s: %m", path_table[i]);
+                        log_error("Failed to query %s: %s", path_table[i], strerror(-r));
                         r = q;
                         continue;
                 }
@@ -106,8 +121,10 @@ static int print_home(const char *n) {
                         _cleanup_free_ char *p = NULL;
 
                         r = sd_path_home(i, arg_suffix, &p);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to query %s: %m", n);
+                        if (r < 0) {
+                                log_error("Failed to query %s: %s", n, strerror(-r));
+                                return r;
+                        }
 
                         printf("%s\n", p);
                         return 0;
@@ -115,16 +132,7 @@ static int print_home(const char *n) {
         }
 
         log_error("Path %s not known.", n);
-        return -EOPNOTSUPP;
-}
-
-static void help(void) {
-        printf("%s [OPTIONS...] [NAME...]\n\n"
-               "Show system and user paths.\n\n"
-               "  -h --help             Show this help\n"
-               "     --version          Show package version\n"
-               "     --suffix=SUFFIX    Suffix to append to paths\n",
-               program_invocation_short_name);
+        return -ENOTSUP;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -146,13 +154,12 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0) {
 
                 switch (c) {
 
                 case 'h':
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -169,6 +176,7 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
+        }
 
         return 1;
 }

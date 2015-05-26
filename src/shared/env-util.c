@@ -20,6 +20,7 @@
 ***/
 
 #include <limits.h>
+#include <sys/param.h>
 #include <unistd.h>
 
 #include "strv.h"
@@ -77,9 +78,7 @@ bool env_value_is_valid(const char *e) {
         if (!utf8_is_valid(e))
                 return false;
 
-        /* bash allows tabs in environment variables, and so should
-         * we */
-        if (string_has_cc(e, "\t"))
+        if (string_has_cc(e))
                 return false;
 
         /* POSIX says the overall size of the environment block cannot
@@ -413,7 +412,7 @@ char *strv_env_get(char **l, const char *name) {
         return strv_env_get_n(l, name, strlen(name));
 }
 
-char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const char *p, void *userdata), void *userdata) {
+char **strv_env_clean_log(char **e, const char *message) {
         char **p, **q;
         int k = 0;
 
@@ -422,8 +421,8 @@ char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const cha
                 bool duplicate = false;
 
                 if (!env_assignment_is_valid(*p)) {
-                        if (invalid_callback)
-                                invalid_callback(*p, userdata);
+                        if (message)
+                                log_error("Ignoring invalid environment '%s': %s", *p, message);
                         free(*p);
                         continue;
                 }
@@ -449,146 +448,6 @@ char **strv_env_clean_with_callback(char **e, void (*invalid_callback)(const cha
         return e;
 }
 
-char *replace_env(const char *format, char **env) {
-        enum {
-                WORD,
-                CURLY,
-                VARIABLE
-        } state = WORD;
-
-        const char *e, *word = format;
-        char *r = NULL, *k;
-
-        assert(format);
-
-        for (e = format; *e; e ++) {
-
-                switch (state) {
-
-                case WORD:
-                        if (*e == '$')
-                                state = CURLY;
-                        break;
-
-                case CURLY:
-                        if (*e == '{') {
-                                k = strnappend(r, word, e-word-1);
-                                if (!k)
-                                        goto fail;
-
-                                free(r);
-                                r = k;
-
-                                word = e-1;
-                                state = VARIABLE;
-
-                        } else if (*e == '$') {
-                                k = strnappend(r, word, e-word);
-                                if (!k)
-                                        goto fail;
-
-                                free(r);
-                                r = k;
-
-                                word = e+1;
-                                state = WORD;
-                        } else
-                                state = WORD;
-                        break;
-
-                case VARIABLE:
-                        if (*e == '}') {
-                                const char *t;
-
-                                t = strempty(strv_env_get_n(env, word+2, e-word-2));
-
-                                k = strappend(r, t);
-                                if (!k)
-                                        goto fail;
-
-                                free(r);
-                                r = k;
-
-                                word = e+1;
-                                state = WORD;
-                        }
-                        break;
-                }
-        }
-
-        k = strnappend(r, word, e-word);
-        if (!k)
-                goto fail;
-
-        free(r);
-        return k;
-
-fail:
-        free(r);
-        return NULL;
-}
-
-char **replace_env_argv(char **argv, char **env) {
-        char **ret, **i;
-        unsigned k = 0, l = 0;
-
-        l = strv_length(argv);
-
-        ret = new(char*, l+1);
-        if (!ret)
-                return NULL;
-
-        STRV_FOREACH(i, argv) {
-
-                /* If $FOO appears as single word, replace it by the split up variable */
-                if ((*i)[0] == '$' && (*i)[1] != '{') {
-                        char *e;
-                        char **w, **m = NULL;
-                        unsigned q;
-
-                        e = strv_env_get(env, *i+1);
-                        if (e) {
-                                int r;
-
-                                r = strv_split_quoted(&m, e, UNQUOTE_RELAX);
-                                if (r < 0) {
-                                        ret[k] = NULL;
-                                        strv_free(ret);
-                                        return NULL;
-                                }
-                        } else
-                                m = NULL;
-
-                        q = strv_length(m);
-                        l = l + q - 1;
-
-                        w = realloc(ret, sizeof(char*) * (l+1));
-                        if (!w) {
-                                ret[k] = NULL;
-                                strv_free(ret);
-                                strv_free(m);
-                                return NULL;
-                        }
-
-                        ret = w;
-                        if (m) {
-                                memcpy(ret + k, m, q * sizeof(char*));
-                                free(m);
-                        }
-
-                        k += q;
-                        continue;
-                }
-
-                /* If ${FOO} appears as part of a word, replace it by the variable as-is */
-                ret[k] = replace_env(*i, env);
-                if (!ret[k]) {
-                        strv_free(ret);
-                        return NULL;
-                }
-                k++;
-        }
-
-        ret[k] = NULL;
-        return ret;
+char **strv_env_clean(char **e) {
+        return strv_env_clean_log(e, NULL);
 }

@@ -19,18 +19,21 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/vt.h>
 #include <string.h>
 
+#include "sd-id128.h"
 #include "sd-messages.h"
 #include "logind-seat.h"
 #include "logind-acl.h"
 #include "util.h"
 #include "mkdir.h"
-#include "formats-util.h"
-#include "terminal-util.h"
+#include "path-util.h"
 
 Seat *seat_new(Manager *m, const char *id) {
         Seat *s;
@@ -151,7 +154,7 @@ int seat_save(Seat *s) {
 
 finish:
         if (r < 0)
-                log_error_errno(r, "Failed to save seat data %s: %m", s->state_file);
+                log_error("Failed to save seat data %s: %s", s->state_file, strerror(-r));
 
         return r;
 }
@@ -198,7 +201,7 @@ int seat_preallocate_vts(Seat *s) {
 
                 q = vt_allocate(i);
                 if (q < 0) {
-                        log_error_errno(q, "Failed to preallocate VT %u: %m", i);
+                        log_error("Failed to preallocate VT %i: %s", i, strerror(-q));
                         r = q;
                 }
         }
@@ -218,7 +221,7 @@ int seat_apply_acls(Seat *s, Session *old_active) {
                             !!s->active, s->active ? s->active->user->uid : 0);
 
         if (r < 0)
-                log_error_errno(r, "Failed to apply ACLs: %m");
+                log_error("Failed to apply ACLs: %s", strerror(-r));
 
         return r;
 }
@@ -272,13 +275,8 @@ int seat_switch_to(Seat *s, unsigned int num) {
         if (!num)
                 return -EINVAL;
 
-        if (num >= s->position_count || !s->positions[num]) {
-                /* allow switching to unused VTs to trigger auto-activate */
-                if (seat_has_vts(s) && num < 64)
-                        return chvt(num);
-
+        if (num >= s->position_count || !s->positions[num])
                 return -EINVAL;
-        }
 
         return session_activate(s->positions[num]);
 }
@@ -337,23 +335,11 @@ int seat_active_vt_changed(Seat *s, unsigned int vtnr) {
 
         log_debug("VT changed to %u", vtnr);
 
-        /* we might have earlier closing sessions on the same VT, so try to
-         * find a running one first */
         LIST_FOREACH(sessions_by_seat, i, s->sessions)
-                if (i->vtnr == vtnr && !i->stopping) {
+                if (i->vtnr == vtnr) {
                         new_active = i;
                         break;
                 }
-
-        if (!new_active) {
-                /* no running one? then we can't decide which one is the
-                 * active one, let the first one win */
-                LIST_FOREACH(sessions_by_seat, i, s->sessions)
-                        if (i->vtnr == vtnr) {
-                                new_active = i;
-                                break;
-                        }
-        }
 
         r = seat_set_active(s, new_active);
         manager_spawn_autovt(s->manager, vtnr);
@@ -409,9 +395,9 @@ int seat_start(Seat *s) {
                 return 0;
 
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_SEAT_START),
+                   MESSAGE_ID(SD_MESSAGE_SEAT_START),
                    "SEAT_ID=%s", s->id,
-                   LOG_MESSAGE("New seat %s.", s->id),
+                   "MESSAGE=New seat %s.", s->id,
                    NULL);
 
         /* Initialize VT magic stuff */
@@ -437,9 +423,9 @@ int seat_stop(Seat *s, bool force) {
 
         if (s->started)
                 log_struct(LOG_INFO,
-                           LOG_MESSAGE_ID(SD_MESSAGE_SEAT_STOP),
+                           MESSAGE_ID(SD_MESSAGE_SEAT_STOP),
                            "SEAT_ID=%s", s->id,
-                           LOG_MESSAGE("Removed seat %s.", s->id),
+                           "MESSAGE=Removed seat %s.", s->id,
                            NULL);
 
         seat_stop_sessions(s, force);

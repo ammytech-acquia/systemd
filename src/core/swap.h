@@ -26,6 +26,7 @@
 
 typedef struct Swap Swap;
 
+#include "unit.h"
 
 typedef enum SwapState {
         SWAP_DEAD,
@@ -62,8 +63,9 @@ typedef enum SwapResult {
 
 typedef struct SwapParameters {
         char *what;
-        char *options;
         int priority;
+        bool noauto:1;
+        bool nofail:1;
 } SwapParameters;
 
 struct Swap {
@@ -86,8 +88,6 @@ struct Swap {
          * from/to /proc/swaps */
         bool is_active:1;
         bool just_activated:1;
-
-        bool reset_cpu_usage:1;
 
         SwapResult result;
 
@@ -117,8 +117,8 @@ struct Swap {
 
 extern const UnitVTable swap_vtable;
 
-int swap_process_device_new(Manager *m, struct udev_device *dev);
-int swap_process_device_remove(Manager *m, struct udev_device *dev);
+int swap_process_new_device(Manager *m, struct udev_device *dev);
+int swap_process_removed_device(Manager *m, struct udev_device *dev);
 
 const char* swap_state_to_string(SwapState i) _const_;
 SwapState swap_state_from_string(const char *s) _pure_;

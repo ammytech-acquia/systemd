@@ -19,17 +19,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 #include "loopback-setup.h"
-#include "log.h"
+#include "util.h"
 
 int main(int argc, char* argv[]) {
         int r;
-
-        log_open();
-        log_parse_environment();
 
         if ((r = loopback_setup()) < 0)
                 fprintf(stderr, "loopback: %s\n", strerror(-r));

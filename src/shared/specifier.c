@@ -24,7 +24,6 @@
 
 #include "macro.h"
 #include "util.h"
-#include "hostname-util.h"
 #include "specifier.h"
 
 /*

@@ -19,6 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/types.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -27,9 +28,7 @@
 
 #include "pager.h"
 #include "util.h"
-#include "process-util.h"
 #include "macro.h"
-#include "terminal-util.h"
 
 static pid_t pager_pid = 0;
 
@@ -41,7 +40,7 @@ noreturn static void pager_fallback(void) {
         } while (n > 0);
 
         if (n < 0) {
-                log_error_errno(errno, "Internal pager failed: %m");
+                log_error("Internal pager failed: %m");
                 _exit(EXIT_FAILURE);
         }
 
@@ -68,15 +67,17 @@ int pager_open(bool jump_to_end) {
          * pager so that we get the value from the actual tty */
         columns();
 
-        if (pipe(fd) < 0)
-                return log_error_errno(errno, "Failed to create pager pipe: %m");
+        if (pipe(fd) < 0) {
+                log_error("Failed to create pager pipe: %m");
+                return -errno;
+        }
 
         parent_pid = getpid();
 
         pager_pid = fork();
         if (pager_pid < 0) {
                 r = -errno;
-                log_error_errno(errno, "Failed to fork pager: %m");
+                log_error("Failed to fork pager: %m");
                 safe_close_pair(fd);
                 return r;
         }
@@ -92,7 +93,7 @@ int pager_open(bool jump_to_end) {
                 if (!less_opts)
                         less_opts = "FRSXMK";
                 if (jump_to_end)
-                        less_opts = strjoina(less_opts, " +G");
+                        less_opts = strappenda(less_opts, " +G");
                 setenv("LESS", less_opts, 1);
 
                 /* Make sure the pager goes away when the parent dies */
@@ -125,8 +126,10 @@ int pager_open(bool jump_to_end) {
         }
 
         /* Return in the parent */
-        if (dup2(fd[1], STDOUT_FILENO) < 0)
-                return log_error_errno(errno, "Failed to duplicate pager pipe: %m");
+        if (dup2(fd[1], STDOUT_FILENO) < 0) {
+                log_error("Failed to duplicate pager pipe: %m");
+                return -errno;
+        }
 
         safe_close_pair(fd);
         return 1;
@@ -140,61 +143,10 @@ void pager_close(void) {
         /* Inform pager that we are done */
         fclose(stdout);
         kill(pager_pid, SIGCONT);
-        (void) wait_for_terminate(pager_pid, NULL);
+        wait_for_terminate(pager_pid, NULL);
         pager_pid = 0;
 }
 
 bool pager_have(void) {
         return pager_pid > 0;
-}
-
-int show_man_page(const char *desc, bool null_stdio) {
-        const char *args[4] = { "man", NULL, NULL, NULL };
-        char *e = NULL;
-        pid_t pid;
-        size_t k;
-        int r;
-        siginfo_t status;
-
-        k = strlen(desc);
-
-        if (desc[k-1] == ')')
-                e = strrchr(desc, '(');
-
-        if (e) {
-                char *page = NULL, *section = NULL;
-
-                page = strndupa(desc, e - desc);
-                section = strndupa(e + 1, desc + k - e - 2);
-
-                args[1] = section;
-                args[2] = page;
-        } else
-                args[1] = desc;
-
-        pid = fork();
-        if (pid < 0)
-                return log_error_errno(errno, "Failed to fork: %m");
-
-        if (pid == 0) {
-                /* Child */
-                if (null_stdio) {
-                        r = make_null_stdio();
-                        if (r < 0) {
-                                log_error_errno(r, "Failed to kill stdio: %m");
-                                _exit(EXIT_FAILURE);
-                        }
-                }
-
-                execvp(args[0], (char**) args);
-                log_error_errno(errno, "Failed to execute man: %m");
-                _exit(EXIT_FAILURE);
-        }
-
-        r = wait_for_terminate(pid, &status);
-        if (r < 0)
-                return r;
-
-        log_debug("Exit code %i status %i", status.si_code, status.si_status);
-        return status.si_status;
 }

@@ -19,6 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <netinet/ether.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <linux/ip.h>
@@ -28,6 +29,10 @@
 #include "util.h"
 #include "macro.h"
 #include "sd-rtnl.h"
+#include "socket-util.h"
+#include "rtnl-util.h"
+#include "event-util.h"
+#include "rtnl-internal.h"
 
 static int load_module(const char *mod_name) {
         struct kmod_ctx *ctx;

@@ -1,5 +1,5 @@
 '\" t
-.TH "SD_BUS_MESSAGE_GET_MONOTONIC_USEC" "3" "" "systemd 220" "sd_bus_message_get_monotonic_usec"
+.TH "SD_BUS_MESSAGE_GET_MONOTONIC_USEC" "3" "" "systemd 215" "sd_bus_message_get_monotonic_usec"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -38,7 +38,7 @@ sd_bus_message_get_monotonic_usec, sd_bus_message_get_realtime_usec, sd_bus_mess
 .PP
 \fBsd_bus_message_get_monotonic_usec()\fR
 returns the monotonic timestamp of the time the message was sent\&. This value is in microseconds since the
-\fBCLOCK_MONOTONIC\fR
+"CLOCK_MONOTONIC"
 epoch, see
 \fBclock_gettime\fR(2)
 for details\&.
@@ -46,11 +46,11 @@ for details\&.
 Similar,
 \fBsd_bus_message_get_realtime_usec()\fR
 returns the realtime (wallclock) timestamp of the time the message was sent\&. This value is in microseconds since Jan 1st, 1970, i\&.e\&. in the
-\fBCLOCK_REALTIME\fR
+"CLOCK_REALTIME"
 clock\&.
 .PP
 \fBsd_bus_message_get_seqnum()\fR
-returns the kernel\-assigned sequence number of the message\&. The kernel assigns a global, monotonically increasing sequence number to all messages transmitted on the local system, at the time the message was sent\&. This sequence number is useful for determining message send order, even across different buses of the local system\&. The sequence number combined with the boot ID of the system (as returned by
+returns the kernel\-assigned sequence number of the message\&. The kernel assigns a global, monotonically increasing sequence number to all messages transmitted on the local system, at the time the message was sent\&. This sequence number is useful for determining message send order, even across different busses of the local system\&. The sequence number combined with the boot ID of the system (as returned by
 \fBsd_id128_get_boot\fR(3)) is a suitable globally unique identifier for bus messages\&.
 .PP
 Note that the sending order and receiving order of messages might differ, in particular for broadcast messages\&. This means that the sequence number and the timestamps of messages a client reads are not necessarily monotonically increasing\&.
@@ -69,12 +69,12 @@ On success, the timestamp or sequence number is returned in the specified 64\-bi
 .PP
 Returned errors may indicate the following problems:
 .PP
-\fB\-EINVAL\fR
+\fI\-EINVAL\fR
 .RS 4
 A specified parameter is invalid\&.
 .RE
 .PP
-\fB\-ENODATA\fR
+\fI\-ENODATA\fR
 .RS 4
 No timestamp or sequence number information is attached to the passed message\&. This error is returned if the underlying transport does not support timestamping or assigning of sequence numbers, or if this feature has not been negotiated with
 \fBsd_bus_negotiate_timestamp\fR(3)\&.

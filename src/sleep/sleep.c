@@ -22,8 +22,10 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <string.h>
 #include <getopt.h>
 
+#include "sd-id128.h"
 #include "sd-messages.h"
 #include "log.h"
 #include "util.h"
@@ -46,14 +48,15 @@ static int write_mode(char **modes) {
                 if (k == 0)
                         return 0;
 
-                log_debug_errno(k, "Failed to write '%s' to /sys/power/disk: %m",
-                                *mode);
+                log_debug("Failed to write '%s' to /sys/power/disk: %s",
+                          *mode, strerror(-k));
                 if (r == 0)
                         r = k;
         }
 
         if (r < 0)
-                log_error_errno(r, "Failed to write mode to /sys/power/disk: %m");
+                log_error("Failed to write mode to /sys/power/disk: %s",
+                          strerror(-r));
 
         return r;
 }
@@ -68,50 +71,51 @@ static int write_state(FILE **f, char **states) {
                 k = write_string_stream(*f, *state);
                 if (k == 0)
                         return 0;
-                log_debug_errno(k, "Failed to write '%s' to /sys/power/state: %m",
-                                *state);
+                log_debug("Failed to write '%s' to /sys/power/state: %s",
+                          *state, strerror(-k));
                 if (r == 0)
                         r = k;
 
                 fclose(*f);
                 *f = fopen("/sys/power/state", "we");
-                if (!*f)
-                        return log_error_errno(errno, "Failed to open /sys/power/state: %m");
+                if (!*f) {
+                        log_error("Failed to open /sys/power/state: %m");
+                        return -errno;
+                }
         }
 
         return r;
 }
 
 static int execute(char **modes, char **states) {
-
-        char *arguments[] = {
-                NULL,
-                (char*) "pre",
-                arg_verb,
-                NULL
-        };
-        static const char* const dirs[] = {SYSTEM_SLEEP_PATH, NULL};
-
+        char* arguments[4];
         int r;
         _cleanup_fclose_ FILE *f = NULL;
+        const char* note = strappenda("SLEEP=", arg_verb);
 
         /* This file is opened first, so that if we hit an error,
          * we can abort before modifying any state. */
         f = fopen("/sys/power/state", "we");
-        if (!f)
-                return log_error_errno(errno, "Failed to open /sys/power/state: %m");
+        if (!f) {
+                log_error("Failed to open /sys/power/state: %m");
+                return -errno;
+        }
 
         /* Configure the hibernation mode */
         r = write_mode(modes);
         if (r < 0)
                 return r;
 
-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, arguments);
+        arguments[0] = NULL;
+        arguments[1] = (char*) "pre";
+        arguments[2] = arg_verb;
+        arguments[3] = NULL;
+        execute_directory(SYSTEM_SLEEP_PATH, NULL, DEFAULT_TIMEOUT_USEC, arguments);
 
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_SLEEP_START),
-                   LOG_MESSAGE("Suspending system..."),
-                   "SLEEP=%s", arg_verb,
+                   MESSAGE_ID(SD_MESSAGE_SLEEP_START),
+                   "MESSAGE=Suspending system...",
+                   note,
                    NULL);
 
         r = write_state(&f, states);
@@ -119,18 +123,19 @@ static int execute(char **modes, char **states) {
                 return r;
 
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_SLEEP_STOP),
-                   LOG_MESSAGE("System resumed."),
-                   "SLEEP=%s", arg_verb,
+                   MESSAGE_ID(SD_MESSAGE_SLEEP_STOP),
+                   "MESSAGE=System resumed.",
+                   note,
                    NULL);
 
         arguments[1] = (char*) "post";
-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, arguments);
+        execute_directory(SYSTEM_SLEEP_PATH, NULL, DEFAULT_TIMEOUT_USEC, arguments);
 
         return r;
 }
 
-static void help(void) {
+static int help(void) {
+
         printf("%s COMMAND\n\n"
                "Suspend the system, hibernate the system, or both.\n\n"
                "Commands:\n"
@@ -139,7 +144,10 @@ static void help(void) {
                "  suspend              Suspend the system\n"
                "  hibernate            Hibernate the system\n"
                "  hybrid-sleep         Both hibernate and suspend the system\n"
-               , program_invocation_short_name);
+               , program_invocation_short_name
+               );
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -158,11 +166,10 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+h", options, NULL)) >= 0)
                 switch(c) {
                 case 'h':
-                        help();
-                        return 0; /* done */
+                        return help();
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);

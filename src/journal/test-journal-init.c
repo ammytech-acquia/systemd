@@ -19,11 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "systemd/sd-journal.h"
+#include <systemd/sd-journal.h>
 
 #include "log.h"
 #include "util.h"
-#include "rm-rf.h"
 
 int main(int argc, char *argv[]) {
         sd_journal *j;
@@ -32,12 +31,8 @@ int main(int argc, char *argv[]) {
 
         log_set_max_level(LOG_DEBUG);
 
-        if (argc >= 2) {
-                r = safe_atoi(argv[1], &I);
-                if (r < 0)
-                        log_info("Could not parse loop count argument. Using default.");
-        }
-
+        if (argc >= 2)
+                safe_atoi(argv[1], &I);
         log_info("Running %d loops", I);
 
         assert_se(mkdtemp(t));
@@ -59,7 +54,7 @@ int main(int argc, char *argv[]) {
                 assert_se(j == NULL);
         }
 
-        assert_se(rm_rf(t, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
+        assert_se(rm_rf_dangerous(t, false, true, false) >= 0);
 
         return 0;
 }

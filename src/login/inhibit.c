@@ -20,6 +20,7 @@
 ***/
 
 #include <getopt.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -31,13 +32,11 @@
 #include "util.h"
 #include "build.h"
 #include "strv.h"
-#include "formats-util.h"
-#include "process-util.h"
 
 static const char* arg_what = "idle:sleep:shutdown";
 static const char* arg_who = NULL;
 static const char* arg_why = "Unknown reason";
-static const char* arg_mode = NULL;
+static const char* arg_mode = "block";
 
 static enum {
         ACTION_INHIBIT,
@@ -98,9 +97,6 @@ static int print_inhibitors(sd_bus *bus, sd_bus_error *error) {
         while ((r = sd_bus_message_read(reply, "(ssssuu)", &what, &who, &why, &mode, &uid, &pid)) > 0) {
                 _cleanup_free_ char *comm = NULL, *u = NULL;
 
-                if (arg_mode && !streq(mode, arg_mode))
-                        continue;
-
                 get_process_comm(pid, &comm);
                 u = uid_to_name(uid);
 
@@ -126,7 +122,8 @@ static int print_inhibitors(sd_bus *bus, sd_bus_error *error) {
         return 0;
 }
 
-static void help(void) {
+static int help(void) {
+
         printf("%s [OPTIONS...] {COMMAND} ...\n\n"
                "Execute a process while inhibiting shutdown/sleep/idle.\n\n"
                "  -h --help               Show this help\n"
@@ -138,8 +135,10 @@ static void help(void) {
                "     --who=STRING         A descriptive string who is inhibiting\n"
                "     --why=STRING         A descriptive string why is being inhibited\n"
                "     --mode=MODE          One of block or delay\n"
-               "     --list               List active inhibitors\n"
-               , program_invocation_short_name);
+               "     --list               List active inhibitors\n",
+               program_invocation_short_name);
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -169,13 +168,12 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "+h", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+h", options, NULL)) >= 0) {
 
                 switch (c) {
 
                 case 'h':
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -208,8 +206,9 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
+        }
 
-        if (arg_action == ACTION_INHIBIT && optind == argc)
+        if (arg_action == ACTION_INHIBIT && argc == 1)
                 arg_action = ACTION_LIST;
 
         else if (arg_action == ACTION_INHIBIT && optind >= argc) {
@@ -222,7 +221,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_bus_close_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         log_parse_environment();
@@ -236,7 +235,7 @@ int main(int argc, char *argv[]) {
 
         r = sd_bus_default_system(&bus);
         if (r < 0) {
-                log_error_errno(r, "Failed to connect to bus: %m");
+                log_error("Failed to connect to bus: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
 
@@ -256,18 +255,15 @@ int main(int argc, char *argv[]) {
                 if (!arg_who)
                         arg_who = w = strv_join(argv + optind, " ");
 
-                if (!arg_mode)
-                        arg_mode = "block";
-
                 fd = inhibit(bus, &error);
                 if (fd < 0) {
-                        log_error("Failed to inhibit: %s", bus_error_message(&error, fd));
+                        log_error("Failed to inhibit: %s", bus_error_message(&error, -r));
                         return EXIT_FAILURE;
                 }
 
                 pid = fork();
                 if (pid < 0) {
-                        log_error_errno(errno, "Failed to fork: %m");
+                        log_error("Failed to fork: %m");
                         return EXIT_FAILURE;
                 }
 
@@ -277,11 +273,11 @@ int main(int argc, char *argv[]) {
                         close_all_fds(NULL, 0);
 
                         execvp(argv[optind], argv + optind);
-                        log_error_errno(errno, "Failed to execute %s: %m", argv[optind]);
+                        log_error("Failed to execute %s: %m", argv[optind]);
                         _exit(EXIT_FAILURE);
                 }
 
-                r = wait_for_terminate_and_warn(argv[optind], pid, true);
+                r = wait_for_terminate_and_warn(argv[optind], pid);
                 return r < 0 ? EXIT_FAILURE : r;
         }
 

@@ -21,6 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <sys/capability.h>
 
@@ -32,8 +33,6 @@ int capability_bounding_set_drop(uint64_t drop, bool right_now);
 int capability_bounding_set_drop_usermode(uint64_t drop);
 
 int drop_privileges(uid_t uid, gid_t gid, uint64_t keep_capabilites);
-
-int drop_capability(cap_value_t cv);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(cap_t, cap_free);
 #define _cleanup_cap_free_ _cleanup_(cap_freep)

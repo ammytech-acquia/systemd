@@ -12,10 +12,10 @@ Closes: #782522
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index 9c96995..71bc54c 100644
+index cb3d9dc..3323884 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
-@@ -148,10 +148,12 @@ static bool mount_is_network(struct mntent *me) {
+@@ -163,11 +163,13 @@ static bool mount_is_network(struct mntent *me) {
  }
  
  static bool mount_in_initrd(struct mntent *me) {
@@ -23,19 +23,20 @@ index 9c96995..71bc54c 100644
 +
          assert(me);
  
-         return fstab_test_option(me->mnt_opts, "x-initrd.mount\0") ||
--               streq(me->mnt_dir, "/usr");
-+               (streq(me->mnt_dir, "/usr") && stat("/run/initramfs/fsck-usr", &sb) == 0);
+         return
+                 hasmntopt(me, "x-initrd.mount") ||
+-                streq(me->mnt_dir, "/usr");
++                (streq(me->mnt_dir, "/usr") && stat("/run/initramfs/fsck-usr", &sb) == 0);
  }
  
- static int write_idle_timeout(FILE *f, const char *where, const char *opts) {
+ static int add_mount(
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index f493445..89c381f 100644
+index 4162983..0668107 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
-@@ -13,6 +13,7 @@ Wants=systemd-fsckd.socket
+@@ -13,6 +13,7 @@ After=systemd-readahead-collect.service systemd-readahead-replay.service
  Before=local-fs.target shutdown.target
- After=systemd-fsckd.socket
+ 
  ConditionPathIsReadWrite=!/
 +ConditionPathExists=!/run/initramfs/fsck-root
  

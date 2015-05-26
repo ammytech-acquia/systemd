@@ -63,7 +63,7 @@ global:
         sd_journal_open_files;
         sd_journal_open_container;
 
-        /* sd-daemon */
+        /* sd-dameon */
         sd_booted;
         sd_is_fifo;
         sd_is_mq;
@@ -148,27 +148,6 @@ global:
         sd_pid_notifyf;
 } LIBSYSTEMD_213;
 
-LIBSYSTEMD_216 {
-global:
-        sd_machine_get_ifindices;
-} LIBSYSTEMD_214;
-
-LIBSYSTEMD_217 {
-global:
-        sd_session_get_desktop;
-} LIBSYSTEMD_216;
-
-LIBSYSTEMD_219 {
-global:
-        sd_pid_notify_with_fds;
-} LIBSYSTEMD_217;
-
-LIBSYSTEMD_220 {
-global:
-        sd_pid_get_user_slice;
-        sd_peer_get_user_slice;
-} LIBSYSTEMD_219;
-
 m4_ifdef(`ENABLE_KDBUS',
 LIBSYSTEMD_FUTURE {
 global:
@@ -180,7 +159,7 @@ global:
         sd_bus_open_user;
         sd_bus_open_system;
         sd_bus_open_system_remote;
-        sd_bus_open_system_machine;
+        sd_bus_open_system_container;
         sd_bus_new;
         sd_bus_set_address;
         sd_bus_set_fd;
@@ -190,9 +169,7 @@ global:
         sd_bus_set_anonymous;
         sd_bus_set_trusted;
         sd_bus_set_monitor;
-        sd_bus_set_description;
-        sd_bus_set_allow_interactive_authorization;
-        sd_bus_get_allow_interactive_authorization;
+        sd_bus_set_name;
         sd_bus_negotiate_fds;
         sd_bus_negotiate_timestamp;
         sd_bus_negotiate_creds;
@@ -203,9 +180,9 @@ global:
         sd_bus_unref;
         sd_bus_is_open;
         sd_bus_can_send;
-        sd_bus_get_bus_id;
-        sd_bus_get_owner_creds;
-        sd_bus_get_description;
+        sd_bus_get_server_id;
+        sd_bus_get_peer_creds;
+        sd_bus_get_name;
         sd_bus_send;
         sd_bus_send_to;
         sd_bus_call;
@@ -236,8 +213,6 @@ global:
         sd_bus_slot_get_bus;
         sd_bus_slot_get_userdata;
         sd_bus_slot_set_userdata;
-        sd_bus_slot_get_description;
-        sd_bus_slot_set_description;
         sd_bus_slot_get_current_message;
         sd_bus_message_new_signal;
         sd_bus_message_new_method_call;
@@ -267,7 +242,6 @@ global:
         sd_bus_message_get_realtime_usec;
         sd_bus_message_get_seqnum;
         sd_bus_message_get_creds;
-        sd_bus_message_is_empty;
         sd_bus_message_is_signal;
         sd_bus_message_is_method_call;
         sd_bus_message_is_method_error;
@@ -303,8 +277,8 @@ global:
         sd_bus_request_name;
         sd_bus_release_name;
         sd_bus_list_names;
-        sd_bus_get_name_creds;
-        sd_bus_get_name_machine_id;
+        sd_bus_get_owner;
+        sd_bus_get_owner_machine_id;
         sd_bus_call_method;
         sd_bus_get_property;
         sd_bus_get_property_trivial;
@@ -328,28 +302,19 @@ global:
         sd_bus_creds_ref;
         sd_bus_creds_unref;
         sd_bus_creds_get_mask;
-        sd_bus_creds_get_augmented_mask;
-        sd_bus_creds_get_pid;
-        sd_bus_creds_get_ppid;
-        sd_bus_creds_get_tid;
         sd_bus_creds_get_uid;
-        sd_bus_creds_get_euid;
-        sd_bus_creds_get_suid;
-        sd_bus_creds_get_fsuid;
         sd_bus_creds_get_gid;
-        sd_bus_creds_get_egid;
-        sd_bus_creds_get_sgid;
-        sd_bus_creds_get_fsgid;
-        sd_bus_creds_get_supplementary_gids;
+        sd_bus_creds_get_pid;
+        sd_bus_creds_get_pid_starttime;
+        sd_bus_creds_get_tid;
         sd_bus_creds_get_comm;
         sd_bus_creds_get_tid_comm;
         sd_bus_creds_get_exe;
         sd_bus_creds_get_cmdline;
         sd_bus_creds_get_cgroup;
         sd_bus_creds_get_unit;
-        sd_bus_creds_get_slice;
         sd_bus_creds_get_user_unit;
-        sd_bus_creds_get_user_slice;
+        sd_bus_creds_get_slice;
         sd_bus_creds_get_session;
         sd_bus_creds_get_owner_uid;
         sd_bus_creds_has_effective_cap;
@@ -359,17 +324,15 @@ global:
         sd_bus_creds_get_selinux_context;
         sd_bus_creds_get_audit_session_id;
         sd_bus_creds_get_audit_login_uid;
-        sd_bus_creds_get_tty;
         sd_bus_creds_get_unique_name;
         sd_bus_creds_get_well_known_names;
-        sd_bus_creds_get_description;
+        sd_bus_creds_get_connection_name;
         sd_bus_error_free;
         sd_bus_error_set;
         sd_bus_error_setf;
         sd_bus_error_set_const;
         sd_bus_error_set_errno;
         sd_bus_error_set_errnof;
-        sd_bus_error_set_errnofv;
         sd_bus_error_get_errno;
         sd_bus_error_copy;
         sd_bus_error_is_set;
@@ -391,6 +354,20 @@ global:
         sd_bus_track_first;
         sd_bus_track_next;
 
+        /* sd-memfd */
+        sd_memfd_new;
+        sd_memfd_new_and_map;
+        sd_memfd_free;
+        sd_memfd_get_fd;
+        sd_memfd_get_file;
+        sd_memfd_dup_fd;
+        sd_memfd_map;
+        sd_memfd_set_sealed;
+        sd_memfd_get_sealed;
+        sd_memfd_get_size;
+        sd_memfd_set_size;
+        sd_memfd_get_name;
+
         /* sd-event */
         sd_event_default;
         sd_event_new;
@@ -402,14 +379,10 @@ global:
         sd_event_add_child;
         sd_event_add_defer;
         sd_event_add_exit;
-        sd_event_wait;
-        sd_event_prepare;
-        sd_event_dispatch;
         sd_event_run;
         sd_event_loop;
         sd_event_exit;
         sd_event_now;
-        sd_event_get_fd;
         sd_event_get_state;
         sd_event_get_tid;
         sd_event_get_exit_code;
@@ -417,8 +390,6 @@ global:
         sd_event_get_watchdog;
         sd_event_source_ref;
         sd_event_source_unref;
-        sd_event_source_set_description;
-        sd_event_source_get_description;
         sd_event_source_set_prepare;
         sd_event_source_get_pending;
         sd_event_source_get_priority;
@@ -469,9 +440,5 @@ global:
         sd_resolve_query_get_userdata;
         sd_resolve_query_set_userdata;
         sd_resolve_query_get_resolve;
-
-        /* sd-path */
-        sd_path_home;
-        sd_path_search;
-} LIBSYSTEMD_220;
+} LIBSYSTEMD_214;
 )

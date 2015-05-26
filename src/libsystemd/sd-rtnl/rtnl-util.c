@@ -19,13 +19,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <netinet/ether.h>
 
 #include "sd-rtnl.h"
 
 #include "rtnl-util.h"
 #include "rtnl-internal.h"
 
-int rtnl_set_link_name(sd_rtnl **rtnl, int ifindex, const char *name) {
+int rtnl_set_link_name(sd_rtnl *rtnl, int ifindex, const char *name) {
         _cleanup_rtnl_message_unref_ sd_rtnl_message *message = NULL;
         int r;
 
@@ -33,13 +34,7 @@ int rtnl_set_link_name(sd_rtnl **rtnl, int ifindex, const char *name) {
         assert(ifindex > 0);
         assert(name);
 
-        if (!*rtnl) {
-                r = sd_rtnl_open(rtnl, 0);
-                if (r < 0)
-                        return r;
-        }
-
-        r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
+        r = sd_rtnl_message_new_link(rtnl, &message, RTM_SETLINK, ifindex);
         if (r < 0)
                 return r;
 
@@ -47,16 +42,17 @@ int rtnl_set_link_name(sd_rtnl **rtnl, int ifindex, const char *name) {
         if (r < 0)
                 return r;
 
-        r = sd_rtnl_call(*rtnl, message, 0, NULL);
+        r = sd_rtnl_call(rtnl, message, 0, NULL);
         if (r < 0)
                 return r;
 
         return 0;
 }
 
-int rtnl_set_link_properties(sd_rtnl **rtnl, int ifindex, const char *alias,
+int rtnl_set_link_properties(sd_rtnl *rtnl, int ifindex, const char *alias,
                              const struct ether_addr *mac, unsigned mtu) {
         _cleanup_rtnl_message_unref_ sd_rtnl_message *message = NULL;
+        bool need_update = false;
         int r;
 
         assert(rtnl);
@@ -65,13 +61,7 @@ int rtnl_set_link_properties(sd_rtnl **rtnl, int ifindex, const char *alias,
         if (!alias && !mac && mtu == 0)
                 return 0;
 
-        if (!*rtnl) {
-                r = sd_rtnl_open(rtnl, 0);
-                if (r < 0)
-                        return r;
-        }
-
-        r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
+        r = sd_rtnl_message_new_link(rtnl, &message, RTM_SETLINK, ifindex);
         if (r < 0)
                 return r;
 
@@ -79,23 +69,32 @@ int rtnl_set_link_properties(sd_rtnl **rtnl, int ifindex, const char *alias,
                 r = sd_rtnl_message_append_string(message, IFLA_IFALIAS, alias);
                 if (r < 0)
                         return r;
+
+                need_update = true;
+
         }
 
         if (mac) {
                 r = sd_rtnl_message_append_ether_addr(message, IFLA_ADDRESS, mac);
                 if (r < 0)
                         return r;
+
+                need_update = true;
         }
 
         if (mtu > 0) {
                 r = sd_rtnl_message_append_u32(message, IFLA_MTU, mtu);
                 if (r < 0)
                         return r;
+
+                need_update = true;
         }
 
-        r = sd_rtnl_call(*rtnl, message, 0, NULL);
-        if (r < 0)
-                return r;
+        if  (need_update) {
+                r = sd_rtnl_call(rtnl, message, 0, NULL);
+                if (r < 0)
+                        return r;
+        }
 
         return 0;
 }
@@ -106,10 +105,12 @@ int rtnl_message_new_synthetic_error(int error, uint32_t serial, sd_rtnl_message
 
         assert(error <= 0);
 
-        r = message_new(NULL, ret, NLMSG_ERROR);
+        r = message_new(NULL, ret, NLMSG_SPACE(sizeof(struct nlmsgerr)));
         if (r < 0)
                 return r;
 
+        (*ret)->hdr->nlmsg_len = NLMSG_LENGTH(sizeof(struct nlmsgerr));
+        (*ret)->hdr->nlmsg_type = NLMSG_ERROR;
         (*ret)->hdr->nlmsg_seq = serial;
 
         err = NLMSG_DATA((*ret)->hdr);
@@ -117,17 +118,6 @@ int rtnl_message_new_synthetic_error(int error, uint32_t serial, sd_rtnl_message
         err->error = error;
 
         return 0;
-}
-
-bool rtnl_message_type_is_neigh(uint16_t type) {
-        switch (type) {
-                case RTM_NEWNEIGH:
-                case RTM_GETNEIGH:
-                case RTM_DELNEIGH:
-                        return true;
-                default:
-                        return false;
-        }
 }
 
 bool rtnl_message_type_is_route(uint16_t type) {
@@ -162,12 +152,4 @@ bool rtnl_message_type_is_addr(uint16_t type) {
                 default:
                         return false;
         }
-}
-
-int rtnl_log_parse_error(int r) {
-        return log_error_errno(r, "Failed to parse netlink message: %m");
-}
-
-int rtnl_log_create_error(int r) {
-        return log_error_errno(r, "Failed to create netlink message: %m");
 }

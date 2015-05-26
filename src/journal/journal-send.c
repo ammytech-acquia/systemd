@@ -32,7 +32,6 @@
 #include "sd-journal.h"
 #include "util.h"
 #include "socket-util.h"
-#include "memfd-util.h"
 
 #define SNDBUF_SIZE (8*1024*1024)
 
@@ -90,17 +89,18 @@ _public_ int sd_journal_printv(int priority, const char *format, va_list ap) {
         /* FIXME: Instead of limiting things to LINE_MAX we could do a
            C99 variable-length array on the stack here in a loop. */
 
-        char buffer[8 + LINE_MAX], p[sizeof("PRIORITY=")-1 + DECIMAL_STR_MAX(int) + 1];
-        struct iovec iov[2];
+        char buffer[8 + LINE_MAX], p[11]; struct iovec iov[2];
 
         assert_return(priority >= 0, -EINVAL);
         assert_return(priority <= 7, -EINVAL);
         assert_return(format, -EINVAL);
 
-        xsprintf(p, "PRIORITY=%i", priority & LOG_PRIMASK);
+        snprintf(p, sizeof(p), "PRIORITY=%i", priority & LOG_PRIMASK);
+        char_array_0(p);
 
         memcpy(buffer, "MESSAGE=", 8);
         vsnprintf(buffer+8, sizeof(buffer) - 8, format, ap);
+        char_array_0(buffer);
 
         zero(iov);
         IOVEC_SET_STRING(iov[0], buffer);
@@ -198,7 +198,7 @@ finish:
 
 _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         PROTECT_ERRNO;
-        int fd, r;
+        int fd;
         _cleanup_close_ int buffer_fd = -1;
         struct iovec *w;
         uint64_t *l;
@@ -218,7 +218,6 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         } control;
         struct cmsghdr *cmsg;
         bool have_syslog_identifier = false;
-        bool seal = true;
 
         assert_return(iov, -EINVAL);
         assert_return(n > 0, -EINVAL);
@@ -305,35 +304,20 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         if (errno != EMSGSIZE && errno != ENOBUFS)
                 return -errno;
 
-        /* Message doesn't fit... Let's dump the data in a memfd or
-         * temporary file and just pass a file descriptor of it to the
-         * other side.
+        /* Message doesn't fit... Let's dump the data in a temporary
+         * file and just pass a file descriptor of it to the other
+         * side.
          *
-         * For the temporary files we use /dev/shm instead of /tmp
-         * here, since we want this to be a tmpfs, and one that is
-         * available from early boot on and where unprivileged users
-         * can create files. */
-        buffer_fd = memfd_new(NULL);
-        if (buffer_fd < 0) {
-                if (buffer_fd == -ENOSYS) {
-                        buffer_fd = open_tmpfile("/dev/shm", O_RDWR | O_CLOEXEC);
-                        if (buffer_fd < 0)
-                                return buffer_fd;
-
-                        seal = false;
-                } else
-                        return buffer_fd;
-        }
+         * We use /dev/shm instead of /tmp here, since we want this to
+         * be a tmpfs, and one that is available from early boot on
+         * and where unprivileged users can create files. */
+        buffer_fd = open_tmpfile("/dev/shm", O_RDWR | O_CLOEXEC);
+        if (buffer_fd < 0)
+                return buffer_fd;
 
         n = writev(buffer_fd, w, j);
         if (n < 0)
                 return -errno;
-
-        if (seal) {
-                r = memfd_set_sealed(buffer_fd);
-                if (r < 0)
-                        return r;
-        }
 
         mh.msg_iov = NULL;
         mh.msg_iovlen = 0;
@@ -371,7 +355,7 @@ static int fill_iovec_perror_and_send(const char *message, int skip, struct iove
                 errno = 0;
                 j = strerror_r(_saved_errno_, buffer + 8 + k, n - 8 - k);
                 if (errno == 0) {
-                        char error[sizeof("ERRNO=")-1 + DECIMAL_STR_MAX(int) + 1];
+                        char error[6 + 10 + 1]; /* for a 32bit value */
 
                         if (j != buffer + 8 + k)
                                 memmove(buffer + 8 + k, j, strlen(j)+1);
@@ -383,7 +367,8 @@ static int fill_iovec_perror_and_send(const char *message, int skip, struct iove
                                 memcpy(buffer + 8 + k - 2, ": ", 2);
                         }
 
-                        xsprintf(error, "ERRNO=%i", _saved_errno_);
+                        snprintf(error, sizeof(error), "ERRNO=%u", _saved_errno_);
+                        char_array_0(error);
 
                         IOVEC_SET_STRING(iov[skip+0], "PRIORITY=3");
                         IOVEC_SET_STRING(iov[skip+1], buffer);
@@ -451,9 +436,12 @@ _public_ int sd_journal_stream_fd(const char *identifier, int priority, int leve
         header[l++] = '0';
         header[l++] = '\n';
 
-        r = loop_write(fd, header, l, false);
+        r = (int) loop_write(fd, header, l, false);
         if (r < 0)
                 return r;
+
+        if ((size_t) r != l)
+                return -errno;
 
         r = fd;
         fd = -1;
@@ -472,7 +460,7 @@ _public_ int sd_journal_print_with_location(int priority, const char *file, cons
 }
 
 _public_ int sd_journal_printv_with_location(int priority, const char *file, const char *line, const char *func, const char *format, va_list ap) {
-        char buffer[8 + LINE_MAX], p[sizeof("PRIORITY=")-1 + DECIMAL_STR_MAX(int) + 1];
+        char buffer[8 + LINE_MAX], p[11];
         struct iovec iov[5];
         char *f;
 
@@ -480,10 +468,12 @@ _public_ int sd_journal_printv_with_location(int priority, const char *file, con
         assert_return(priority <= 7, -EINVAL);
         assert_return(format, -EINVAL);
 
-        xsprintf(p, "PRIORITY=%i", priority & LOG_PRIMASK);
+        snprintf(p, sizeof(p), "PRIORITY=%i", priority & LOG_PRIMASK);
+        char_array_0(p);
 
         memcpy(buffer, "MESSAGE=", 8);
         vsnprintf(buffer+8, sizeof(buffer) - 8, format, ap);
+        char_array_0(buffer);
 
         /* func is initialized from __func__ which is not a macro, but
          * a static const char[], hence cannot easily be prefixed with

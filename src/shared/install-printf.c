@@ -19,32 +19,44 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <stdlib.h>
 
 #include "specifier.h"
 #include "unit-name.h"
 #include "util.h"
 #include "install-printf.h"
-#include "formats-util.h"
 
 static int specifier_prefix_and_instance(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
+        char *n;
 
         assert(i);
 
-        return unit_name_to_prefix_and_instance(i->name, ret);
+        n = unit_name_to_prefix_and_instance(i->name);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_prefix(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
+        char *n;
 
         assert(i);
 
-        return unit_name_to_prefix(i->name, ret);
+        n = unit_name_to_prefix(i->name);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_instance(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
         char *instance;
         int r;
 
@@ -65,7 +77,7 @@ static int specifier_instance(char specifier, void *data, void *userdata, char *
 }
 
 static int specifier_user_name(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
         const char *username;
         _cleanup_free_ char *tmp = NULL;
         char *printed = NULL;
@@ -91,7 +103,7 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
                 if (r < 0)
                         return r;
 
-                if (asprintf(&printed, UID_FMT, uid) < 0)
+                if (asprintf(&printed, "%d", uid) < 0)
                         return -ENOMEM;
                 break;
         }}
@@ -102,7 +114,7 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
 }
 
 
-int install_full_printf(UnitFileInstallInfo *i, const char *format, char **ret) {
+int install_full_printf(InstallInfo *i, const char *format, char **ret) {
 
         /* This is similar to unit_full_printf() but does not support
          * anything path-related.

@@ -19,9 +19,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <string.h>
+#include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <stdio.h>
 
+#include "label.h"
 #include "util.h"
 #include "path-util.h"
 #include "mkdir.h"
@@ -39,16 +44,32 @@ int mkdir_safe_internal(const char *path, mode_t mode, uid_t uid, gid_t gid, mkd
         if ((st.st_mode & 0007) > (mode & 0007) ||
             (st.st_mode & 0070) > (mode & 0070) ||
             (st.st_mode & 0700) > (mode & 0700) ||
-            (uid != UID_INVALID && st.st_uid != uid) ||
-            (gid != GID_INVALID && st.st_gid != gid) ||
-            !S_ISDIR(st.st_mode))
-                return -EEXIST;
+            (uid != (uid_t) -1 && st.st_uid != uid) ||
+            (gid != (gid_t) -1 && st.st_gid != gid) ||
+            !S_ISDIR(st.st_mode)) {
+                errno = EEXIST;
+                return -errno;
+        }
 
         return 0;
 }
 
 int mkdir_safe(const char *path, mode_t mode, uid_t uid, gid_t gid) {
         return mkdir_safe_internal(path, mode, uid, gid, mkdir);
+}
+
+int is_dir(const char* path, bool follow) {
+        struct stat st;
+
+        if (follow) {
+                if (stat(path, &st) < 0)
+                        return -errno;
+        } else {
+                if (lstat(path, &st) < 0)
+                        return -errno;
+        }
+
+        return S_ISDIR(st.st_mode);
 }
 
 int mkdir_parents_internal(const char *prefix, const char *path, mode_t mode, mkdir_func_t _mkdir) {
@@ -122,4 +143,8 @@ int mkdir_p_internal(const char *prefix, const char *path, mode_t mode, mkdir_fu
 
 int mkdir_p(const char *path, mode_t mode) {
         return mkdir_p_internal(NULL, path, mode, mkdir);
+}
+
+int mkdir_p_prefix(const char *prefix, const char *path, mode_t mode) {
+        return mkdir_p_internal(prefix, path, mode, mkdir);
 }

@@ -20,15 +20,39 @@
 ***/
 
 #include <errno.h>
+#include <sys/stat.h>
 #include <stdlib.h>
+#include <string.h>
+#include <assert.h>
 #include <unistd.h>
 
+#include "dev-setup.h"
+#include "log.h"
+#include "macro.h"
 #include "util.h"
 #include "label.h"
-#include "path-util.h"
-#include "dev-setup.h"
 
-int dev_setup(const char *prefix, uid_t uid, gid_t gid) {
+static int symlink_and_label(const char *old_path, const char *new_path) {
+        int r;
+
+        assert(old_path);
+        assert(new_path);
+
+        r = label_context_set(new_path, S_IFLNK);
+        if (r < 0)
+                return r;
+
+        if (symlink(old_path, new_path) < 0)
+                r = -errno;
+
+        label_context_clear();
+
+        return r;
+}
+
+int dev_setup(const char *prefix) {
+        const char *j, *k;
+
         static const char symlinks[] =
                 "-/proc/kcore\0"     "/dev/core\0"
                 "/proc/self/fd\0"    "/dev/fd\0"
@@ -36,13 +60,7 @@ int dev_setup(const char *prefix, uid_t uid, gid_t gid) {
                 "/proc/self/fd/1\0"  "/dev/stdout\0"
                 "/proc/self/fd/2\0"  "/dev/stderr\0";
 
-        const char *j, *k;
-        int r;
-
         NULSTR_FOREACH_PAIR(j, k, symlinks) {
-                _cleanup_free_ char *link_name = NULL;
-                const char *n;
-
                 if (j[0] == '-') {
                         j++;
 
@@ -51,21 +69,15 @@ int dev_setup(const char *prefix, uid_t uid, gid_t gid) {
                 }
 
                 if (prefix) {
-                        link_name = prefix_root(prefix, k);
+                        _cleanup_free_ char *link_name = NULL;
+
+                        link_name = strjoin(prefix, "/", k, NULL);
                         if (!link_name)
                                 return -ENOMEM;
 
-                        n = link_name;
+                        symlink_and_label(j, link_name);
                 } else
-                        n = k;
-
-                r = symlink_label(j, n);
-                if (r < 0)
-                        log_debug_errno(r, "Failed to symlink %s to %s: %m", j, n);
-
-                if (uid != UID_INVALID || gid != GID_INVALID)
-                        if (lchown(n, uid, gid) < 0)
-                                log_debug_errno(errno, "Failed to chown %s: %m", n);
+                        symlink_and_label(j, k);
         }
 
         return 0;

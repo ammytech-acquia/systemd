@@ -20,32 +20,30 @@
 ***/
 
 #include <sys/socket.h>
+#include <sys/capability.h>
 
-#include "sd-daemon.h"
-#include "sd-event.h"
 #include "util.h"
 #include "strv.h"
 #include "macro.h"
 #include "def.h"
 #include "path-util.h"
 #include "missing.h"
-#include "set.h"
-#include "unit-name.h"
 
+#include "sd-event.h"
 #include "sd-bus.h"
 #include "bus-error.h"
-#include "bus-label.h"
 #include "bus-message.h"
 #include "bus-util.h"
 #include "bus-internal.h"
 
-static int name_owner_change_callback(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+static int name_owner_change_callback(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
         sd_event *e = userdata;
 
+        assert(bus);
         assert(m);
         assert(e);
 
-        sd_bus_close(sd_bus_message_get_bus(m));
+        sd_bus_close(bus);
         sd_event_exit(e, 0);
 
         return 1;
@@ -124,23 +122,17 @@ int bus_event_loop_with_idle(
                 if (r < 0)
                         return r;
 
-                if (r == 0 && !exiting && idle) {
+                if (r == 0 && !exiting) {
 
                         r = sd_bus_try_close(bus);
                         if (r == -EBUSY)
                                 continue;
 
-                        /* Fallback for dbus1 connections: we
-                         * unregister the name and wait for the
-                         * response to come through for it */
-                        if (r == -EOPNOTSUPP) {
-
-                                /* Inform the service manager that we
-                                 * are going down, so that it will
-                                 * queue all further start requests,
-                                 * instead of assuming we are already
-                                 * running. */
-                                sd_notify(false, "STOPPING=1");
+                        if (r == -ENOTSUP) {
+                                /* Fallback for dbus1 connections: we
+                                 * unregister the name and wait for
+                                 * the response to come through for
+                                 * it */
 
                                 r = bus_async_unregister_and_exit(e, bus, name);
                                 if (r < 0)
@@ -191,66 +183,45 @@ int bus_name_has_owner(sd_bus *c, const char *name, sd_bus_error *error) {
         return has_owner;
 }
 
-static int check_good_user(sd_bus_message *m, uid_t good_user) {
-        _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
-        uid_t sender_uid;
-        int r;
-
-        assert(m);
-
-        if (good_user == UID_INVALID)
-                return 0;
-
-        r = sd_bus_query_sender_creds(m, SD_BUS_CREDS_EUID, &creds);
-        if (r < 0)
-                return r;
-
-        /* Don't trust augmented credentials for authorization */
-        assert_return((sd_bus_creds_get_augmented_mask(creds) & SD_BUS_CREDS_EUID) == 0, -EPERM);
-
-        r = sd_bus_creds_get_euid(creds, &sender_uid);
-        if (r < 0)
-                return r;
-
-        return sender_uid == good_user;
-}
-
-int bus_test_polkit(
-                sd_bus_message *call,
-                int capability,
+int bus_verify_polkit(
+                sd_bus *bus,
+                sd_bus_message *m,
                 const char *action,
-                uid_t good_user,
+                bool interactive,
                 bool *_challenge,
                 sd_bus_error *e) {
 
+        _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
+        uid_t uid;
         int r;
 
-        assert(call);
+        assert(bus);
+        assert(m);
         assert(action);
 
-        /* Tests non-interactively! */
-
-        r = check_good_user(call, good_user);
-        if (r != 0)
-                return r;
-
-        r = sd_bus_query_sender_privilege(call, capability);
+        r = sd_bus_query_sender_creds(m, SD_BUS_CREDS_UID, &creds);
         if (r < 0)
                 return r;
-        else if (r > 0)
+
+        r = sd_bus_creds_get_uid(creds, &uid);
+        if (r < 0)
+                return r;
+
+        if (uid == 0)
                 return 1;
+
 #ifdef ENABLE_POLKIT
         else {
                 _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
                 int authorized = false, challenge = false;
                 const char *sender;
 
-                sender = sd_bus_message_get_sender(call);
+                sender = sd_bus_message_get_sender(m);
                 if (!sender)
                         return -EBADMSG;
 
                 r = sd_bus_call_method(
-                                call->bus,
+                                bus,
                                 "org.freedesktop.PolicyKit1",
                                 "/org/freedesktop/PolicyKit1/Authority",
                                 "org.freedesktop.PolicyKit1.Authority",
@@ -261,7 +232,7 @@ int bus_test_polkit(
                                 "system-bus-name", 1, "name", "s", sender,
                                 action,
                                 0,
-                                0,
+                                interactive ? 1 : 0,
                                 "");
 
                 if (r < 0) {
@@ -321,11 +292,12 @@ static void async_polkit_query_free(AsyncPolkitQuery *q) {
         free(q);
 }
 
-static int async_polkit_callback(sd_bus_message *reply, void *userdata, sd_bus_error *error) {
+static int async_polkit_callback(sd_bus *bus, sd_bus_message *reply, void *userdata, sd_bus_error *error) {
         _cleanup_bus_error_free_ sd_bus_error error_buffer = SD_BUS_ERROR_NULL;
         AsyncPolkitQuery *q = userdata;
         int r;
 
+        assert(bus);
         assert(reply);
         assert(q);
 
@@ -338,7 +310,7 @@ static int async_polkit_callback(sd_bus_message *reply, void *userdata, sd_bus_e
                 goto finish;
         }
 
-        r = q->callback(q->request, q->userdata, &error_buffer);
+        r = q->callback(bus, q->request, q->userdata, &error_buffer);
         r = bus_maybe_reply_error(q->request, r, &error_buffer);
 
 finish:
@@ -350,34 +322,31 @@ finish:
 #endif
 
 int bus_verify_polkit_async(
-                sd_bus_message *call,
-                int capability,
+                sd_bus *bus,
+                Hashmap **registry,
+                sd_bus_message *m,
                 const char *action,
                 bool interactive,
-                uid_t good_user,
-                Hashmap **registry,
-                sd_bus_error *error) {
+                sd_bus_error *error,
+                sd_bus_message_handler_t callback,
+                void *userdata) {
 
 #ifdef ENABLE_POLKIT
         _cleanup_bus_message_unref_ sd_bus_message *pk = NULL;
         AsyncPolkitQuery *q;
         const char *sender;
-        sd_bus_message_handler_t callback;
-        void *userdata;
-        int c;
 #endif
+        _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
+        uid_t uid;
         int r;
 
-        assert(call);
-        assert(action);
+        assert(bus);
         assert(registry);
-
-        r = check_good_user(call, good_user);
-        if (r != 0)
-                return r;
+        assert(m);
+        assert(action);
 
 #ifdef ENABLE_POLKIT
-        q = hashmap_get(*registry, call);
+        q = hashmap_get(*registry, m);
         if (q) {
                 int authorized, challenge;
 
@@ -410,45 +379,32 @@ int bus_verify_polkit_async(
                 if (authorized)
                         return 1;
 
-                if (challenge)
-                        return sd_bus_error_set(error, SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED, "Interactive authentication required.");
-
                 return -EACCES;
         }
 #endif
 
-        r = sd_bus_query_sender_privilege(call, capability);
+        r = sd_bus_query_sender_creds(m, SD_BUS_CREDS_UID, &creds);
         if (r < 0)
                 return r;
-        else if (r > 0)
+
+        r = sd_bus_creds_get_uid(creds, &uid);
+        if (r < 0)
+                return r;
+
+        if (uid == 0)
                 return 1;
 
 #ifdef ENABLE_POLKIT
-        if (sd_bus_get_current_message(call->bus) != call)
-                return -EINVAL;
-
-        callback = sd_bus_get_current_handler(call->bus);
-        if (!callback)
-                return -EINVAL;
-
-        userdata = sd_bus_get_current_userdata(call->bus);
-
-        sender = sd_bus_message_get_sender(call);
+        sender = sd_bus_message_get_sender(m);
         if (!sender)
                 return -EBADMSG;
 
-        c = sd_bus_message_get_allow_interactive_authorization(call);
-        if (c < 0)
-                return c;
-        if (c > 0)
-                interactive = true;
-
-        r = hashmap_ensure_allocated(registry, NULL);
+        r = hashmap_ensure_allocated(registry, trivial_hash_func, trivial_compare_func);
         if (r < 0)
                 return r;
 
         r = sd_bus_message_new_method_call(
-                        call->bus,
+                        bus,
                         &pk,
                         "org.freedesktop.PolicyKit1",
                         "/org/freedesktop/PolicyKit1/Authority",
@@ -463,7 +419,7 @@ int bus_verify_polkit_async(
                         "system-bus-name", 1, "name", "s", sender,
                         action,
                         0,
-                        !!interactive,
+                        interactive ? 1 : 0,
                         NULL);
         if (r < 0)
                 return r;
@@ -472,11 +428,11 @@ int bus_verify_polkit_async(
         if (!q)
                 return -ENOMEM;
 
-        q->request = sd_bus_message_ref(call);
+        q->request = sd_bus_message_ref(m);
         q->callback = callback;
         q->userdata = userdata;
 
-        r = hashmap_put(*registry, call, q);
+        r = hashmap_put(*registry, m, q);
         if (r < 0) {
                 async_polkit_query_free(q);
                 return r;
@@ -484,7 +440,7 @@ int bus_verify_polkit_async(
 
         q->registry = *registry;
 
-        r = sd_bus_call_async(call->bus, &q->slot, pk, async_polkit_callback, q, 0);
+        r = sd_bus_call_async(bus, &q->slot, pk, async_polkit_callback, q, 0);
         if (r < 0) {
                 async_polkit_query_free(q);
                 return r;
@@ -496,7 +452,7 @@ int bus_verify_polkit_async(
         return -EACCES;
 }
 
-void bus_verify_polkit_async_registry_free(Hashmap *registry) {
+void bus_verify_polkit_async_registry_free(sd_bus *bus, Hashmap *registry) {
 #ifdef ENABLE_POLKIT
         AsyncPolkitQuery *q;
 
@@ -549,7 +505,7 @@ int bus_open_system_systemd(sd_bus **_bus) {
         if (r < 0)
                 return r;
 
-        r = sd_bus_set_address(bus, KERNEL_SYSTEM_BUS_ADDRESS);
+        r = sd_bus_set_address(bus, KERNEL_SYSTEM_BUS_PATH);
         if (r < 0)
                 return r;
 
@@ -602,7 +558,7 @@ int bus_open_user_systemd(sd_bus **_bus) {
         if (r < 0)
                 return r;
 
-        if (asprintf(&bus->address, KERNEL_USER_BUS_ADDRESS_FMT, getuid()) < 0)
+        if (asprintf(&bus->address, KERNEL_USER_BUS_FMT, getuid()) < 0)
                 return -ENOMEM;
 
         bus->bus_client = true;
@@ -668,21 +624,14 @@ int bus_print_property(const char *name, sd_bus_message *property, bool all) {
                 if (r < 0)
                         return r;
 
-                if (all || !isempty(s)) {
-                        _cleanup_free_ char *escaped = NULL;
-
-                        escaped = xescape(s, "\n");
-                        if (!escaped)
-                                return -ENOMEM;
-
-                        printf("%s=%s\n", name, escaped);
-                }
+                if (all || !isempty(s))
+                        printf("%s=%s\n", name, s);
 
                 return 1;
         }
 
         case SD_BUS_TYPE_BOOLEAN: {
-                int b;
+                bool b;
 
                 r = sd_bus_message_read_basic(property, type, &b);
                 if (r < 0)
@@ -716,18 +665,6 @@ int bus_print_property(const char *name, sd_bus_message *property, bool all) {
                         printf("%s=%s\n", name, format_timespan(timespan, sizeof(timespan), u, 0));
                 } else
                         printf("%s=%llu\n", name, (unsigned long long) u);
-
-                return 1;
-        }
-
-        case SD_BUS_TYPE_INT64: {
-                int64_t i;
-
-                r = sd_bus_message_read_basic(property, type, &i);
-                if (r < 0)
-                        return r;
-
-                printf("%s=%lld\n", name, (long long) i);
 
                 return 1;
         }
@@ -779,16 +716,10 @@ int bus_print_property(const char *name, sd_bus_message *property, bool all) {
                                 return r;
 
                         while((r = sd_bus_message_read_basic(property, SD_BUS_TYPE_STRING, &str)) > 0) {
-                                _cleanup_free_ char *escaped = NULL;
-
                                 if (first)
                                         printf("%s=", name);
 
-                                escaped = xescape(str, "\n ");
-                                if (!escaped)
-                                        return -ENOMEM;
-
-                                printf("%s%s", first ? "" : " ", escaped);
+                                printf("%s%s", first ? "" : " ", str);
 
                                 first = false;
                         }
@@ -961,6 +892,7 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
         switch (type) {
         case SD_BUS_TYPE_STRING: {
                 const char *s;
+                char *str;
                 char **p = userdata;
 
                 r = sd_bus_message_read_basic(m, type, &s);
@@ -970,7 +902,14 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
                 if (isempty(s))
                         break;
 
-                r = free_and_strdup(p, s);
+                str = strdup(s);
+                if (!str) {
+                        r = -ENOMEM;
+                        break;
+                }
+                free(*p);
+                *p = str;
+
                 break;
         }
 
@@ -1035,16 +974,31 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
         return r;
 }
 
-int bus_message_map_all_properties(
-                sd_bus_message *m,
-                const struct bus_properties_map *map,
-                void *userdata) {
-
+int bus_map_all_properties(sd_bus *bus,
+                           const char *destination,
+                           const char *path,
+                           const struct bus_properties_map *map,
+                           void *userdata) {
+        _cleanup_bus_message_unref_ sd_bus_message *m = NULL;
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
-        assert(m);
+        assert(bus);
+        assert(destination);
+        assert(path);
         assert(map);
+
+        r = sd_bus_call_method(
+                        bus,
+                        destination,
+                        path,
+                        "org.freedesktop.DBus.Properties",
+                        "GetAll",
+                        &error,
+                        &m,
+                        "s", "");
+        if (r < 0)
+                return r;
 
         r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "{sv}");
         if (r < 0)
@@ -1078,9 +1032,9 @@ int bus_message_map_all_properties(
 
                         v = (uint8_t *)userdata + prop->offset;
                         if (map[i].set)
-                                r = prop->set(sd_bus_message_get_bus(m), member, m, &error, v);
+                                r = prop->set(bus, member, m, &error, v);
                         else
-                                r = map_basic(sd_bus_message_get_bus(m), member, m, &error, v);
+                                r = map_basic(bus, member, m, &error, v);
                         if (r < 0)
                                 return r;
 
@@ -1097,77 +1051,8 @@ int bus_message_map_all_properties(
                 if (r < 0)
                         return r;
         }
-        if (r < 0)
-                return r;
 
-        return sd_bus_message_exit_container(m);
-}
-
-int bus_message_map_properties_changed(
-                sd_bus_message *m,
-                const struct bus_properties_map *map,
-                void *userdata) {
-
-        const char *member;
-        int r, invalidated, i;
-
-        assert(m);
-        assert(map);
-
-        r = bus_message_map_all_properties(m, map, userdata);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "s");
-        if (r < 0)
-                return r;
-
-        invalidated = 0;
-        while ((r = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &member)) > 0)
-                for (i = 0; map[i].member; i++)
-                        if (streq(map[i].member, member)) {
-                                ++invalidated;
-                                break;
-                        }
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_exit_container(m);
-        if (r < 0)
-                return r;
-
-        return invalidated;
-}
-
-int bus_map_all_properties(
-                sd_bus *bus,
-                const char *destination,
-                const char *path,
-                const struct bus_properties_map *map,
-                void *userdata) {
-
-        _cleanup_bus_message_unref_ sd_bus_message *m = NULL;
-        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        int r;
-
-        assert(bus);
-        assert(destination);
-        assert(path);
-        assert(map);
-
-        r = sd_bus_call_method(
-                        bus,
-                        destination,
-                        path,
-                        "org.freedesktop.DBus.Properties",
-                        "GetAll",
-                        &error,
-                        &m,
-                        "s", "");
-        if (r < 0)
-                return r;
-
-        return bus_message_map_all_properties(m, map, userdata);
+        return r;
 }
 
 int bus_open_transport(BusTransport transport, const char *host, bool user, sd_bus **bus) {
@@ -1178,7 +1063,7 @@ int bus_open_transport(BusTransport transport, const char *host, bool user, sd_b
         assert(bus);
 
         assert_return((transport == BUS_TRANSPORT_LOCAL) == !host, -EINVAL);
-        assert_return(transport == BUS_TRANSPORT_LOCAL || !user, -EOPNOTSUPP);
+        assert_return(transport == BUS_TRANSPORT_LOCAL || !user, -ENOTSUP);
 
         switch (transport) {
 
@@ -1194,8 +1079,8 @@ int bus_open_transport(BusTransport transport, const char *host, bool user, sd_b
                 r = sd_bus_open_system_remote(bus, host);
                 break;
 
-        case BUS_TRANSPORT_MACHINE:
-                r = sd_bus_open_system_machine(bus, host);
+        case BUS_TRANSPORT_CONTAINER:
+                r = sd_bus_open_system_container(bus, host);
                 break;
 
         default:
@@ -1213,7 +1098,7 @@ int bus_open_transport_systemd(BusTransport transport, const char *host, bool us
         assert(bus);
 
         assert_return((transport == BUS_TRANSPORT_LOCAL) == !host, -EINVAL);
-        assert_return(transport == BUS_TRANSPORT_LOCAL || !user, -EOPNOTSUPP);
+        assert_return(transport == BUS_TRANSPORT_LOCAL || !user, -ENOTSUP);
 
         switch (transport) {
 
@@ -1229,8 +1114,8 @@ int bus_open_transport_systemd(BusTransport transport, const char *host, bool us
                 r = sd_bus_open_system_remote(bus, host);
                 break;
 
-        case BUS_TRANSPORT_MACHINE:
-                r = sd_bus_open_system_machine(bus, host);
+        case BUS_TRANSPORT_CONTAINER:
+                r = sd_bus_open_system_container(bus, host);
                 break;
 
         default:
@@ -1301,11 +1186,13 @@ int bus_property_get_ulong(
 #endif
 
 int bus_log_parse_error(int r) {
-        return log_error_errno(r, "Failed to parse bus message: %m");
+        log_error("Failed to parse message: %s", strerror(-r));
+        return r;
 }
 
 int bus_log_create_error(int r) {
-        return log_error_errno(r, "Failed to create bus message: %m");
+        log_error("Failed to create message: %s", strerror(-r));
+        return r;
 }
 
 int bus_parse_unit_info(sd_bus_message *message, UnitInfo *u) {
@@ -1378,7 +1265,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                         if (r < 0)
                                 return bus_log_create_error(r);
 
-                        r = sd_bus_message_append(m, "v", "t", USEC_INFINITY);
+                        r = sd_bus_message_append(m, "v", "t", (usec_t) -1);
 
                 } else if (endswith(eq, "%")) {
                         double percent;
@@ -1410,7 +1297,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
 
         if (STR_IN_SET(field,
                        "CPUAccounting", "MemoryAccounting", "BlockIOAccounting",
-                       "SendSIGHUP", "SendSIGKILL", "WakeSystem", "DefaultDependencies")) {
+                       "SendSIGHUP", "SendSIGKILL")) {
 
                 r = parse_boolean(eq);
                 if (r < 0) {
@@ -1571,17 +1458,6 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
 
                 r = sd_bus_message_append(m, "v", "i", sig);
 
-        } else if (streq(field, "AccuracySec")) {
-                usec_t u;
-
-                r = parse_sec(eq, &u);
-                if (r < 0) {
-                        log_error("Failed to parse %s value %s", field, eq);
-                        return -EINVAL;
-                }
-
-                r = sd_bus_message_append(m, "v", "t", u);
-
         } else {
                 log_error("Unknown assignment %s.", assignment);
                 return -EINVAL;
@@ -1591,494 +1467,4 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 return bus_log_create_error(r);
 
         return 0;
-}
-
-typedef struct BusWaitForJobs {
-        sd_bus *bus;
-        Set *jobs;
-
-        char *name;
-        char *result;
-
-        sd_bus_slot *slot_job_removed;
-        sd_bus_slot *slot_disconnected;
-} BusWaitForJobs;
-
-static int match_disconnected(sd_bus_message *m, void *userdata, sd_bus_error *error) {
-        assert(m);
-
-        log_error("Warning! D-Bus connection terminated.");
-        sd_bus_close(sd_bus_message_get_bus(m));
-
-        return 0;
-}
-
-static int match_job_removed(sd_bus_message *m, void *userdata, sd_bus_error *error) {
-        const char *path, *unit, *result;
-        BusWaitForJobs *d = userdata;
-        uint32_t id;
-        char *found;
-        int r;
-
-        assert(m);
-        assert(d);
-
-        r = sd_bus_message_read(m, "uoss", &id, &path, &unit, &result);
-        if (r < 0) {
-                bus_log_parse_error(r);
-                return 0;
-        }
-
-        found = set_remove(d->jobs, (char*) path);
-        if (!found)
-                return 0;
-
-        free(found);
-
-        if (!isempty(result))
-                d->result = strdup(result);
-
-        if (!isempty(unit))
-                d->name = strdup(unit);
-
-        return 0;
-}
-
-void bus_wait_for_jobs_free(BusWaitForJobs *d) {
-        if (!d)
-                return;
-
-        set_free_free(d->jobs);
-
-        sd_bus_slot_unref(d->slot_disconnected);
-        sd_bus_slot_unref(d->slot_job_removed);
-
-        sd_bus_unref(d->bus);
-
-        free(d->name);
-        free(d->result);
-
-        free(d);
-}
-
-int bus_wait_for_jobs_new(sd_bus *bus, BusWaitForJobs **ret) {
-        _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *d = NULL;
-        int r;
-
-        assert(bus);
-        assert(ret);
-
-        d = new0(BusWaitForJobs, 1);
-        if (!d)
-                return -ENOMEM;
-
-        d->bus = sd_bus_ref(bus);
-
-        /* When we are a bus client we match by sender. Direct
-         * connections OTOH have no initialized sender field, and
-         * hence we ignore the sender then */
-        r = sd_bus_add_match(
-                        bus,
-                        &d->slot_job_removed,
-                        bus->bus_client ?
-                        "type='signal',"
-                        "sender='org.freedesktop.systemd1',"
-                        "interface='org.freedesktop.systemd1.Manager',"
-                        "member='JobRemoved',"
-                        "path='/org/freedesktop/systemd1'" :
-                        "type='signal',"
-                        "interface='org.freedesktop.systemd1.Manager',"
-                        "member='JobRemoved',"
-                        "path='/org/freedesktop/systemd1'",
-                        match_job_removed, d);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_add_match(
-                        bus,
-                        &d->slot_disconnected,
-                        "type='signal',"
-                        "sender='org.freedesktop.DBus.Local',"
-                        "interface='org.freedesktop.DBus.Local',"
-                        "member='Disconnected'",
-                        match_disconnected, d);
-        if (r < 0)
-                return r;
-
-        *ret = d;
-        d = NULL;
-
-        return 0;
-}
-
-static int bus_process_wait(sd_bus *bus) {
-        int r;
-
-        for (;;) {
-                r = sd_bus_process(bus, NULL);
-                if (r < 0)
-                        return r;
-                if (r > 0)
-                        return 0;
-
-                r = sd_bus_wait(bus, (uint64_t) -1);
-                if (r < 0)
-                        return r;
-        }
-}
-
-static int bus_job_get_service_result(BusWaitForJobs *d, char **result) {
-        _cleanup_free_ char *dbus_path = NULL;
-
-        assert(d);
-        assert(d->name);
-        assert(result);
-
-        dbus_path = unit_dbus_path_from_name(d->name);
-        if (!dbus_path)
-                return -ENOMEM;
-
-        return sd_bus_get_property_string(d->bus,
-                                          "org.freedesktop.systemd1",
-                                          dbus_path,
-                                          "org.freedesktop.systemd1.Service",
-                                          "Result",
-                                          NULL,
-                                          result);
-}
-
-static const struct {
-        const char *result, *explanation;
-} explanations [] = {
-        { "resources",   "a configured resource limit was exceeded" },
-        { "timeout",     "a timeout was exceeded" },
-        { "exit-code",   "the control process exited with error code" },
-        { "signal",      "a fatal signal was delivered to the control process" },
-        { "core-dump",   "a fatal signal was delivered causing the control process to dump core" },
-        { "watchdog",    "the service failed to send watchdog ping" },
-        { "start-limit", "start of the service was attempted too often" }
-};
-
-static void log_job_error_with_service_result(const char* service, const char *result) {
-        _cleanup_free_ char *service_shell_quoted = NULL;
-
-        assert(service);
-
-        service_shell_quoted = shell_maybe_quote(service);
-
-        if (!isempty(result)) {
-                unsigned i;
-
-                for (i = 0; i < ELEMENTSOF(explanations); ++i)
-                        if (streq(result, explanations[i].result))
-                                break;
-
-                if (i < ELEMENTSOF(explanations)) {
-                        log_error("Job for %s failed because %s. See \"systemctl status %s\" and \"journalctl -xe\" for details.\n",
-                                  service,
-                                  explanations[i].explanation,
-                                  strna(service_shell_quoted));
-
-                        goto finish;
-                }
-        }
-
-        log_error("Job for %s failed. See \"systemctl status %s\" and \"journalctl -xe\" for details.\n",
-                  service,
-                  strna(service_shell_quoted));
-
-finish:
-        /* For some results maybe additional explanation is required */
-        if (streq_ptr(result, "start-limit"))
-                log_info("To force a start use \"systemctl reset-failed %1$s\" followed by \"systemctl start %1$s\" again.",
-                         strna(service_shell_quoted));
-}
-
-static int check_wait_response(BusWaitForJobs *d, bool quiet) {
-        int r = 0;
-
-        assert(d->result);
-
-        if (!quiet) {
-                if (streq(d->result, "canceled"))
-                        log_error("Job for %s canceled.", strna(d->name));
-                else if (streq(d->result, "timeout"))
-                        log_error("Job for %s timed out.", strna(d->name));
-                else if (streq(d->result, "dependency"))
-                        log_error("A dependency job for %s failed. See 'journalctl -xe' for details.", strna(d->name));
-                else if (streq(d->result, "invalid"))
-                        log_error("Job for %s invalid.", strna(d->name));
-                else if (streq(d->result, "assert"))
-                        log_error("Assertion failed on job for %s.", strna(d->name));
-                else if (streq(d->result, "unsupported"))
-                        log_error("Operation on or unit type of %s not supported on this system.", strna(d->name));
-                else if (!streq(d->result, "done") && !streq(d->result, "skipped")) {
-                        if (d->name) {
-                                int q;
-                                _cleanup_free_ char *result = NULL;
-
-                                q = bus_job_get_service_result(d, &result);
-                                if (q < 0)
-                                        log_debug_errno(q, "Failed to get Result property of service %s: %m", d->name);
-
-                                log_job_error_with_service_result(d->name, result);
-                        } else
-                                log_error("Job failed. See \"journalctl -xe\" for details.");
-                }
-        }
-
-        if (streq(d->result, "canceled"))
-                r = -ECANCELED;
-        else if (streq(d->result, "timeout"))
-                r = -ETIME;
-        else if (streq(d->result, "dependency"))
-                r = -EIO;
-        else if (streq(d->result, "invalid"))
-                r = -ENOEXEC;
-        else if (streq(d->result, "assert"))
-                r = -EPROTO;
-        else if (streq(d->result, "unsupported"))
-                r = -EOPNOTSUPP;
-        else if (!streq(d->result, "done") && !streq(d->result, "skipped"))
-                r = -EIO;
-
-        return r;
-}
-
-int bus_wait_for_jobs(BusWaitForJobs *d, bool quiet) {
-        int r = 0;
-
-        assert(d);
-
-        while (!set_isempty(d->jobs)) {
-                int q;
-
-                q = bus_process_wait(d->bus);
-                if (q < 0)
-                        return log_error_errno(q, "Failed to wait for response: %m");
-
-                if (d->result) {
-                        q = check_wait_response(d, quiet);
-                        /* Return the first error as it is most likely to be
-                         * meaningful. */
-                        if (q < 0 && r == 0)
-                                r = q;
-
-                        log_debug_errno(q, "Got result %s/%m for job %s", strna(d->result), strna(d->name));
-                }
-
-                free(d->name);
-                d->name = NULL;
-
-                free(d->result);
-                d->result = NULL;
-        }
-
-        return r;
-}
-
-int bus_wait_for_jobs_add(BusWaitForJobs *d, const char *path) {
-        int r;
-
-        assert(d);
-
-        r = set_ensure_allocated(&d->jobs, &string_hash_ops);
-        if (r < 0)
-                return r;
-
-        return set_put_strdup(d->jobs, path);
-}
-
-int bus_wait_for_jobs_one(BusWaitForJobs *d, const char *path, bool quiet) {
-        int r;
-
-        r = bus_wait_for_jobs_add(d, path);
-        if (r < 0)
-                return log_oom();
-
-        return bus_wait_for_jobs(d, quiet);
-}
-
-int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet, UnitFileChange **changes, unsigned *n_changes) {
-        const char *type, *path, *source;
-        int r;
-
-        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(sss)");
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        while ((r = sd_bus_message_read(m, "(sss)", &type, &path, &source)) > 0) {
-                if (!quiet) {
-                        if (streq(type, "symlink"))
-                                log_info("Created symlink from %s to %s.", path, source);
-                        else
-                                log_info("Removed symlink %s.", path);
-                }
-
-                r = unit_file_changes_add(changes, n_changes, streq(type, "symlink") ? UNIT_FILE_SYMLINK : UNIT_FILE_UNLINK, path, source);
-                if (r < 0)
-                        return r;
-        }
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        r = sd_bus_message_exit_container(m);
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        return 0;
-}
-
-/**
- * bus_path_encode_unique() - encode unique object path
- * @b: bus connection or NULL
- * @prefix: object path prefix
- * @sender_id: unique-name of client, or NULL
- * @external_id: external ID to be chosen by client, or NULL
- * @ret_path: storage for encoded object path pointer
- *
- * Whenever we provide a bus API that allows clients to create and manage
- * server-side objects, we need to provide a unique name for these objects. If
- * we let the server choose the name, we suffer from a race condition: If a
- * client creates an object asynchronously, it cannot destroy that object until
- * it received the method reply. It cannot know the name of the new object,
- * thus, it cannot destroy it. Furthermore, it enforces a round-trip.
- *
- * Therefore, many APIs allow the client to choose the unique name for newly
- * created objects. There're two problems to solve, though:
- *    1) Object names are usually defined via dbus object paths, which are
- *       usually globally namespaced. Therefore, multiple clients must be able
- *       to choose unique object names without interference.
- *    2) If multiple libraries share the same bus connection, they must be
- *       able to choose unique object names without interference.
- * The first problem is solved easily by prefixing a name with the
- * unique-bus-name of a connection. The server side must enforce this and
- * reject any other name. The second problem is solved by providing unique
- * suffixes from within sd-bus.
- *
- * This helper allows clients to create unique object-paths. It uses the
- * template '/prefix/sender_id/external_id' and returns the new path in
- * @ret_path (must be freed by the caller).
- * If @sender_id is NULL, the unique-name of @b is used. If @external_id is
- * NULL, this function allocates a unique suffix via @b (by requesting a new
- * cookie). If both @sender_id and @external_id are given, @b can be passed as
- * NULL.
- *
- * Returns: 0 on success, negative error code on failure.
- */
-int bus_path_encode_unique(sd_bus *b, const char *prefix, const char *sender_id, const char *external_id, char **ret_path) {
-        _cleanup_free_ char *sender_label = NULL, *external_label = NULL;
-        char external_buf[DECIMAL_STR_MAX(uint64_t)], *p;
-        int r;
-
-        assert_return(b || (sender_id && external_id), -EINVAL);
-        assert_return(object_path_is_valid(prefix), -EINVAL);
-        assert_return(ret_path, -EINVAL);
-
-        if (!sender_id) {
-                r = sd_bus_get_unique_name(b, &sender_id);
-                if (r < 0)
-                        return r;
-        }
-
-        if (!external_id) {
-                xsprintf(external_buf, "%"PRIu64, ++b->cookie);
-                external_id = external_buf;
-        }
-
-        sender_label = bus_label_escape(sender_id);
-        if (!sender_label)
-                return -ENOMEM;
-
-        external_label = bus_label_escape(external_id);
-        if (!external_label)
-                return -ENOMEM;
-
-        p = strjoin(prefix, "/", sender_label, "/", external_label, NULL);
-        if (!p)
-                return -ENOMEM;
-
-        *ret_path = p;
-        return 0;
-}
-
-/**
- * bus_path_decode_unique() - decode unique object path
- * @path: object path to decode
- * @prefix: object path prefix
- * @ret_sender: output parameter for sender-id label
- * @ret_external: output parameter for external-id label
- *
- * This does the reverse of bus_path_encode_unique() (see its description for
- * details). Both trailing labels, sender-id and external-id, are unescaped and
- * returned in the given output parameters (the caller must free them).
- *
- * Note that this function returns 0 if the path does not match the template
- * (see bus_path_encode_unique()), 1 if it matched.
- *
- * Returns: Negative error code on failure, 0 if the given object path does not
- *          match the template (return parameters are set to NULL), 1 if it was
- *          parsed successfully (return parameters contain allocated labels).
- */
-int bus_path_decode_unique(const char *path, const char *prefix, char **ret_sender, char **ret_external) {
-        const char *p, *q;
-        char *sender, *external;
-
-        assert(object_path_is_valid(path));
-        assert(object_path_is_valid(prefix));
-        assert(ret_sender);
-        assert(ret_external);
-
-        p = object_path_startswith(path, prefix);
-        if (!p) {
-                *ret_sender = NULL;
-                *ret_external = NULL;
-                return 0;
-        }
-
-        q = strchr(p, '/');
-        if (!q) {
-                *ret_sender = NULL;
-                *ret_external = NULL;
-                return 0;
-        }
-
-        sender = bus_label_unescape_n(p, q - p);
-        external = bus_label_unescape(q + 1);
-        if (!sender || !external) {
-                free(sender);
-                free(external);
-                return -ENOMEM;
-        }
-
-        *ret_sender = sender;
-        *ret_external = external;
-        return 1;
-}
-
-bool is_kdbus_wanted(void) {
-        _cleanup_free_ char *value = NULL;
-        int r;
-
-        if (get_proc_cmdline_key("kdbus", NULL) <= 0) {
-                r = get_proc_cmdline_key("kdbus=", &value);
-                if (r <= 0 || parse_boolean(value) != 1)
-                        return false;
-        }
-
-        return true;
-}
-
-bool is_kdbus_available(void) {
-        _cleanup_close_ int fd = -1;
-        struct kdbus_cmd cmd = { .size = sizeof(cmd), .flags = KDBUS_FLAG_NEGOTIATE };
-
-        if (!is_kdbus_wanted())
-                return false;
-
-        fd = open("/sys/fs/kdbus/control", O_RDWR | O_CLOEXEC | O_NONBLOCK | O_NOCTTY);
-        if (fd < 0)
-                return false;
-
-        return ioctl(fd, KDBUS_CMD_BUS_MAKE, &cmd) >= 0;
 }

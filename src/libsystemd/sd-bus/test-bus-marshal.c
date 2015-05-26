@@ -19,8 +19,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <stdlib.h>
-#include <math.h>
+#include <byteswap.h>
 
 #ifdef HAVE_GLIB
 #include <gio/gio.h>
@@ -38,16 +39,6 @@
 #include "bus-util.h"
 #include "bus-dump.h"
 #include "bus-label.h"
-
-static void test_bus_path_encode_unique(void) {
-        _cleanup_free_ char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *e = NULL;
-
-        assert_se(bus_path_encode_unique(NULL, "/foo/bar", "some.sender", "a.suffix", &a) >= 0 && streq_ptr(a, "/foo/bar/some_2esender/a_2esuffix"));
-        assert_se(bus_path_decode_unique(a, "/foo/bar", &b, &c) > 0 && streq_ptr(b, "some.sender") && streq_ptr(c, "a.suffix"));
-        assert_se(bus_path_decode_unique(a, "/bar/foo", &d, &d) == 0 && !d);
-        assert_se(bus_path_decode_unique("/foo/bar/onlyOneSuffix", "/foo/bar", &d, &d) == 0 && !d);
-        assert_se(bus_path_decode_unique("/foo/bar/_/_", "/foo/bar", &d, &e) > 0 && streq_ptr(d, "") && streq_ptr(e, ""));
-}
 
 static void test_bus_path_encode(void) {
         _cleanup_free_ char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *e = NULL, *f = NULL;
@@ -103,8 +94,6 @@ int main(int argc, char *argv[]) {
         _cleanup_fclose_ FILE *ms = NULL;
         size_t first_size = 0, second_size = 0, third_size = 0;
         _cleanup_bus_unref_ sd_bus *bus = NULL;
-        double dbl;
-        uint64_t u64;
 
         r = sd_bus_default_system(&bus);
         if (r < 0)
@@ -156,16 +145,13 @@ int main(int argc, char *argv[]) {
         r = sd_bus_message_append_array(m, 'u', NULL, 0);
         assert_se(r >= 0);
 
-        r = sd_bus_message_append(m, "a(stdo)", 1, "foo", 815ULL, 47.0, "/");
-        assert_se(r >= 0);
-
         r = bus_message_seal(m, 4711, 0);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+        bus_message_dump(m, stdout, true);
 
         ms = open_memstream(&first, &first_size);
-        bus_message_dump(m, ms, 0);
+        bus_message_dump(m, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
 
@@ -215,11 +201,11 @@ int main(int argc, char *argv[]) {
         r = bus_message_from_malloc(bus, buffer, sz, NULL, 0, NULL, NULL, &m);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+        bus_message_dump(m, stdout, true);
 
         fclose(ms);
         ms = open_memstream(&second, &second_size);
-        bus_message_dump(m, ms, 0);
+        bus_message_dump(m, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
         assert_se(first_size == second_size);
@@ -282,13 +268,6 @@ int main(int argc, char *argv[]) {
         assert_se(r > 0);
         assert_se(sz == 0);
 
-        r = sd_bus_message_read(m, "a(stdo)", 1, &x, &u64, &dbl, &y);
-        assert_se(r > 0);
-        assert_se(streq(x, "foo"));
-        assert_se(u64 == 815ULL);
-        assert_se(fabs(dbl - 47.0) < 0.1);
-        assert_se(streq(y, "/"));
-
         r = sd_bus_message_peek_type(m, NULL, NULL);
         assert_se(r == 0);
 
@@ -306,7 +285,7 @@ int main(int argc, char *argv[]) {
 
         fclose(ms);
         ms = open_memstream(&third, &third_size);
-        bus_message_dump(copy, ms, 0);
+        bus_message_dump(copy, ms, false);
         fflush(ms);
         assert_se(!ferror(ms));
 
@@ -367,7 +346,6 @@ int main(int argc, char *argv[]) {
 
         test_bus_label_escape();
         test_bus_path_encode();
-        test_bus_path_encode_unique();
 
         return 0;
 }

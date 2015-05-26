@@ -1,5 +1,5 @@
 '\" t
-.TH "SD_BUS_MESSAGE_APPEND" "3" "" "systemd 220" "sd_bus_message_append"
+.TH "SD_BUS_MESSAGE_APPEND" "3" "" "systemd 215" "sd_bus_message_append"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -50,7 +50,7 @@ and
 ")"\&. This sequence cannot be empty \(em it must contain at least one type\&. Arguments corresponding to this nested sequence follow the same rules as if they were not nested\&.
 .PP
 A variant is denoted by
-"v"\&. Corresponding arguments must include a format string denoting a complete type, and following that, arguments corresponding to the specified type\&.
+"v"\&. Correspoding arguments must include a format string denoting a complete type, and following that, arguments corresponding to the specified type\&.
 .PP
 An array is denoted by
 "a"
@@ -105,7 +105,7 @@ T{
 T}:T{
 \fBSD_BUS_TYPE_BYTE\fR
 T}:T{
-unsigned integer
+unsigned interger
 T}:T{
 1 byte
 T}
@@ -380,27 +380,27 @@ On success, this call returns 0 or a positive integer\&. On failure, this call r
 .PP
 Returned errors may indicate the following problems:
 .PP
-\fB\-EINVAL\fR
+\fI\-EINVAL\fR
 .RS 4
 Specified parameter is invalid\&.
 .RE
 .PP
-\fB\-EPERM\fR
+\fI\-EPERM\fR
 .RS 4
 Message has been sealed\&.
 .RE
 .PP
-\fB\-ESTALE\fR
+\fI\-ESTALE\fR
 .RS 4
 Message is in invalid state\&.
 .RE
 .PP
-\fB\-ENXIO\fR
+\fI\-ENXIO\fR
 .RS 4
 Message cannot be appended to\&.
 .RE
 .PP
-\fB\-ENOMEM\fR
+\fI\-ENOMEM\fR
 .RS 4
 Memory allocation failed\&.
 .RE

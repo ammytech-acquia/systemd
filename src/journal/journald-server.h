@@ -21,12 +21,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <inttypes.h>
 #include <stdbool.h>
+#include <sys/epoll.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 
 #include "sd-event.h"
 #include "journal-file.h"
 #include "hashmap.h"
+#include "util.h"
 #include "audit.h"
 #include "journald-rate-limit.h"
 #include "list.h"
@@ -55,7 +59,6 @@ typedef struct Server {
         int native_fd;
         int stdout_fd;
         int dev_kmsg_fd;
-        int audit_fd;
         int hostname_fd;
 
         sd_event *event;
@@ -64,7 +67,6 @@ typedef struct Server {
         sd_event_source *native_event_source;
         sd_event_source *stdout_event_source;
         sd_event_source *dev_kmsg_event_source;
-        sd_event_source *audit_event_source;
         sd_event_source *sync_event_source;
         sd_event_source *sigusr1_event_source;
         sd_event_source *sigusr2_event_source;
@@ -74,7 +76,7 @@ typedef struct Server {
 
         JournalFile *runtime_journal;
         JournalFile *system_journal;
-        OrderedHashmap *user_journals;
+        Hashmap *user_journals;
 
         uint64_t seqnum;
 
@@ -146,7 +148,7 @@ typedef struct Server {
 #define N_IOVEC_UDEV_FIELDS 32
 #define N_IOVEC_OBJECT_FIELDS 11
 
-void server_dispatch_message(Server *s, struct iovec *iovec, unsigned n, unsigned m, const struct ucred *ucred, const struct timeval *tv, const char *label, size_t label_len, const char *unit_id, int priority, pid_t object_pid);
+void server_dispatch_message(Server *s, struct iovec *iovec, unsigned n, unsigned m, struct ucred *ucred, struct timeval *tv, const char *label, size_t label_len, const char *unit_id, int priority, pid_t object_pid);
 void server_driver_message(Server *s, sd_id128_t message_id, const char *format, ...) _printf_(3,4);
 
 /* gperf lookup function */
@@ -163,6 +165,7 @@ const char *split_mode_to_string(SplitMode s) _const_;
 SplitMode split_mode_from_string(const char *s) _pure_;
 
 void server_fix_perms(Server *s, JournalFile *f, uid_t uid);
+bool shall_try_append_again(JournalFile *f, int r);
 int server_init(Server *s);
 void server_done(Server *s);
 void server_sync(Server *s);
@@ -171,4 +174,4 @@ void server_rotate(Server *s);
 int server_schedule_sync(Server *s, int priority);
 int server_flush_to_var(Server *s);
 void server_maybe_append_tags(Server *s);
-int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void *userdata);
+int process_datagram(sd_event_source *es, int fd, uint32_t revents, void *userdata);

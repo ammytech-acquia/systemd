@@ -24,90 +24,10 @@
 <xsl:import href="http://docbook.sourceforge.net/release/xsl/current/html/docbook.xsl"/>
 
 <!-- translate man page references to links to html pages -->
-<xsl:template match="citerefentry[not(@project)]">
+<xsl:template match="citerefentry">
   <a>
     <xsl:attribute name="href">
       <xsl:value-of select="refentrytitle"/><xsl:text>.html</xsl:text>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='man-pages'] | citerefentry[manvolnum='2'] | citerefentry[manvolnum='4']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>http://man7.org/linux/man-pages/man</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-      <xsl:text>.</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>.html</xsl:text>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='die-net']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>http://linux.die.net/man/</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='mankier']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>https://www.mankier.com/</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='archlinux']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>https://www.archlinux.org/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-      <xsl:text>/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-      <xsl:text>.</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>.html</xsl:text>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='freebsd']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>https://www.freebsd.org/cgi/man.cgi?</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-      <xsl:text>(</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>)</xsl:text>
-    </xsl:attribute>
-    <xsl:call-template name="inline.charseq"/>
-  </a>
-</xsl:template>
-
-<xsl:template match="citerefentry[@project='dbus']">
-  <a>
-    <xsl:attribute name="href">
-      <xsl:text>http://dbus.freedesktop.org/doc/</xsl:text>
-      <xsl:value-of select="refentrytitle"/>
-      <xsl:text>.</xsl:text>
-      <xsl:value-of select="manvolnum"/>
-      <xsl:text>.html</xsl:text>
     </xsl:attribute>
     <xsl:call-template name="inline.charseq"/>
   </a>

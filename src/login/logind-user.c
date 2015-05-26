@@ -26,8 +26,8 @@
 
 #include "util.h"
 #include "mkdir.h"
-#include "rm-rf.h"
 #include "hashmap.h"
+#include "strv.h"
 #include "fileio.h"
 #include "path-util.h"
 #include "special.h"
@@ -37,8 +37,6 @@
 #include "conf-parser.h"
 #include "clean-ipc.h"
 #include "logind-user.h"
-#include "smack-util.h"
-#include "formats-util.h"
 
 User* user_new(Manager *m, uid_t uid, gid_t gid, const char *name) {
         User *u;
@@ -57,7 +55,7 @@ User* user_new(Manager *m, uid_t uid, gid_t gid, const char *name) {
         if (asprintf(&u->state_file, "/run/systemd/users/"UID_FMT, uid) < 0)
                 goto fail;
 
-        if (hashmap_put(m->users, UID_TO_PTR(uid), u) < 0)
+        if (hashmap_put(m->users, ULONG_TO_PTR((unsigned long) uid), u) < 0)
                 goto fail;
 
         u->manager = m;
@@ -98,7 +96,7 @@ void user_free(User *u) {
 
         free(u->runtime_path);
 
-        hashmap_remove(u->manager->users, UID_TO_PTR(u->uid));
+        hashmap_remove(u->manager->users, ULONG_TO_PTR((unsigned long) u->uid));
 
         free(u->name);
         free(u->state_file);
@@ -253,7 +251,7 @@ int user_save(User *u) {
 
 finish:
         if (r < 0)
-                log_error_errno(r, "Failed to save user data %s: %m", u->state_file);
+                log_error("Failed to save user data %s: %s", u->state_file, strerror(-r));
 
         return r;
 }
@@ -279,7 +277,7 @@ int user_load(User *u) {
                 if (r == -ENOENT)
                         return 0;
 
-                log_error_errno(r, "Failed to read %s: %m", u->state_file);
+                log_error("Failed to read %s: %s", u->state_file, strerror(-r));
                 return r;
         }
 
@@ -311,8 +309,10 @@ static int user_mkdir_runtime_path(User *u) {
         assert(u);
 
         r = mkdir_safe_label("/run/user", 0755, 0, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to create /run/user: %m");
+        if (r < 0) {
+                log_error("Failed to create /run/user: %s", strerror(-r));
+                return r;
+        }
 
         if (!u->runtime_path) {
                 if (asprintf(&p, "/run/user/" UID_FMT, u->uid) < 0)
@@ -323,33 +323,17 @@ static int user_mkdir_runtime_path(User *u) {
         if (path_is_mount_point(p, false) <= 0) {
                 _cleanup_free_ char *t = NULL;
 
-                (void) mkdir(p, 0700);
+                mkdir(p, 0700);
 
-                if (mac_smack_use())
-                        r = asprintf(&t, "mode=0700,smackfsroot=*,uid=" UID_FMT ",gid=" GID_FMT ",size=%zu", u->uid, u->gid, u->manager->runtime_dir_size);
-                else
-                        r = asprintf(&t, "mode=0700,uid=" UID_FMT ",gid=" GID_FMT ",size=%zu", u->uid, u->gid, u->manager->runtime_dir_size);
-                if (r < 0) {
+                if (asprintf(&t, "mode=0700,uid=" UID_FMT ",gid=" GID_FMT ",size=%zu", u->uid, u->gid, u->manager->runtime_dir_size) < 0) {
                         r = log_oom();
                         goto fail;
                 }
 
                 r = mount("tmpfs", p, "tmpfs", MS_NODEV|MS_NOSUID, t);
                 if (r < 0) {
-                        if (errno != EPERM) {
-                                r = log_error_errno(errno, "Failed to mount per-user tmpfs directory %s: %m", p);
-                                goto fail;
-                        }
-
-                        /* Lacking permissions, maybe
-                         * CAP_SYS_ADMIN-less container? In this case,
-                         * just use a normal directory. */
-
-                        r = chmod_and_chown(p, 0700, u->uid, u->gid);
-                        if (r < 0) {
-                                log_error_errno(r, "Failed to change runtime directory ownership and mode: %m");
-                                goto fail;
-                        }
+                        log_error("Failed to mount per-user tmpfs directory %s: %s", p, strerror(-r));
+                        goto fail;
                 }
         }
 
@@ -357,12 +341,7 @@ static int user_mkdir_runtime_path(User *u) {
         return 0;
 
 fail:
-        if (p) {
-                /* Try to clean up, but ignore errors */
-                (void) rmdir(p);
-                free(p);
-        }
-
+        free(p);
         u->runtime_path = NULL;
         return r;
 }
@@ -378,7 +357,7 @@ static int user_start_slice(User *u) {
                 char lu[DECIMAL_STR_MAX(uid_t) + 1], *slice;
                 sprintf(lu, UID_FMT, u->uid);
 
-                r = slice_build_subslice(SPECIAL_USER_SLICE, lu, &slice);
+                r = build_subslice(SPECIAL_USER_SLICE, lu, &slice);
                 if (r < 0)
                         return r;
 
@@ -411,9 +390,9 @@ static int user_start_service(User *u) {
                 char lu[DECIMAL_STR_MAX(uid_t) + 1], *service;
                 sprintf(lu, UID_FMT, u->uid);
 
-                r = unit_name_build("user", lu, ".service", &service);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to build service name: %m");
+                service = unit_name_build("user", lu, ".service");
+                if (!service)
+                        return log_oom();
 
                 r = manager_start_unit(u->manager, service, &error, &job);
                 if (r < 0) {
@@ -523,20 +502,16 @@ static int user_remove_runtime_path(User *u) {
         if (!u->runtime_path)
                 return 0;
 
-        r = rm_rf(u->runtime_path, 0);
+        r = rm_rf(u->runtime_path, false, false, false);
         if (r < 0)
-                log_error_errno(r, "Failed to remove runtime directory %s: %m", u->runtime_path);
+                log_error("Failed to remove runtime directory %s: %s", u->runtime_path, strerror(-r));
 
-        /* Ignore cases where the directory isn't mounted, as that's
-         * quite possible, if we lacked the permissions to mount
-         * something */
-        r = umount2(u->runtime_path, MNT_DETACH);
-        if (r < 0 && errno != EINVAL && errno != ENOENT)
-                log_error_errno(errno, "Failed to unmount user runtime directory %s: %m", u->runtime_path);
+        if (umount2(u->runtime_path, MNT_DETACH) < 0)
+                log_error("Failed to unmount user runtime directory %s: %m", u->runtime_path);
 
-        r = rm_rf(u->runtime_path, REMOVE_ROOT);
+        r = rm_rf(u->runtime_path, false, true, false);
         if (r < 0)
-                log_error_errno(r, "Failed to remove runtime directory %s: %m", u->runtime_path);
+                log_error("Failed to remove runtime directory %s: %s", u->runtime_path, strerror(-r));
 
         free(u->runtime_path);
         u->runtime_path = NULL;
@@ -660,7 +635,7 @@ int user_check_linger_file(User *u) {
         if (!cc)
                 return -ENOMEM;
 
-        p = strjoina("/var/lib/systemd/linger/", cc);
+        p = strappenda("/var/lib/systemd/linger/", cc);
 
         return access(p, F_OK) >= 0;
 }
@@ -739,7 +714,7 @@ int user_kill(User *u, int signo) {
 }
 
 void user_elect_display(User *u) {
-        Session *graphical = NULL, *text = NULL, *other = NULL, *s;
+        Session *graphical = NULL, *text = NULL, *s;
 
         assert(u);
 
@@ -757,35 +732,22 @@ void user_elect_display(User *u) {
 
                 if (SESSION_TYPE_IS_GRAPHICAL(s->type))
                         graphical = s;
-                else if (s->type == SESSION_TTY)
-                        text = s;
                 else
-                        other = s;
+                        text = s;
         }
 
         if (graphical &&
             (!u->display ||
              u->display->class != SESSION_USER ||
              u->display->stopping ||
-             !SESSION_TYPE_IS_GRAPHICAL(u->display->type))) {
+             !SESSION_TYPE_IS_GRAPHICAL(u->display->type)))
                 u->display = graphical;
-                return;
-        }
 
         if (text &&
             (!u->display ||
              u->display->class != SESSION_USER ||
-             u->display->stopping ||
-             u->display->type != SESSION_TTY)) {
-                u->display = text;
-                return;
-        }
-
-        if (other &&
-            (!u->display ||
-             u->display->class != SESSION_USER ||
              u->display->stopping))
-                u->display = other;
+                u->display = text;
 }
 
 static const char* const user_state_table[_USER_STATE_MAX] = {

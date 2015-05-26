@@ -19,11 +19,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <libgen.h>
 #include <sys/socket.h>
 
 #include "namespace.h"
 #include "util.h"
-#include "process-util.h"
 
 static void test_tmpdir(const char *id, const char *A, const char *B) {
         _cleanup_free_ char *a, *b;
@@ -43,8 +43,8 @@ static void test_tmpdir(const char *id, const char *A, const char *B) {
         assert_se((x.st_mode & 01777) == 0700);
         assert_se((y.st_mode & 01777) == 0700);
 
-        c = strjoina(a, "/tmp");
-        d = strjoina(b, "/tmp");
+        c = strappenda(a, "/tmp");
+        d = strappenda(b, "/tmp");
 
         assert_se(stat(c, &x) >= 0);
         assert_se(stat(d, &y) >= 0);

@@ -20,7 +20,6 @@
 ***/
 
 #include "time-util.h"
-#include "strv.h"
 
 static void test_parse_sec(void) {
         usec_t u;
@@ -43,18 +42,12 @@ static void test_parse_sec(void) {
         assert_se(u == 2500 * USEC_PER_MSEC);
         assert_se(parse_sec(".7", &u) >= 0);
         assert_se(u == 700 * USEC_PER_MSEC);
-        assert_se(parse_sec("infinity", &u) >= 0);
-        assert_se(u == USEC_INFINITY);
-        assert_se(parse_sec(" infinity ", &u) >= 0);
-        assert_se(u == USEC_INFINITY);
 
         assert_se(parse_sec(" xyz ", &u) < 0);
         assert_se(parse_sec("", &u) < 0);
         assert_se(parse_sec(" . ", &u) < 0);
         assert_se(parse_sec(" 5. ", &u) < 0);
         assert_se(parse_sec(".s ", &u) < 0);
-        assert_se(parse_sec(" infinity .7", &u) < 0);
-        assert_se(parse_sec(".3 infinity", &u) < 0);
 }
 
 static void test_parse_nsec(void) {
@@ -78,18 +71,12 @@ static void test_parse_nsec(void) {
         assert_se(u == 2);
         assert_se(parse_nsec(".7", &u) >= 0);
         assert_se(u == 0);
-        assert_se(parse_nsec("infinity", &u) >= 0);
-        assert_se(u == NSEC_INFINITY);
-        assert_se(parse_nsec(" infinity ", &u) >= 0);
-        assert_se(u == NSEC_INFINITY);
 
         assert_se(parse_nsec(" xyz ", &u) < 0);
         assert_se(parse_nsec("", &u) < 0);
         assert_se(parse_nsec(" . ", &u) < 0);
         assert_se(parse_nsec(" 5. ", &u) < 0);
         assert_se(parse_nsec(".s ", &u) < 0);
-        assert_se(parse_nsec(" infinity .7", &u) < 0);
-        assert_se(parse_nsec(".3 infinity", &u) < 0);
 }
 
 static void test_format_timespan_one(usec_t x, usec_t accuracy) {
@@ -137,26 +124,6 @@ static void test_format_timespan(usec_t accuracy) {
         test_format_timespan_one(986087, accuracy);
         test_format_timespan_one(500 * USEC_PER_MSEC, accuracy);
         test_format_timespan_one(9*USEC_PER_YEAR/5 - 23, accuracy);
-        test_format_timespan_one(USEC_INFINITY, accuracy);
-}
-
-static void test_timezone_is_valid(void) {
-        assert_se(timezone_is_valid("Europe/Berlin"));
-        assert_se(timezone_is_valid("Australia/Sydney"));
-        assert_se(!timezone_is_valid("Europe/Do not exist"));
-}
-
-static void test_get_timezones(void) {
-        _cleanup_strv_free_ char **zones = NULL;
-        int r;
-        char **zone;
-
-        r = get_timezones(&zones);
-        assert_se(r == 0);
-
-        STRV_FOREACH(zone, zones) {
-                assert_se(timezone_is_valid(*zone));
-        }
 }
 
 int main(int argc, char *argv[]) {
@@ -165,8 +132,5 @@ int main(int argc, char *argv[]) {
         test_format_timespan(1);
         test_format_timespan(USEC_PER_MSEC);
         test_format_timespan(USEC_PER_SEC);
-        test_timezone_is_valid();
-        test_get_timezones();
-
         return 0;
 }

@@ -12,6 +12,7 @@
  * GNU General Public License for more details.
  */
 
+#include <time.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,27 +20,30 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <sys/un.h>
 
 #include "udev.h"
 #include "udev-util.h"
 
-static void print_help(void) {
-        printf("%s control COMMAND\n\n"
-               "Control the udev daemon.\n\n"
-               "  -h --help                Show this help\n"
-               "     --version             Show package version\n"
-               "  -e --exit                Instruct the daemon to cleanup and exit\n"
-               "  -l --log-priority=LEVEL  Set the udev log level for the daemon\n"
-               "  -s --stop-exec-queue     Do not execute events, queue only\n"
-               "  -S --start-exec-queue    Execute events, flush queue\n"
-               "  -R --reload              Reload rules and databases\n"
-               "  -p --property=KEY=VALUE  Set a global property for all events\n"
-               "  -m --children-max=N      Maximum number of children\n"
-               "     --timeout=SECONDS     Maximum time to block for a reply\n"
-               , program_invocation_short_name);
+static void print_help(void)
+{
+        printf("Usage: udevadm control COMMAND\n"
+                "  -e,--exit                 instruct the daemon to cleanup and exit\n"
+                "  -l,--log-priority=LEVEL   set the udev log level for the daemon\n"
+                "  -s,--stop-exec-queue      do not execute events, queue only\n"
+                "  -S,--start-exec-queue     execute events, flush queue\n"
+                "  -R,--reload               reload rules and databases\n"
+                "  -p,--property=KEY=VALUE   set a global property for all events\n"
+                "  -m,--children-max=N       maximum number of children\n"
+                "     --timeout=SECONDS      maximum time to block for a reply\n"
+                "  -h,--help                 print this help text\n\n");
 }
 
-static int adm_control(struct udev *udev, int argc, char *argv[]) {
+static int adm_control(struct udev *udev, int argc, char *argv[])
+{
         _cleanup_udev_ctrl_unref_ struct udev_ctrl *uctrl = NULL;
         int timeout = 60;
         int rc = 1, c;
@@ -159,5 +163,5 @@ static int adm_control(struct udev *udev, int argc, char *argv[]) {
 const struct udevadm_cmd udevadm_control = {
         .name = "control",
         .cmd = adm_control,
-        .help = "Control the udev daemon",
+        .help = "control the udev daemon",
 };

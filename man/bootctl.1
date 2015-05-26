@@ -1,5 +1,5 @@
 '\" t
-.TH "BOOTCTL" "1" "" "systemd 220" "bootctl"
+.TH "BOOTCTL" "1" "" "systemd 215" "bootctl"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -22,34 +22,18 @@
 .SH "NAME"
 bootctl \- Control the firmware and boot manager settings
 .SH "SYNOPSIS"
-.HP \w'\fBbootctl\ \fR\fB[OPTIONS...]\fR\fBstatus\fR\ 'u
-\fBbootctl \fR\fB[OPTIONS...]\fR\fBstatus\fR
-.HP \w'\fBbootctl\ \fR\fB[OPTIONS...]\fR\fBupdate\fR\ 'u
-\fBbootctl \fR\fB[OPTIONS...]\fR\fBupdate\fR
-.HP \w'\fBbootctl\ \fR\fB[OPTIONS...]\fR\fBinstall\fR\ 'u
-\fBbootctl \fR\fB[OPTIONS...]\fR\fBinstall\fR
-.HP \w'\fBbootctl\ \fR\fB[OPTIONS...]\fR\fBremove\fR\ 'u
-\fBbootctl \fR\fB[OPTIONS...]\fR\fBremove\fR
+.HP \w'\fBbootctl\fR\ 'u
+\fBbootctl\fR [OPTIONS...] {COMMAND}
 .SH "DESCRIPTION"
 .PP
 \fBbootctl\fR
-checks, updates, installs or removes the boot loader from the current system\&.
+may be used to query or (in the future) change the firmware and boot manager settings\&.
 .PP
-\fBbootctl status\fR
-checks and prints the currently installed versions of the boot loader binaries and the all current EFI boot variables\&.
+Firmware information is available only on EFI systems\&.
 .PP
-\fBbootctl update\fR
-updates all installed versions of systemd\-boot, if the current version is newer than the version installed in the EFI system partition\&. This also includes the EFI default/fallback loader at /EFI/Boot/boot*\&.efi\&. A systemd\-boot entry in the EFI boot variables is created, if there is no current entry\&. The created entry will be added to the end of the boot order list\&.
-.PP
-\fBbootctl install\fR
-installs systemd\-boot into the EFI system partition\&. A copy of systemd\-boot will be stored as the EFI default/fallback loader at /EFI/Boot/boot*\&.efi\&. A systemd\-boot entry in the EFI boot variables is created and added to the top of the boot order list\&.
-.PP
-\fBbootctl remove\fR
-removes all installed versions of systemd\-boot from the EFI system partition, and removes systemd\-boot from the EFI boot variables\&.
-.PP
-If no command is passed
-\fBstatus\fR
-is implied\&.
+Currently, only the
+\fBgummiboot\fR(8)
+boot manager implements the required boot loader interface to provide complete boot manager information\&.
 .SH "OPTIONS"
 .PP
 The following options are understood:
@@ -64,29 +48,33 @@ Print a short help text and exit\&.
 Print a short version string and exit\&.
 .RE
 .PP
-\fB\-\-path\fR
-.RS 4
-Path to the EFI system partition\&. The default is /boot\&.
-.RE
+The following commands are understood:
 .PP
-\fB\-\-no\-variables\fR
+\fBstatus\fR
 .RS 4
-Do not touch the EFI boot variables\&.
+Show firmware and boot manager information about the system, including secure boot mode status and selected firmware entry (where available)\&.
 .RE
 .SH "EXIT STATUS"
 .PP
-On success 0 is returned, a non\-zero failure code otherwise\&.
+On success, 0 is returned, a non\-zero failure code otherwise\&.
 .SH "SEE ALSO"
 .PP
-\m[blue]\fBBoot loader specification\fR\m[]\&\s-2\u[1]\d\s+2\m[blue]\fBSystemd boot loader interface\fR\m[]\&\s-2\u[2]\d\s+2
+\m[blue]\fBBoot loader interface\fR\m[]\&\s-2\u[1]\d\s+2,
+\m[blue]\fBBoot loader specification\fR\m[]\&\s-2\u[2]\d\s+2,
+\m[blue]\fBgummiboot\fR\m[]\&\s-2\u[3]\d\s+2
 .SH "NOTES"
 .IP " 1." 4
+Boot loader interface
+.RS 4
+\%http://www.freedesktop.org/wiki/Software/systemd/BootLoaderInterface
+.RE
+.IP " 2." 4
 Boot loader specification
 .RS 4
 \%http://www.freedesktop.org/wiki/Specifications/BootLoaderSpec
 .RE
-.IP " 2." 4
-Systemd boot loader interface
+.IP " 3." 4
+gummiboot
 .RS 4
-\%http://www.freedesktop.org/wiki/Software/systemd/BootLoaderInterface
+\%http://www.freedesktop.org/wiki/Software/gummiboot/
 .RE

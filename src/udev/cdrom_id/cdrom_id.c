@@ -36,7 +36,21 @@
 
 #include "libudev.h"
 #include "libudev-private.h"
-#include "random-util.h"
+
+static bool debug;
+
+_printf_(6,0)
+static void log_fn(struct udev *udev, int priority,
+                   const char *file, int line, const char *fn,
+                   const char *format, va_list args)
+{
+        if (debug) {
+                fprintf(stderr, "%s: ", fn);
+                vfprintf(stderr, format, args);
+        } else {
+                vsyslog(priority, format, args);
+        }
+}
 
 /* device info */
 static unsigned int cd_cd_rom;
@@ -599,7 +613,7 @@ static int cd_profiles(struct udev *udev, int fd)
                 switch (feature) {
                 case 0x00:
                         log_debug("GET CONFIGURATION: feature 'profiles', with %i entries", features[i+3] / 4);
-                        feature_profiles(udev, &features[i]+4, MIN(features[i+3], len - i - 4));
+                        feature_profiles(udev, &features[i]+4, features[i+3]);
                         break;
                 default:
                         log_debug("GET CONFIGURATION: feature 0x%04x <ignored>, with 0x%02x bytes", feature, features[i+3]);
@@ -651,8 +665,8 @@ static int cd_media_info(struct udev *udev, int fd)
          * write protected; we need to check the contents if it is blank */
         if ((cd_media_dvd_rw_ro || cd_media_dvd_plus_rw || cd_media_dvd_plus_rw_dl || cd_media_dvd_ram) && (header[2] & 3) > 1) {
                 unsigned char buffer[32 * 2048];
-                unsigned char len;
-                int offset;
+                unsigned char result, len;
+                int block, offset;
 
                 if (cd_media_dvd_ram) {
                         /* a write protected dvd-ram may report "complete" status */
@@ -733,23 +747,22 @@ static int cd_media_info(struct udev *udev, int fd)
                 /* if any non-zero data is found in sector 16 (iso and udf) or
                  * eventually 0 (fat32 boot sector, ext2 superblock, etc), disc
                  * is assumed non-blank */
+                result = 0;
 
-                for (offset = 32768; offset < (32768 + 2048); offset++) {
-                        if (buffer [offset]) {
-                                log_debug("data in block 16, assuming complete");
-                                goto determined;
+                for (block = 32768; block >= 0 && !result; block -= 32768) {
+                        offset = block;
+                        while (offset < (block + 2048) && !result) {
+                                result = buffer [offset];
+                                offset++;
                         }
                 }
 
-                for (offset = 0; offset < 2048; offset++) {
-                        if (buffer [offset]) {
-                                log_debug("data in block 0, assuming complete");
-                                goto determined;
-                        }
+                if (!result) {
+                        cd_media_state = media_status[0];
+                        log_debug("no data in blocks 0 or 16, assuming blank");
+                } else {
+                        log_debug("data in blocks 0 or 16, assuming complete");
                 }
-
-                cd_media_state = media_status[0];
-                log_debug("no data in blocks 0 or 16, assuming blank");
         }
 
 determined:
@@ -862,12 +875,12 @@ int main(int argc, char *argv[])
         int cnt;
         int rc = 0;
 
-        log_parse_environment();
-        log_open();
-
         udev = udev_new();
         if (udev == NULL)
                 goto exit;
+
+        log_open();
+        udev_set_log_fn(udev, log_fn);
 
         while (1) {
                 int option;
@@ -887,17 +900,17 @@ int main(int argc, char *argv[])
                         eject = true;
                         break;
                 case 'd':
-                        log_set_target(LOG_TARGET_CONSOLE);
+                        debug = true;
                         log_set_max_level(LOG_DEBUG);
-                        log_open();
+                        udev_set_log_priority(udev, LOG_DEBUG);
                         break;
                 case 'h':
                         printf("Usage: cdrom_id [options] <device>\n"
-                               "  -l,--lock-media    lock the media (to enable eject request events)\n"
-                               "  -u,--unlock-media  unlock the media\n"
-                               "  -e,--eject-media   eject the media\n"
-                               "  -d,--debug         debug to stderr\n"
-                               "  -h,--help          print this help text\n\n");
+                               "  --lock-media    lock the media (to enable eject request events)\n"
+                               "  --unlock-media  unlock the media\n"
+                               "  --eject-media   eject the media\n"
+                               "  --debug         debug to stderr\n"
+                               "  --help          print this help text\n\n");
                         goto exit;
                 default:
                         rc = 1;
@@ -913,7 +926,7 @@ int main(int argc, char *argv[])
                 goto exit;
         }
 
-        initialize_srand();
+        srand((unsigned int)getpid());
         for (cnt = 20; cnt > 0; cnt--) {
                 struct timespec duration;
 
@@ -1065,17 +1078,17 @@ work:
         if (cd_media_state != NULL)
                 printf("ID_CDROM_MEDIA_STATE=%s\n", cd_media_state);
         if (cd_media_session_next > 0)
-                printf("ID_CDROM_MEDIA_SESSION_NEXT=%u\n", cd_media_session_next);
+                printf("ID_CDROM_MEDIA_SESSION_NEXT=%d\n", cd_media_session_next);
         if (cd_media_session_count > 0)
-                printf("ID_CDROM_MEDIA_SESSION_COUNT=%u\n", cd_media_session_count);
+                printf("ID_CDROM_MEDIA_SESSION_COUNT=%d\n", cd_media_session_count);
         if (cd_media_session_count > 1 && cd_media_session_last_offset > 0)
                 printf("ID_CDROM_MEDIA_SESSION_LAST_OFFSET=%llu\n", cd_media_session_last_offset);
         if (cd_media_track_count > 0)
-                printf("ID_CDROM_MEDIA_TRACK_COUNT=%u\n", cd_media_track_count);
+                printf("ID_CDROM_MEDIA_TRACK_COUNT=%d\n", cd_media_track_count);
         if (cd_media_track_count_audio > 0)
-                printf("ID_CDROM_MEDIA_TRACK_COUNT_AUDIO=%u\n", cd_media_track_count_audio);
+                printf("ID_CDROM_MEDIA_TRACK_COUNT_AUDIO=%d\n", cd_media_track_count_audio);
         if (cd_media_track_count_data > 0)
-                printf("ID_CDROM_MEDIA_TRACK_COUNT_DATA=%u\n", cd_media_track_count_data);
+                printf("ID_CDROM_MEDIA_TRACK_COUNT_DATA=%d\n", cd_media_track_count_data);
 exit:
         if (fd >= 0)
                 close(fd);

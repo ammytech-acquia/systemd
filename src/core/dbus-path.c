@@ -21,6 +21,7 @@
 
 #include "unit.h"
 #include "path.h"
+#include "dbus-unit.h"
 #include "dbus-path.h"
 #include "bus-util.h"
 

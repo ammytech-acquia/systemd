@@ -17,11 +17,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <unistd.h>
 #include <errno.h>
 #include <string.h>
 
+#include "libudev.h"
 #include "libudev-private.h"
 
 /**

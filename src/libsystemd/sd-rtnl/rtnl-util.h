@@ -21,6 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <netinet/ether.h>
 
 #include "util.h"
 #include "sd-rtnl.h"
@@ -32,13 +33,9 @@ void rtnl_message_seal(sd_rtnl_message *m);
 bool rtnl_message_type_is_link(uint16_t type);
 bool rtnl_message_type_is_addr(uint16_t type);
 bool rtnl_message_type_is_route(uint16_t type);
-bool rtnl_message_type_is_neigh(uint16_t type);
 
-int rtnl_set_link_name(sd_rtnl **rtnl, int ifindex, const char *name);
-int rtnl_set_link_properties(sd_rtnl **rtnl, int ifindex, const char *alias, const struct ether_addr *mac, unsigned mtu);
-
-int rtnl_log_parse_error(int r);
-int rtnl_log_create_error(int r);
+int rtnl_set_link_name(sd_rtnl *rtnl, int ifindex, const char *name);
+int rtnl_set_link_properties(sd_rtnl *rtnl, int ifindex, const char *alias, const struct ether_addr *mac, unsigned mtu);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_rtnl*, sd_rtnl_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_rtnl_message*, sd_rtnl_message_unref);

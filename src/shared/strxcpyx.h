@@ -21,6 +21,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <stdarg.h>
+#include <stdbool.h>
 
 #include "macro.h"
 

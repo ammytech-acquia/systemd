@@ -20,11 +20,17 @@
 ***/
 
 #include <netinet/in.h>
+#include <netinet/ether.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <linux/netlink.h>
+#include <linux/veth.h>
+#include <linux/if.h>
+#include <linux/ip.h>
+#include <linux/if_tunnel.h>
+#include <linux/if_bridge.h>
 
 #include "util.h"
-#include "formats-util.h"
 #include "refcnt.h"
 #include "missing.h"
 
@@ -36,16 +42,14 @@
 #define GET_CONTAINER(m, i) ((i) < (m)->n_containers ? (struct rtattr*)((uint8_t*)(m)->hdr + (m)->container_offsets[i]) : NULL)
 #define PUSH_CONTAINER(m, new) (m)->container_offsets[(m)->n_containers ++] = (uint8_t*)(new) - (uint8_t*)(m)->hdr;
 
-#define RTA_TYPE(rta) ((rta)->rta_type & NLA_TYPE_MASK)
-
 static int message_new_empty(sd_rtnl *rtnl, sd_rtnl_message **ret) {
         sd_rtnl_message *m;
 
         assert_return(ret, -EINVAL);
 
-        /* Note that 'rtnl' is currently unused, if we start using it internally
+        /* Note that 'rtnl' is curretly unused, if we start using it internally
            we must take care to avoid problems due to mutual references between
-           buses and their queued messages. See sd-bus.
+           busses and their queued messages. See sd-bus.
          */
 
         m = new0(sd_rtnl_message, 1);
@@ -70,6 +74,8 @@ int message_new(sd_rtnl *rtnl, sd_rtnl_message **ret, uint16_t type) {
         r = type_system_get_type(NULL, &nl_type, type);
         if (r < 0)
                 return r;
+
+        assert(nl_type->type == NLA_NESTED);
 
         r = message_new_empty(rtnl, &m);
         if (r < 0)
@@ -112,24 +118,6 @@ int sd_rtnl_message_route_set_dst_prefixlen(sd_rtnl_message *m, unsigned char pr
         return 0;
 }
 
-int sd_rtnl_message_route_set_src_prefixlen(sd_rtnl_message *m, unsigned char prefixlen) {
-        struct rtmsg *rtm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_route(m->hdr->nlmsg_type), -EINVAL);
-
-        rtm = NLMSG_DATA(m->hdr);
-
-        if ((rtm->rtm_family == AF_INET && prefixlen > 32) ||
-            (rtm->rtm_family == AF_INET6 && prefixlen > 128))
-                return -ERANGE;
-
-        rtm->rtm_src_len = prefixlen;
-
-        return 0;
-}
-
 int sd_rtnl_message_route_set_scope(sd_rtnl_message *m, unsigned char scope) {
         struct rtmsg *rtm;
 
@@ -144,60 +132,13 @@ int sd_rtnl_message_route_set_scope(sd_rtnl_message *m, unsigned char scope) {
         return 0;
 }
 
-int sd_rtnl_message_route_get_family(sd_rtnl_message *m, int *family) {
-        struct rtmsg *rtm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_route(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(family, -EINVAL);
-
-        rtm = NLMSG_DATA(m->hdr);
-
-        *family = rtm->rtm_family;
-
-        return 0;
-}
-
-int sd_rtnl_message_route_get_dst_prefixlen(sd_rtnl_message *m, unsigned char *dst_len) {
-        struct rtmsg *rtm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_route(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(dst_len, -EINVAL);
-
-        rtm = NLMSG_DATA(m->hdr);
-
-        *dst_len = rtm->rtm_dst_len;
-
-        return 0;
-}
-
-int sd_rtnl_message_route_get_src_prefixlen(sd_rtnl_message *m, unsigned char *src_len) {
-        struct rtmsg *rtm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_route(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(src_len, -EINVAL);
-
-        rtm = NLMSG_DATA(m->hdr);
-
-        *src_len = rtm->rtm_src_len;
-
-        return 0;
-}
-
 int sd_rtnl_message_new_route(sd_rtnl *rtnl, sd_rtnl_message **ret,
-                              uint16_t nlmsg_type, int rtm_family,
-                              unsigned char rtm_protocol) {
+                              uint16_t nlmsg_type, unsigned char rtm_family) {
         struct rtmsg *rtm;
         int r;
 
         assert_return(rtnl_message_type_is_route(nlmsg_type), -EINVAL);
-        assert_return((nlmsg_type == RTM_GETROUTE && rtm_family == AF_UNSPEC) ||
-                      rtm_family == AF_INET || rtm_family == AF_INET6, -EINVAL);
+        assert_return(rtm_family == AF_INET || rtm_family == AF_INET6, -EINVAL);
         assert_return(ret, -EINVAL);
 
         r = message_new(rtnl, ret, nlmsg_type);
@@ -213,114 +154,7 @@ int sd_rtnl_message_new_route(sd_rtnl *rtnl, sd_rtnl_message **ret,
         rtm->rtm_scope = RT_SCOPE_UNIVERSE;
         rtm->rtm_type = RTN_UNICAST;
         rtm->rtm_table = RT_TABLE_MAIN;
-        rtm->rtm_protocol = rtm_protocol;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_set_flags(sd_rtnl_message *m, uint8_t flags) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-        ndm->ndm_flags |= flags;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_set_state(sd_rtnl_message *m, uint16_t state) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-        ndm->ndm_state |= state;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_get_flags(sd_rtnl_message *m, uint8_t *flags) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-        *flags = ndm->ndm_flags;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_get_state(sd_rtnl_message *m, uint16_t *state) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-        *state = ndm->ndm_state;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_get_family(sd_rtnl_message *m, int *family) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(family, -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-
-        *family = ndm->ndm_family;
-
-        return 0;
-}
-
-int sd_rtnl_message_neigh_get_ifindex(sd_rtnl_message *m, int *index) {
-        struct ndmsg *ndm;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_neigh(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(index, -EINVAL);
-
-        ndm = NLMSG_DATA(m->hdr);
-
-        *index = ndm->ndm_ifindex;
-
-        return 0;
-}
-
-int sd_rtnl_message_new_neigh(sd_rtnl *rtnl, sd_rtnl_message **ret, uint16_t nlmsg_type, int index, int ndm_family) {
-        struct ndmsg *ndm;
-        int r;
-
-        assert_return(rtnl_message_type_is_neigh(nlmsg_type), -EINVAL);
-        assert_return(ndm_family == AF_INET  ||
-                      ndm_family == AF_INET6 ||
-                      ndm_family == PF_BRIDGE, -EINVAL);
-        assert_return(ret, -EINVAL);
-
-        r = message_new(rtnl, ret, nlmsg_type);
-        if (r < 0)
-                return r;
-
-        if (nlmsg_type == RTM_NEWNEIGH)
-                (*ret)->hdr->nlmsg_flags |= NLM_F_CREATE | NLM_F_APPEND;
-
-        ndm = NLMSG_DATA((*ret)->hdr);
-
-        ndm->ndm_family = ndm_family;
-        ndm->ndm_ifindex = index;
+        rtm->rtm_protocol = RTPROT_BOOT;
 
         return 0;
 }
@@ -355,20 +189,6 @@ int sd_rtnl_message_link_set_type(sd_rtnl_message *m, unsigned type) {
         return 0;
 }
 
-int sd_rtnl_message_link_set_family(sd_rtnl_message *m, unsigned family) {
-        struct ifinfomsg *ifi;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_link(m->hdr->nlmsg_type), -EINVAL);
-
-        ifi = NLMSG_DATA(m->hdr);
-
-        ifi->ifi_family = family;
-
-        return 0;
-}
-
 int sd_rtnl_message_new_link(sd_rtnl *rtnl, sd_rtnl_message **ret,
                              uint16_t nlmsg_type, int index) {
         struct ifinfomsg *ifi;
@@ -396,10 +216,9 @@ int sd_rtnl_message_new_link(sd_rtnl *rtnl, sd_rtnl_message **ret,
 int sd_rtnl_message_request_dump(sd_rtnl_message *m, int dump) {
         assert_return(m, -EINVAL);
         assert_return(m->hdr, -EINVAL);
-        assert_return(m->hdr->nlmsg_type == RTM_GETLINK  ||
-                      m->hdr->nlmsg_type == RTM_GETADDR  ||
-                      m->hdr->nlmsg_type == RTM_GETROUTE ||
-                      m->hdr->nlmsg_type == RTM_GETNEIGH,
+        assert_return(m->hdr->nlmsg_type == RTM_GETLINK ||
+                      m->hdr->nlmsg_type == RTM_GETADDR ||
+                      m->hdr->nlmsg_type == RTM_GETROUTE,
                       -EINVAL);
 
         if (dump)
@@ -456,7 +275,7 @@ int sd_rtnl_message_addr_set_scope(sd_rtnl_message *m, unsigned char scope) {
         return 0;
 }
 
-int sd_rtnl_message_addr_get_family(sd_rtnl_message *m, int *family) {
+int sd_rtnl_message_addr_get_family(sd_rtnl_message *m, unsigned char *family) {
         struct ifaddrmsg *ifa;
 
         assert_return(m, -EINVAL);
@@ -533,7 +352,7 @@ int sd_rtnl_message_addr_get_ifindex(sd_rtnl_message *m, int *ifindex) {
 
 int sd_rtnl_message_new_addr(sd_rtnl *rtnl, sd_rtnl_message **ret,
                              uint16_t nlmsg_type, int index,
-                             int family) {
+                             unsigned char family) {
         struct ifaddrmsg *ifa;
         int r;
 
@@ -564,7 +383,7 @@ int sd_rtnl_message_new_addr(sd_rtnl *rtnl, sd_rtnl_message **ret,
 }
 
 int sd_rtnl_message_new_addr_update(sd_rtnl *rtnl, sd_rtnl_message **ret,
-                             int index, int family) {
+                             int index, unsigned char family) {
         int r;
 
         r = sd_rtnl_message_new_addr(rtnl, ret, RTM_NEWADDR, index, family);
@@ -584,7 +403,7 @@ sd_rtnl_message *sd_rtnl_message_ref(sd_rtnl_message *m) {
 }
 
 sd_rtnl_message *sd_rtnl_message_unref(sd_rtnl_message *m) {
-        if (m && REFCNT_DEC(m->n_ref) == 0) {
+        if (m && REFCNT_DEC(m->n_ref) <= 0) {
                 unsigned i;
 
                 free(m->hdr);
@@ -609,53 +428,10 @@ int sd_rtnl_message_get_type(sd_rtnl_message *m, uint16_t *type) {
         return 0;
 }
 
-int sd_rtnl_message_get_family(sd_rtnl_message *m, int *family) {
-        assert_return(m, -EINVAL);
-        assert_return(family, -EINVAL);
-
-        assert(m->hdr);
-
-        if (rtnl_message_type_is_link(m->hdr->nlmsg_type)) {
-                struct ifinfomsg *ifi;
-
-                ifi = NLMSG_DATA(m->hdr);
-
-                *family = ifi->ifi_family;
-
-                return 0;
-        } else if (rtnl_message_type_is_route(m->hdr->nlmsg_type)) {
-                struct rtmsg *rtm;
-
-                rtm = NLMSG_DATA(m->hdr);
-
-                *family = rtm->rtm_family;
-
-                return 0;
-        } else if (rtnl_message_type_is_neigh(m->hdr->nlmsg_type)) {
-                struct ndmsg *ndm;
-
-                ndm = NLMSG_DATA(m->hdr);
-
-                *family = ndm->ndm_family;
-
-                return 0;
-        } else if (rtnl_message_type_is_addr(m->hdr->nlmsg_type)) {
-                struct ifaddrmsg *ifa;
-
-                ifa = NLMSG_DATA(m->hdr);
-
-                *family = ifa->ifa_family;
-
-                return 0;
-        }
-
-        return -EOPNOTSUPP;
-}
-
 int sd_rtnl_message_is_broadcast(sd_rtnl_message *m) {
         assert_return(m, -EINVAL);
 
-        return m->broadcast;
+        return !m->hdr->nlmsg_pid;
 }
 
 int sd_rtnl_message_link_get_ifindex(sd_rtnl_message *m, int *ifindex) {
@@ -684,21 +460,6 @@ int sd_rtnl_message_link_get_flags(sd_rtnl_message *m, unsigned *flags) {
         ifi = NLMSG_DATA(m->hdr);
 
         *flags = ifi->ifi_flags;
-
-        return 0;
-}
-
-int sd_rtnl_message_link_get_type(sd_rtnl_message *m, unsigned *type) {
-        struct ifinfomsg *ifi;
-
-        assert_return(m, -EINVAL);
-        assert_return(m->hdr, -EINVAL);
-        assert_return(rtnl_message_type_is_link(m->hdr->nlmsg_type), -EINVAL);
-        assert_return(type, -EINVAL);
-
-        ifi = NLMSG_DATA(m->hdr);
-
-        *type = ifi->ifi_type;
 
         return 0;
 }
@@ -754,6 +515,7 @@ static int add_rtattr(sd_rtnl_message *m, unsigned short type, const void *data,
                 /* if no data was passed, make sure we still initialize the padding
                    note that we can have data_length > 0 (used by some containers) */
                 padding = RTA_DATA(rta);
+                data_length = 0;
         }
 
         /* make sure also the padding at the end of the message is initialized */
@@ -795,8 +557,8 @@ int sd_rtnl_message_append_string(sd_rtnl_message *m, unsigned short type, const
                 size = (size_t)r;
 
         if (size) {
-                length = strnlen(data, size+1);
-                if (length > size)
+                length = strnlen(data, size);
+                if (length >= size)
                         return -EINVAL;
         } else
                 length = strlen(data);
@@ -941,39 +703,18 @@ int sd_rtnl_message_open_container(sd_rtnl_message *m, unsigned short type) {
         assert_return(m->n_containers < RTNL_CONTAINER_DEPTH, -ERANGE);
 
         r = message_attribute_has_type(m, type, NLA_NESTED);
-        if (r < 0) {
-                const NLTypeSystemUnion *type_system_union;
-                int family;
-
-                r = message_attribute_has_type(m, type, NLA_UNION);
-                if (r < 0)
-                        return r;
-                size = (size_t) r;
-
-                r = sd_rtnl_message_get_family(m, &family);
-                if (r < 0)
-                        return r;
-
-                r = type_system_get_type_system_union(m->container_type_system[m->n_containers], &type_system_union, type);
-                if (r < 0)
-                        return r;
-
-                r = type_system_union_protocol_get_type_system(type_system_union,
-                                                               &m->container_type_system[m->n_containers + 1],
-                                                               family);
-                if (r < 0)
-                        return r;
-        } else {
+        if (r < 0)
+                return r;
+        else
                 size = (size_t)r;
 
-                r = type_system_get_type_system(m->container_type_system[m->n_containers],
-                                                &m->container_type_system[m->n_containers + 1],
-                                                type);
-                if (r < 0)
-                        return r;
-        }
+        r = type_system_get_type_system(m->container_type_system[m->n_containers],
+                                        &m->container_type_system[m->n_containers + 1],
+                                        type);
+        if (r < 0)
+                return r;
 
-        r = add_rtattr(m, type | NLA_F_NESTED, NULL, size);
+        r = add_rtattr(m, type, NULL, size);
         if (r < 0)
                 return r;
 
@@ -1045,11 +786,9 @@ int rtnl_message_read_internal(sd_rtnl_message *m, unsigned short type, void **d
         return RTA_PAYLOAD(rta);
 }
 
-int sd_rtnl_message_read_string(sd_rtnl_message *m, unsigned short type, const char **data) {
+int sd_rtnl_message_read_string(sd_rtnl_message *m, unsigned short type, char **data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_STRING);
         if (r < 0)
@@ -1061,8 +800,7 @@ int sd_rtnl_message_read_string(sd_rtnl_message *m, unsigned short type, const c
         else if (strnlen(attr_data, r) >= (size_t) r)
                 return -EIO;
 
-        if (data)
-                *data = (const char *) attr_data;
+        *data = (char *) attr_data;
 
         return 0;
 }
@@ -1070,8 +808,6 @@ int sd_rtnl_message_read_string(sd_rtnl_message *m, unsigned short type, const c
 int sd_rtnl_message_read_u8(sd_rtnl_message *m, unsigned short type, uint8_t *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_U8);
         if (r < 0)
@@ -1083,8 +819,7 @@ int sd_rtnl_message_read_u8(sd_rtnl_message *m, unsigned short type, uint8_t *da
         else if ((size_t) r < sizeof(uint8_t))
                 return -EIO;
 
-        if (data)
-                *data = *(uint8_t *) attr_data;
+        *data = *(uint8_t *) attr_data;
 
         return 0;
 }
@@ -1092,8 +827,6 @@ int sd_rtnl_message_read_u8(sd_rtnl_message *m, unsigned short type, uint8_t *da
 int sd_rtnl_message_read_u16(sd_rtnl_message *m, unsigned short type, uint16_t *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_U16);
         if (r < 0)
@@ -1105,8 +838,7 @@ int sd_rtnl_message_read_u16(sd_rtnl_message *m, unsigned short type, uint16_t *
         else if ((size_t) r < sizeof(uint16_t))
                 return -EIO;
 
-        if (data)
-                *data = *(uint16_t *) attr_data;
+        *data = *(uint16_t *) attr_data;
 
         return 0;
 }
@@ -1114,8 +846,6 @@ int sd_rtnl_message_read_u16(sd_rtnl_message *m, unsigned short type, uint16_t *
 int sd_rtnl_message_read_u32(sd_rtnl_message *m, unsigned short type, uint32_t *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_U32);
         if (r < 0)
@@ -1127,8 +857,7 @@ int sd_rtnl_message_read_u32(sd_rtnl_message *m, unsigned short type, uint32_t *
         else if ((size_t)r < sizeof(uint32_t))
                 return -EIO;
 
-        if (data)
-                *data = *(uint32_t *) attr_data;
+        *data = *(uint32_t *) attr_data;
 
         return 0;
 }
@@ -1136,8 +865,6 @@ int sd_rtnl_message_read_u32(sd_rtnl_message *m, unsigned short type, uint32_t *
 int sd_rtnl_message_read_ether_addr(sd_rtnl_message *m, unsigned short type, struct ether_addr *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_ETHER_ADDR);
         if (r < 0)
@@ -1149,8 +876,7 @@ int sd_rtnl_message_read_ether_addr(sd_rtnl_message *m, unsigned short type, str
         else if ((size_t)r < sizeof(struct ether_addr))
                 return -EIO;
 
-        if (data)
-                memcpy(data, attr_data, sizeof(struct ether_addr));
+        memcpy(data, attr_data, sizeof(struct ether_addr));
 
         return 0;
 }
@@ -1158,8 +884,6 @@ int sd_rtnl_message_read_ether_addr(sd_rtnl_message *m, unsigned short type, str
 int sd_rtnl_message_read_cache_info(sd_rtnl_message *m, unsigned short type, struct ifa_cacheinfo *info) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_CACHE_INFO);
         if (r < 0)
@@ -1171,8 +895,7 @@ int sd_rtnl_message_read_cache_info(sd_rtnl_message *m, unsigned short type, str
         else if ((size_t)r < sizeof(struct ifa_cacheinfo))
                 return -EIO;
 
-        if (info)
-                memcpy(info, attr_data, sizeof(struct ifa_cacheinfo));
+        memcpy(info, attr_data, sizeof(struct ifa_cacheinfo));
 
         return 0;
 }
@@ -1180,8 +903,6 @@ int sd_rtnl_message_read_cache_info(sd_rtnl_message *m, unsigned short type, str
 int sd_rtnl_message_read_in_addr(sd_rtnl_message *m, unsigned short type, struct in_addr *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_IN_ADDR);
         if (r < 0)
@@ -1193,8 +914,7 @@ int sd_rtnl_message_read_in_addr(sd_rtnl_message *m, unsigned short type, struct
         else if ((size_t)r < sizeof(struct in_addr))
                 return -EIO;
 
-        if (data)
-                memcpy(data, attr_data, sizeof(struct in_addr));
+        memcpy(data, attr_data, sizeof(struct in_addr));
 
         return 0;
 }
@@ -1202,8 +922,6 @@ int sd_rtnl_message_read_in_addr(sd_rtnl_message *m, unsigned short type, struct
 int sd_rtnl_message_read_in6_addr(sd_rtnl_message *m, unsigned short type, struct in6_addr *data) {
         int r;
         void *attr_data;
-
-        assert_return(m, -EINVAL);
 
         r = message_attribute_has_type(m, type, NLA_IN_ADDR);
         if (r < 0)
@@ -1215,8 +933,7 @@ int sd_rtnl_message_read_in6_addr(sd_rtnl_message *m, unsigned short type, struc
         else if ((size_t)r < sizeof(struct in6_addr))
                 return -EIO;
 
-        if (data)
-                memcpy(data, attr_data, sizeof(struct in6_addr));
+        memcpy(data, attr_data, sizeof(struct in6_addr));
 
         return 0;
 }
@@ -1245,6 +962,7 @@ int sd_rtnl_message_enter_container(sd_rtnl_message *m, unsigned short type) {
                         return r;
         } else if (nl_type->type == NLA_UNION) {
                 const NLTypeSystemUnion *type_system_union;
+                char *key;
 
                 r = type_system_get_type_system_union(m->container_type_system[m->n_containers],
                                                       &type_system_union,
@@ -1252,42 +970,15 @@ int sd_rtnl_message_enter_container(sd_rtnl_message *m, unsigned short type) {
                 if (r < 0)
                         return r;
 
-                switch (type_system_union->match_type) {
-                case NL_MATCH_SIBLING:
-                {
-                        const char *key;
+                r = sd_rtnl_message_read_string(m, type_system_union->match, &key);
+                if (r < 0)
+                        return r;
 
-                        r = sd_rtnl_message_read_string(m, type_system_union->match, &key);
-                        if (r < 0)
-                                return r;
-
-                        r = type_system_union_get_type_system(type_system_union,
-                                                              &type_system,
-                                                              key);
-                        if (r < 0)
-                                return r;
-
-                        break;
-                }
-                case NL_MATCH_PROTOCOL:
-                {
-                        int family;
-
-                        r = sd_rtnl_message_get_family(m, &family);
-                        if (r < 0)
-                                return r;
-
-                        r = type_system_union_protocol_get_type_system(type_system_union,
-                                                                       &type_system,
-                                                                       family);
-                        if (r < 0)
-                                return r;
-
-                        break;
-                }
-                default:
-                        assert_not_reached("sd-rtnl: invalid type system union type");
-                }
+                r = type_system_union_get_type_system(type_system_union,
+                                                      &type_system,
+                                                      key);
+                if (r < 0)
+                        return r;
         } else
                 return -EINVAL;
 
@@ -1336,20 +1027,13 @@ uint32_t rtnl_message_get_serial(sd_rtnl_message *m) {
         return m->hdr->nlmsg_seq;
 }
 
-int sd_rtnl_message_is_error(sd_rtnl_message *m) {
-        assert_return(m, 0);
-        assert_return(m->hdr, 0);
-
-        return m->hdr->nlmsg_type == NLMSG_ERROR;
-}
-
 int sd_rtnl_message_get_errno(sd_rtnl_message *m) {
         struct nlmsgerr *err;
 
         assert_return(m, -EINVAL);
         assert_return(m->hdr, -EINVAL);
 
-        if (!sd_rtnl_message_is_error(m))
+        if (m->hdr->nlmsg_type != NLMSG_ERROR)
                 return 0;
 
         err = NLMSG_DATA(m->hdr);
@@ -1373,7 +1057,7 @@ int rtnl_message_parse(sd_rtnl_message *m,
         *rta_tb_size = max + 1;
 
         for (; RTA_OK(rta, rt_len); rta = RTA_NEXT(rta, rt_len)) {
-                type = RTA_TYPE(rta);
+                type = rta->rta_type;
 
                 /* if the kernel is newer than the headers we used
                    when building, we ignore out-of-range attributes
@@ -1432,15 +1116,12 @@ static int socket_recv_message(int fd, struct iovec *iov, uint32_t *_group, bool
         assert(iov);
 
         r = recvmsg(fd, &msg, MSG_TRUNC | (peek ? MSG_PEEK : 0));
-        if (r < 0) {
+        if (r < 0)
                 /* no data */
-                if (errno == ENOBUFS)
-                        log_debug("rtnl: kernel receive buffer overrun");
-                else if (errno == EAGAIN)
-                        log_debug("rtnl: no data in socket");
-
-                return (errno == EAGAIN || errno == EINTR) ? 0 : -errno;
-        }
+                return (errno == EAGAIN) ? 0 : -errno;
+        else if (r == 0)
+                /* connection was closed by the kernel */
+                return -ECONNRESET;
 
         for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
                 if (cmsg->cmsg_level == SOL_SOCKET &&
@@ -1449,10 +1130,8 @@ static int socket_recv_message(int fd, struct iovec *iov, uint32_t *_group, bool
                         struct ucred *ucred = (void *)CMSG_DATA(cmsg);
 
                         /* from the kernel */
-                        if (ucred->pid == 0)
+                        if (ucred->uid == 0 && ucred->pid == 0)
                                 auth = true;
-                        else
-                                log_debug("rtnl: ignoring message from PID "PID_FMT, ucred->pid);
                 } else if (cmsg->cmsg_level == SOL_NETLINK &&
                            cmsg->cmsg_type == NETLINK_PKTINFO &&
                            cmsg->cmsg_len == CMSG_LEN(sizeof(struct nl_pktinfo))) {
@@ -1463,19 +1142,11 @@ static int socket_recv_message(int fd, struct iovec *iov, uint32_t *_group, bool
                 }
         }
 
-        if (!auth) {
+        if (!auth)
                 /* not from the kernel, ignore */
-                if (peek) {
-                        /* drop the message */
-                        r = recvmsg(fd, &msg, 0);
-                        if (r < 0)
-                                return (errno == EAGAIN || errno == EINTR) ? 0 : -errno;
-                }
-
                 return 0;
-        }
 
-        if (_group)
+        if (group)
                 *_group = group;
 
         return r;
@@ -1501,7 +1172,7 @@ int socket_read_message(sd_rtnl *rtnl) {
         assert(rtnl->rbuffer_allocated >= sizeof(struct nlmsghdr));
 
         /* read nothing, just get the pending message size */
-        r = socket_recv_message(rtnl->fd, &iov, NULL, true);
+        r = socket_recv_message(rtnl->fd, &iov, &group, true);
         if (r <= 0)
                 return r;
         else
@@ -1539,7 +1210,7 @@ int socket_read_message(sd_rtnl *rtnl) {
                 }
         }
 
-        for (new_msg = rtnl->rbuffer; NLMSG_OK(new_msg, len) && !done; new_msg = NLMSG_NEXT(new_msg, len)) {
+        for (new_msg = rtnl->rbuffer; NLMSG_OK(new_msg, len); new_msg = NLMSG_NEXT(new_msg, len)) {
                 _cleanup_rtnl_message_unref_ sd_rtnl_message *m = NULL;
                 const NLType *nl_type;
 
@@ -1554,33 +1225,26 @@ int socket_read_message(sd_rtnl *rtnl) {
                 if (new_msg->nlmsg_type == NLMSG_DONE) {
                         /* finished reading multi-part message */
                         done = true;
-
-                        /* if first is not defined, put NLMSG_DONE into the receive queue. */
-                        if (first)
-                                continue;
+                        break;
                 }
 
                 /* check that we support this message type */
                 r = type_system_get_type(NULL, &nl_type, new_msg->nlmsg_type);
                 if (r < 0) {
-                        if (r == -EOPNOTSUPP)
-                                log_debug("sd-rtnl: ignored message with unknown type: %i",
+                        if (r == -ENOTSUP)
+                                log_debug("sd-rtnl: ignored message with unknown type: %u",
                                           new_msg->nlmsg_type);
 
                         continue;
                 }
 
                 /* check that the size matches the message type */
-                if (new_msg->nlmsg_len < NLMSG_LENGTH(nl_type->size)) {
-                        log_debug("sd-rtnl: message larger than expected, dropping");
+                if (new_msg->nlmsg_len < NLMSG_LENGTH(nl_type->size))
                         continue;
-                }
 
                 r = message_new_empty(rtnl, &m);
                 if (r < 0)
                         return r;
-
-                m->broadcast = !!group;
 
                 m->hdr = memdup(new_msg, new_msg->nlmsg_len);
                 if (!m->hdr)

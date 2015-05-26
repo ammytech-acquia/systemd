@@ -22,13 +22,12 @@
 #include <fcntl.h>
 
 #include "sd-journal.h"
-#include "macro.h"
 #include "journal-file.h"
 #include "journal-internal.h"
 
 int main(int argc, char *argv[]) {
-        _cleanup_free_ char *fn = NULL;
-        char dn[] = "/var/tmp/test-journal-flush.XXXXXX";
+
+        char dn[] = "/var/tmp/test-journal-flush.XXXXXX", *fn;
         JournalFile *new_journal = NULL;
         sd_journal *j = NULL;
         unsigned n = 0;
@@ -40,6 +39,8 @@ int main(int argc, char *argv[]) {
         r = journal_file_open(fn, O_CREAT|O_RDWR, 0644, false, false, NULL, NULL, NULL, &new_journal);
         assert_se(r >= 0);
 
+        unlink(fn);
+
         r = sd_journal_open(&j, 0);
         assert_se(r >= 0);
 
@@ -50,13 +51,13 @@ int main(int argc, char *argv[]) {
                 JournalFile *f;
 
                 f = j->current_file;
-                assert_se(f && f->current_offset > 0);
+                assert(f && f->current_offset > 0);
 
                 r = journal_file_move_to_object(f, OBJECT_ENTRY, f->current_offset, &o);
-                assert_se(r >= 0);
+                assert(r >= 0);
 
                 r = journal_file_copy_entry(f, new_journal, o, f->current_offset, NULL, NULL, NULL);
-                assert_se(r >= 0);
+                assert(r >= 0);
 
                 n++;
                 if (n > 10000)
@@ -67,7 +68,6 @@ int main(int argc, char *argv[]) {
 
         journal_file_close(new_journal);
 
-        unlink(fn);
         assert_se(rmdir(dn) == 0);
 
         return 0;

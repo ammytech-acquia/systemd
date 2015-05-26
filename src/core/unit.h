@@ -28,14 +28,20 @@
 typedef struct Unit Unit;
 typedef struct UnitVTable UnitVTable;
 typedef enum UnitActiveState UnitActiveState;
+typedef enum UnitDependency UnitDependency;
 typedef struct UnitRef UnitRef;
 typedef struct UnitStatusMessageFormats UnitStatusMessageFormats;
 
+#include "sd-event.h"
+#include "set.h"
+#include "util.h"
 #include "list.h"
+#include "socket-util.h"
+#include "execute.h"
+#include "cgroup.h"
 #include "condition.h"
 #include "install.h"
 #include "unit-name.h"
-#include "failure-action.h"
 
 enum UnitActiveState {
         UNIT_ACTIVE,
@@ -47,14 +53,6 @@ enum UnitActiveState {
         _UNIT_ACTIVE_STATE_MAX,
         _UNIT_ACTIVE_STATE_INVALID = -1
 };
-
-typedef enum KillOperation {
-        KILL_TERMINATE,
-        KILL_KILL,
-        KILL_ABORT,
-        _KILL_OPERATION_MAX,
-        _KILL_OPERATION_INVALID = -1
-} KillOperation;
 
 static inline bool UNIT_IS_ACTIVE_OR_RELOADING(UnitActiveState t) {
         return t == UNIT_ACTIVE || t == UNIT_RELOADING;
@@ -72,6 +70,54 @@ static inline bool UNIT_IS_INACTIVE_OR_FAILED(UnitActiveState t) {
         return t == UNIT_INACTIVE || t == UNIT_FAILED;
 }
 
+enum UnitDependency {
+        /* Positive dependencies */
+        UNIT_REQUIRES,
+        UNIT_REQUIRES_OVERRIDABLE,
+        UNIT_REQUISITE,
+        UNIT_REQUISITE_OVERRIDABLE,
+        UNIT_WANTS,
+        UNIT_BINDS_TO,
+        UNIT_PART_OF,
+
+        /* Inverse of the above */
+        UNIT_REQUIRED_BY,             /* inverse of 'requires' and 'requisite' is 'required_by' */
+        UNIT_REQUIRED_BY_OVERRIDABLE, /* inverse of 'requires_overridable' and 'requisite_overridable' is 'soft_required_by' */
+        UNIT_WANTED_BY,               /* inverse of 'wants' */
+        UNIT_BOUND_BY,                /* inverse of 'binds_to' */
+        UNIT_CONSISTS_OF,             /* inverse of 'part_of' */
+
+        /* Negative dependencies */
+        UNIT_CONFLICTS,               /* inverse of 'conflicts' is 'conflicted_by' */
+        UNIT_CONFLICTED_BY,
+
+        /* Order */
+        UNIT_BEFORE,                  /* inverse of 'before' is 'after' and vice versa */
+        UNIT_AFTER,
+
+        /* On Failure */
+        UNIT_ON_FAILURE,
+
+        /* Triggers (i.e. a socket triggers a service) */
+        UNIT_TRIGGERS,
+        UNIT_TRIGGERED_BY,
+
+        /* Propagate reloads */
+        UNIT_PROPAGATES_RELOAD_TO,
+        UNIT_RELOAD_PROPAGATED_FROM,
+
+        /* Joins namespace of */
+        UNIT_JOINS_NAMESPACE_OF,
+
+        /* Reference information for GC logic */
+        UNIT_REFERENCES,              /* Inverse of 'references' is 'referenced_by' */
+        UNIT_REFERENCED_BY,
+
+        _UNIT_DEPENDENCY_MAX,
+        _UNIT_DEPENDENCY_INVALID = -1
+};
+
+#include "manager.h"
 #include "job.h"
 
 struct UnitRef {
@@ -104,7 +150,6 @@ struct Unit {
         char *fragment_path; /* if loaded from a config file this is the primary path to it */
         char *source_path; /* if converted, the source file */
         char **dropin_paths;
-
         usec_t fragment_mtime;
         usec_t source_mtime;
         usec_t dropin_mtime;
@@ -115,25 +160,26 @@ struct Unit {
         /* JOB_NOP jobs are special and can be installed without disturbing the real job. */
         Job *nop_job;
 
-        /* Job timeout and action to take */
         usec_t job_timeout;
-        FailureAction job_timeout_action;
-        char *job_timeout_reboot_arg;
 
         /* References to this */
         LIST_HEAD(UnitRef, refs);
 
         /* Conditions to check */
         LIST_HEAD(Condition, conditions);
-        LIST_HEAD(Condition, asserts);
 
         dual_timestamp condition_timestamp;
-        dual_timestamp assert_timestamp;
 
         dual_timestamp inactive_exit_timestamp;
         dual_timestamp active_enter_timestamp;
         dual_timestamp active_exit_timestamp;
         dual_timestamp inactive_enter_timestamp;
+
+        /* Counterparts in the cgroup filesystem */
+        char *cgroup_path;
+        CGroupControllerMask cgroup_realized_mask;
+        CGroupControllerMask cgroup_subtree_mask;
+        CGroupControllerMask cgroup_members_mask;
 
         UnitRef slice;
 
@@ -166,27 +212,17 @@ struct Unit {
         /* Used during GC sweeps */
         unsigned gc_marker;
 
+        /* When deserializing, temporarily store the job type for this
+         * unit here, if there was a job scheduled.
+         * Only for deserializing from a legacy version. New style uses full
+         * serialized jobs. */
+        int deserialized_job; /* This is actually of type JobType */
+
         /* Error code when we didn't manage to load the unit (negative) */
         int load_error;
 
-        /* Make sure we never enter endless loops with the check unneeded logic, or the BindsTo= logic */
-        RateLimit auto_stop_ratelimit;
-
-        /* Cached unit file state and preset */
+        /* Cached unit file state */
         UnitFileState unit_file_state;
-        int unit_file_preset;
-
-        /* Where the cpuacct.usage cgroup counter was at the time the unit was started */
-        nsec_t cpuacct_usage_base;
-
-        /* Counterparts in the cgroup filesystem */
-        char *cgroup_path;
-        CGroupControllerMask cgroup_realized_mask;
-        CGroupControllerMask cgroup_subtree_mask;
-        CGroupControllerMask cgroup_members_mask;
-
-        /* How to start OnFailure units */
-        JobMode on_failure_job_mode;
 
         /* Garbage collect us we nobody wants or requires us anymore */
         bool stop_when_unneeded;
@@ -203,6 +239,9 @@ struct Unit {
         /* Allow isolation requests */
         bool allow_isolate;
 
+        /* How to start OnFailure units */
+        JobMode on_failure_job_mode;
+
         /* Ignore this unit when isolating */
         bool ignore_on_isolate;
 
@@ -211,7 +250,6 @@ struct Unit {
 
         /* Did the last condition check succeed? */
         bool condition_result;
-        bool assert_result;
 
         /* Is this a transient unit? */
         bool transient;
@@ -231,9 +269,6 @@ struct Unit {
         bool cgroup_realized:1;
         bool cgroup_members_mask_valid:1;
         bool cgroup_subtree_mask_valid:1;
-
-        /* Did we already invoke unit_coldplug() for this unit? */
-        bool coldplugged:1;
 };
 
 struct UnitStatusMessageFormats {
@@ -248,16 +283,18 @@ typedef enum UnitSetPropertiesMode {
         UNIT_PERSISTENT = 2,
 } UnitSetPropertiesMode;
 
+#include "service.h"
 #include "socket.h"
 #include "busname.h"
 #include "target.h"
 #include "snapshot.h"
 #include "device.h"
+#include "mount.h"
 #include "automount.h"
 #include "swap.h"
 #include "timer.h"
-#include "slice.h"
 #include "path.h"
+#include "slice.h"
 #include "scope.h"
 
 struct UnitVTable {
@@ -281,7 +318,7 @@ struct UnitVTable {
          * that */
         size_t exec_runtime_offset;
 
-        /* The name of the configuration file section with the private settings of this unit */
+        /* The name of the configuration file section with the private settings of this unit*/
         const char *private_section;
 
         /* Config file sections this unit type understands, separated
@@ -342,10 +379,6 @@ struct UnitVTable {
          * way */
         bool (*check_gc)(Unit *u);
 
-        /* When the unit is not running and no job for it queued we
-         * shall release its runtime resources */
-        void (*release_resources)(Unit *u);
-
         /* Return true when this unit is suitable for snapshotting */
         bool (*check_snapshot)(Unit *u);
 
@@ -360,7 +393,7 @@ struct UnitVTable {
         void (*notify_cgroup_empty)(Unit *u);
 
         /* Called whenever a process of this unit sends us a message */
-        void (*notify_message)(Unit *u, pid_t pid, char **tags, FDSet *fds);
+        void (*notify_message)(Unit *u, pid_t pid, char **tags);
 
         /* Called whenever a name this Unit registered for comes or
          * goes away. */
@@ -396,10 +429,6 @@ struct UnitVTable {
 
         /* Type specific cleanups. */
         void (*shutdown)(Manager *m);
-
-        /* If this function is set and return false all jobs for units
-         * of this type will immediately fail. */
-        bool (*supported)(void);
 
         /* The interface name */
         const char *bus_interface;
@@ -566,7 +595,6 @@ void unit_start_on_failure(Unit *u);
 void unit_trigger_notify(Unit *u);
 
 UnitFileState unit_get_unit_file_state(Unit *u);
-int unit_get_unit_file_preset(Unit *u);
 
 Unit* unit_ref_set(UnitRef *ref, Unit *u);
 void unit_ref_unset(UnitRef *ref);
@@ -592,44 +620,25 @@ int unit_write_drop_in_private_format(Unit *u, UnitSetPropertiesMode mode, const
 
 int unit_remove_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name);
 
-int unit_kill_context(Unit *u, KillContext *c, KillOperation k, pid_t main_pid, pid_t control_pid, bool main_pid_alien);
+int unit_kill_context(Unit *u, KillContext *c, bool sigkill, pid_t main_pid, pid_t control_pid, bool main_pid_alien);
 
 int unit_make_transient(Unit *u);
 
 int unit_require_mounts_for(Unit *u, const char *path);
 
-bool unit_type_supported(UnitType t);
-
-static inline bool unit_supported(Unit *u) {
-        return unit_type_supported(u->type);
-}
-
-void unit_warn_if_dir_nonempty(Unit *u, const char* where);
-int unit_fail_if_symlink(Unit *u, const char* where);
-
 const char *unit_active_state_to_string(UnitActiveState i) _const_;
 UnitActiveState unit_active_state_from_string(const char *s) _pure_;
 
+const char *unit_dependency_to_string(UnitDependency i) _const_;
+UnitDependency unit_dependency_from_string(const char *s) _pure_;
+
 /* Macros which append UNIT= or USER_UNIT= to the message */
 
-#define log_unit_full(unit, level, error, ...)                          \
-        ({                                                              \
-                Unit *_u = (unit);                                      \
-                _u ? log_object_internal(level, error, __FILE__, __LINE__, __func__, _u->manager->unit_log_field, _u->id, ##__VA_ARGS__) : \
-                        log_internal(level, error, __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
-        })
+#define log_full_unit(level, unit, ...) log_meta_object(level, __FILE__, __LINE__, __func__, getpid() == 1 ? "UNIT=" : "USER_UNIT=", unit, __VA_ARGS__)
+#define log_debug_unit(unit, ...)       log_full_unit(LOG_DEBUG, unit, __VA_ARGS__)
+#define log_info_unit(unit, ...)        log_full_unit(LOG_INFO, unit, __VA_ARGS__)
+#define log_notice_unit(unit, ...)      log_full_unit(LOG_NOTICE, unit, __VA_ARGS__)
+#define log_warning_unit(unit, ...)     log_full_unit(LOG_WARNING, unit, __VA_ARGS__)
+#define log_error_unit(unit, ...)       log_full_unit(LOG_ERR, unit, __VA_ARGS__)
 
-#define log_unit_debug(unit, ...)   log_unit_full(unit, LOG_DEBUG, 0, ##__VA_ARGS__)
-#define log_unit_info(unit, ...)    log_unit_full(unit, LOG_INFO, 0, ##__VA_ARGS__)
-#define log_unit_notice(unit, ...)  log_unit_full(unit, LOG_NOTICE, 0, ##__VA_ARGS__)
-#define log_unit_warning(unit, ...) log_unit_full(unit, LOG_WARNING, 0, ##__VA_ARGS__)
-#define log_unit_error(unit, ...)   log_unit_full(unit, LOG_ERR, 0, ##__VA_ARGS__)
-
-#define log_unit_debug_errno(unit, error, ...)   log_unit_full(unit, LOG_DEBUG, error, ##__VA_ARGS__)
-#define log_unit_info_errno(unit, error, ...)    log_unit_full(unit, LOG_INFO, error, ##__VA_ARGS__)
-#define log_unit_notice_errno(unit, error, ...)  log_unit_full(unit, LOG_NOTICE, error, ##__VA_ARGS__)
-#define log_unit_warning_errno(unit, error, ...) log_unit_full(unit, LOG_WARNING, error, ##__VA_ARGS__)
-#define log_unit_error_errno(unit, error, ...)   log_unit_full(unit, LOG_ERR, error, ##__VA_ARGS__)
-
-#define LOG_UNIT_MESSAGE(unit, fmt, ...) "MESSAGE=%s: " fmt, (unit)->id, ##__VA_ARGS__
-#define LOG_UNIT_ID(unit) (unit)->manager->unit_log_format_string, (unit)->id
+#define log_struct_unit(level, unit, ...) log_struct(level, getpid() == 1 ? "UNIT=%s" : "USER_UNIT=%s", unit, __VA_ARGS__)

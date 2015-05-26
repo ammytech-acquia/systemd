@@ -19,6 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <unistd.h>
 #include <string.h>
 
 #include "util.h"
@@ -136,6 +137,31 @@ static void test_replace_env_arg(void) {
         assert_se(strv_length(r) == 9);
 }
 
+static void test_one_normalize(const char *input, const char *output) {
+        _cleanup_free_ char *t;
+
+        t = normalize_env_assignment(input);
+        assert_se(t);
+        assert_se(streq(t, output));
+}
+
+static void test_normalize_env_assignment(void) {
+        test_one_normalize("foo=bar", "foo=bar");
+        test_one_normalize("=bar", "=bar");
+        test_one_normalize("foo=", "foo=");
+        test_one_normalize("=", "=");
+        test_one_normalize("", "");
+        test_one_normalize("a=\"waldo\"", "a=waldo");
+        test_one_normalize("a=\"waldo", "a=\"waldo");
+        test_one_normalize("a=waldo\"", "a=waldo\"");
+        test_one_normalize("a=\'", "a='");
+        test_one_normalize("a=\'\'", "a=");
+        test_one_normalize(" xyz  ", "xyz");
+        test_one_normalize(" xyz = bar  ", "xyz=bar");
+        test_one_normalize(" xyz = 'bar ' ", "xyz=bar ");
+        test_one_normalize(" ' xyz' = 'bar ' ", "' xyz'=bar ");
+}
+
 static void test_env_clean(void) {
         _cleanup_strv_free_ char **e;
 
@@ -184,6 +210,7 @@ int main(int argc, char *argv[]) {
         test_strv_env_set();
         test_strv_env_merge();
         test_replace_env_arg();
+        test_normalize_env_assignment();
         test_env_clean();
         test_env_name_is_valid();
 

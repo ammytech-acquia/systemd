@@ -234,7 +234,7 @@ _public_ int sd_bus_reply_method_errnof(
                 return 0;
 
         va_start(ap, format);
-        sd_bus_error_set_errnofv(&berror, error, format, ap);
+        bus_error_set_errnofv(&berror, error, format, ap);
         va_end(ap);
 
         return sd_bus_reply_method_error(call, &berror);
@@ -462,97 +462,13 @@ _public_ int sd_bus_query_sender_creds(sd_bus_message *call, uint64_t mask, sd_b
         /* No data passed? Or not enough data passed to retrieve the missing bits? */
         if (!c || !(c->mask & SD_BUS_CREDS_PID)) {
                 /* We couldn't read anything from the call, let's try
-                 * to get it from the sender or peer. */
+                 * to get it from the sender or peer */
 
                 if (call->sender)
-                        /* There's a sender, but the creds are
-                         * missing. This means we are talking via
-                         * dbus1, or are getting a message that was
-                         * sent to us via kdbus, but was converted
-                         * from a dbus1 message by the bus-proxy and
-                         * thus also lacks the creds. */
-                        return sd_bus_get_name_creds(call->bus, call->sender, mask, creds);
+                        return sd_bus_get_owner(call->bus, call->sender, mask, creds);
                 else
-                        /* There's no sender, hence we are on a dbus1
-                         * direct connection. For direct connections
-                         * the credentials of the AF_UNIX peer matter,
-                         * which may be queried via
-                         * sd_bus_get_owner_creds(). */
-                        return sd_bus_get_owner_creds(call->bus, mask, creds);
+                        return sd_bus_get_peer_creds(call->bus, mask, creds);
         }
 
         return bus_creds_extend_by_pid(c, mask, creds);
-}
-
-_public_ int sd_bus_query_sender_privilege(sd_bus_message *call, int capability) {
-        _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
-        uid_t our_uid;
-        bool know_caps = false;
-        int r;
-
-        assert_return(call, -EINVAL);
-        assert_return(call->sealed, -EPERM);
-        assert_return(call->bus, -EINVAL);
-        assert_return(!bus_pid_changed(call->bus), -ECHILD);
-
-        if (!BUS_IS_OPEN(call->bus->state))
-                return -ENOTCONN;
-
-        if (capability >= 0) {
-
-                r = sd_bus_query_sender_creds(call, SD_BUS_CREDS_UID|SD_BUS_CREDS_EUID|SD_BUS_CREDS_EFFECTIVE_CAPS, &creds);
-                if (r < 0)
-                        return r;
-
-                /* We cannot use augmented caps for authorization,
-                 * since then data is acquired raceful from
-                 * /proc. This can never actually happen, but let's
-                 * better be safe than sorry, and do an extra check
-                 * here. */
-                assert_return((sd_bus_creds_get_augmented_mask(creds) & SD_BUS_CREDS_EFFECTIVE_CAPS) == 0, -EPERM);
-
-                /* Note that not even on kdbus we might have the caps
-                 * field, due to faked identities, or namespace
-                 * translation issues. */
-                r = sd_bus_creds_has_effective_cap(creds, capability);
-                if (r > 0)
-                        return 1;
-                if (r == 0)
-                        know_caps = true;
-        } else {
-                r = sd_bus_query_sender_creds(call, SD_BUS_CREDS_UID|SD_BUS_CREDS_EUID, &creds);
-                if (r < 0)
-                        return r;
-        }
-
-        /* Now, check the UID, but only if the capability check wasn't
-         * sufficient */
-        our_uid = getuid();
-        if (our_uid != 0 || !know_caps || capability < 0) {
-                uid_t sender_uid;
-
-                /* We cannot use augmented uid/euid for authorization,
-                 * since then data is acquired raceful from
-                 * /proc. This can never actually happen, but let's
-                 * better be safe than sorry, and do an extra check
-                 * here. */
-                assert_return((sd_bus_creds_get_augmented_mask(creds) & (SD_BUS_CREDS_UID|SD_BUS_CREDS_EUID)) == 0, -EPERM);
-
-                /* Try to use the EUID, if we have it. */
-                r = sd_bus_creds_get_euid(creds, &sender_uid);
-                if (r < 0)
-                        r = sd_bus_creds_get_uid(creds, &sender_uid);
-
-                if (r >= 0) {
-                        /* Sender has same UID as us, then let's grant access */
-                        if (sender_uid == our_uid)
-                                return 1;
-
-                        /* Sender is root, we are not root. */
-                        if (our_uid != 0 && sender_uid == 0)
-                                return 1;
-                }
-        }
-
-        return 0;
 }

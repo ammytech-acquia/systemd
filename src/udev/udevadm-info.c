@@ -15,22 +15,25 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
 #include <getopt.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "udev.h"
 #include "udev-util.h"
-#include "udevadm-util.h"
 
-static bool skip_attribute(const char *name) {
+static bool skip_attribute(const char *name)
+{
         static const char* const skip[] = {
                 "uevent",
                 "dev",
@@ -48,7 +51,8 @@ static bool skip_attribute(const char *name) {
         return false;
 }
 
-static void print_all_attributes(struct udev_device *device, const char *key) {
+static void print_all_attributes(struct udev_device *device, const char *key)
+{
         struct udev_list_entry *sysattr;
 
         udev_list_entry_foreach(sysattr, udev_device_get_sysattr_list_entry(device)) {
@@ -80,7 +84,8 @@ static void print_all_attributes(struct udev_device *device, const char *key) {
         printf("\n");
 }
 
-static int print_device_chain(struct udev_device *device) {
+static int print_device_chain(struct udev_device *device)
+{
         struct udev_device *device_parent;
         const char *str;
 
@@ -125,7 +130,8 @@ static int print_device_chain(struct udev_device *device) {
         return 0;
 }
 
-static void print_record(struct udev_device *device) {
+static void print_record(struct udev_device *device)
+{
         const char *str;
         int i;
         struct udev_list_entry *list_entry;
@@ -150,7 +156,8 @@ static void print_record(struct udev_device *device) {
         printf("\n");
 }
 
-static int stat_device(const char *name, bool export, const char *prefix) {
+static int stat_device(const char *name, bool export, const char *prefix)
+{
         struct stat statbuf;
 
         if (stat(name, &statbuf) != 0)
@@ -159,16 +166,17 @@ static int stat_device(const char *name, bool export, const char *prefix) {
         if (export) {
                 if (prefix == NULL)
                         prefix = "INFO_";
-                printf("%sMAJOR=%u\n"
-                       "%sMINOR=%u\n",
+                printf("%sMAJOR=%d\n"
+                       "%sMINOR=%d\n",
                        prefix, major(statbuf.st_dev),
                        prefix, minor(statbuf.st_dev));
         } else
-                printf("%u:%u\n", major(statbuf.st_dev), minor(statbuf.st_dev));
+                printf("%d:%d\n", major(statbuf.st_dev), minor(statbuf.st_dev));
         return 0;
 }
 
-static int export_devices(struct udev *udev) {
+static int export_devices(struct udev *udev)
+{
         struct udev_enumerate *udev_enumerate;
         struct udev_list_entry *list_entry;
 
@@ -189,7 +197,8 @@ static int export_devices(struct udev *udev) {
         return 0;
 }
 
-static void cleanup_dir(DIR *dir, mode_t mask, int depth) {
+static void cleanup_dir(DIR *dir, mode_t mask, int depth)
+{
         struct dirent *dent;
 
         if (depth <= 0)
@@ -205,19 +214,22 @@ static void cleanup_dir(DIR *dir, mode_t mask, int depth) {
                 if ((stats.st_mode & mask) != 0)
                         continue;
                 if (S_ISDIR(stats.st_mode)) {
-                        _cleanup_closedir_ DIR *dir2;
+                        DIR *dir2;
 
                         dir2 = fdopendir(openat(dirfd(dir), dent->d_name, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC));
-                        if (dir2 != NULL)
+                        if (dir2 != NULL) {
                                 cleanup_dir(dir2, mask, depth-1);
-
-                        (void) unlinkat(dirfd(dir), dent->d_name, AT_REMOVEDIR);
-                } else
-                        (void) unlinkat(dirfd(dir), dent->d_name, 0);
+                                closedir(dir2);
+                        }
+                        unlinkat(dirfd(dir), dent->d_name, AT_REMOVEDIR);
+                } else {
+                        unlinkat(dirfd(dir), dent->d_name, 0);
+                }
         }
 }
 
-static void cleanup_db(struct udev *udev) {
+static void cleanup_db(struct udev *udev)
+{
         DIR *dir;
 
         unlink("/run/udev/queue.bin");
@@ -253,32 +265,38 @@ static void cleanup_db(struct udev *udev) {
         }
 }
 
-static void help(void) {
+static struct udev_device *find_device(struct udev *udev, const char *id, const char *prefix)
+{
+        char name[UTIL_PATH_SIZE];
 
-        printf("%s info [OPTIONS] [DEVPATH|FILE]\n\n"
-               "Query sysfs or the udev database.\n\n"
-               "  -h --help                   Print this message\n"
-               "     --version                Print version of the program\n"
-               "  -q --query=TYPE             Query device information:\n"
-               "       name                     Name of device node\n"
-               "       symlink                  Pointing to node\n"
-               "       path                     sysfs device path\n"
-               "       property                 The device properties\n"
-               "       all                      All values\n"
-               "  -p --path=SYSPATH           sysfs device path used for query or attribute walk\n"
-               "  -n --name=NAME              Node or symlink name used for query or attribute walk\n"
-               "  -r --root                   Prepend dev directory to path names\n"
-               "  -a --attribute-walk         Print all key matches walking along the chain\n"
-               "                              of parent devices\n"
-               "  -d --device-id-of-file=FILE Print major:minor of device containing this file\n"
-               "  -x --export                 Export key/value pairs\n"
-               "  -P --export-prefix          Export the key name with a prefix\n"
-               "  -e --export-db              Export the content of the udev database\n"
-               "  -c --cleanup-db             Clean up the udev database\n"
-               , program_invocation_short_name);
+        if (prefix && !startswith(id, prefix)) {
+                strscpyl(name, sizeof(name), prefix, id, NULL);
+                id = name;
+        }
+
+        if (startswith(id, "/dev/")) {
+                struct stat statbuf;
+                char type;
+
+                if (stat(id, &statbuf) < 0)
+                        return NULL;
+
+                if (S_ISBLK(statbuf.st_mode))
+                        type = 'b';
+                else if (S_ISCHR(statbuf.st_mode))
+                        type = 'c';
+                else
+                        return NULL;
+
+                return udev_device_new_from_devnum(udev, type, statbuf.st_rdev);
+        } else if (startswith(id, "/sys/"))
+                return udev_device_new_from_syspath(udev, id);
+        else
+                return NULL;
 }
 
-static int uinfo(struct udev *udev, int argc, char *argv[]) {
+static int uinfo(struct udev *udev, int argc, char *argv[])
+{
         _cleanup_udev_device_unref_ struct udev_device *device = NULL;
         bool root = 0;
         bool export = 0;
@@ -302,6 +320,27 @@ static int uinfo(struct udev *udev, int argc, char *argv[]) {
                 { "help",              no_argument,       NULL, 'h' },
                 {}
         };
+
+        static const char *usage =
+                "Usage: udevadm info [OPTIONS] [DEVPATH|FILE]\n"
+                " -q,--query=TYPE             query device information:\n"
+                "      name                     name of device node\n"
+                "      symlink                  pointing to node\n"
+                "      path                     sys device path\n"
+                "      property                 the device properties\n"
+                "      all                      all values\n"
+                " -p,--path=SYSPATH           sys device path used for query or attribute walk\n"
+                " -n,--name=NAME              node or symlink name used for query or attribute walk\n"
+                " -r,--root                   prepend dev directory to path names\n"
+                " -a,--attribute-walk         print all key matches walking along the chain\n"
+                "                             of parent devices\n"
+                " -d,--device-id-of-file=FILE print major:minor of device containing this file\n"
+                " -x,--export                 export key/value pairs\n"
+                " -P,--export-prefix          export the key name with a prefix\n"
+                " -e,--export-db              export the content of the udev database\n"
+                " -c,--cleanup-db             cleanup the udev database\n"
+                "    --version                print version of the program\n"
+                " -h,--help                   print this message\n";
 
         enum action_type {
                 ACTION_QUERY,
@@ -387,7 +426,7 @@ static int uinfo(struct udev *udev, int argc, char *argv[]) {
                         printf("%s\n", VERSION);
                         return 0;
                 case 'h':
-                        help();
+                        printf("%s\n", usage);
                         return 0;
                 default:
                         return 1;
@@ -397,7 +436,7 @@ static int uinfo(struct udev *udev, int argc, char *argv[]) {
         case ACTION_QUERY:
                 if (!device) {
                         if (!argv[optind]) {
-                                help();
+                                fprintf(stderr, "%s\n", usage);
                                 return 2;
                         }
                         device = find_device(udev, argv[optind], NULL);
@@ -488,5 +527,5 @@ static int uinfo(struct udev *udev, int argc, char *argv[]) {
 const struct udevadm_cmd udevadm_info = {
         .name = "info",
         .cmd = uinfo,
-        .help = "Query sysfs or the udev database",
+        .help = "query sysfs or the udev database",
 };

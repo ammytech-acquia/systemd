@@ -23,34 +23,16 @@
 
 #include "sd-event.h"
 #include "sd-rtnl.h"
-#include "sd-network.h"
 
-#include "hashmap.h"
+#include "util.h"
 
-typedef struct Manager Manager;
-
-#include "networkd-wait-online-link.h"
-
-struct Manager {
-        Hashmap *links;
-        Hashmap *links_by_name;
-
-        char **interfaces;
-        char **ignore;
-
-        sd_rtnl *rtnl;
-        sd_event_source *rtnl_event_source;
-
-        sd_network_monitor *network_monitor;
-        sd_event_source *network_monitor_event_source;
-
+typedef struct Manager {
         sd_event *event;
-};
+        sd_rtnl *rtnl;
+        sd_network_monitor *monitor;
+} Manager;
 
 void manager_free(Manager *m);
-int manager_new(Manager **ret, char **interfaces, char **ignore, usec_t timeout);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
-
-bool manager_all_configured(Manager *m);
-bool manager_ignore_link(Manager *m, Link *link);
+#define _cleanup_manager_free_ _cleanup_(manager_freep)

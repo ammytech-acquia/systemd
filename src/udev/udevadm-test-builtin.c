@@ -17,24 +17,33 @@
 
 #include <stdlib.h>
 #include <stddef.h>
+#include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <syslog.h>
 #include <getopt.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/inotify.h>
+#include <sys/poll.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "udev.h"
 
-static void help(struct udev *udev) {
-        printf("%s builtin [--help] COMMAND SYSPATH\n\n"
-               "Test a built-in command.\n\n"
-               "  -h --help     Print this message\n"
-               "     --version  Print version of the program\n\n"
-               "Commands:\n"
-               , program_invocation_short_name);
-
+static void help(struct udev *udev)
+{
+        fprintf(stderr, "\n");
+        fprintf(stderr, "Usage: udevadm builtin [--help] COMMAND SYSPATH\n");
         udev_builtin_list(udev);
+        fprintf(stderr, "\n");
 }
 
-static int adm_builtin(struct udev *udev, int argc, char *argv[]) {
+static int adm_builtin(struct udev *udev, int argc, char *argv[])
+{
         static const struct option options[] = {
                 { "help", no_argument, NULL, 'h' },
                 {}
@@ -106,6 +115,6 @@ out:
 const struct udevadm_cmd udevadm_test_builtin = {
         .name = "test-builtin",
         .cmd = adm_builtin,
-        .help = "Test a built-in command",
+        .help = "test a built-in command",
         .debug = true,
 };

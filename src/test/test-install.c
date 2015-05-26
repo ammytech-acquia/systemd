@@ -19,15 +19,19 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
 
+#include "util.h"
+#include "path-util.h"
 #include "install.h"
 
 static void dump_changes(UnitFileChange *c, unsigned n) {
         unsigned i;
 
-        assert_se(n == 0 || c);
+        assert(n == 0 || c);
 
         for (i = 0; i < n; i++) {
                 if (c[i].type == UNIT_FILE_UNLINK)
@@ -47,7 +51,7 @@ int main(int argc, char* argv[]) {
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
 
-        h = hashmap_new(&string_hash_ops);
+        h = hashmap_new(string_hash_func, string_compare_func);
         r = unit_file_get_list(UNIT_FILE_SYSTEM, NULL, h);
         assert_se(r == 0);
 

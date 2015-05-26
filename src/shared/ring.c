@@ -20,6 +20,7 @@
 ***/
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
@@ -28,16 +29,14 @@
 
 #define RING_MASK(_r, _v) ((_v) & ((_r)->size - 1))
 
-void ring_flush(Ring *r) {
+void ring_flush(struct ring *r) {
         assert(r);
 
         r->start = 0;
         r->used = 0;
 }
 
-void ring_clear(Ring *r) {
-        assert(r);
-
+void ring_clear(struct ring *r) {
         free(r->buf);
         zero(*r);
 }
@@ -54,7 +53,7 @@ void ring_clear(Ring *r) {
  *         size_t iov_len;
  *     };
  */
-size_t ring_peek(Ring *r, struct iovec *vec) {
+size_t ring_peek(struct ring *r, struct iovec *vec) {
         assert(r);
 
         if (r->used == 0) {
@@ -81,7 +80,7 @@ size_t ring_peek(Ring *r, struct iovec *vec) {
  * at most @size bytes. If the ring buffer size is smaller, copy less bytes and
  * return the number of bytes copied.
  */
-size_t ring_copy(Ring *r, void *buf, size_t size) {
+size_t ring_copy(struct ring *r, void *buf, size_t size) {
         size_t l;
 
         assert(r);
@@ -107,7 +106,7 @@ size_t ring_copy(Ring *r, void *buf, size_t size) {
  * Resize ring-buffer to size @nsize. @nsize must be a power-of-2, otherwise
  * ring operations will behave incorrectly.
  */
-static int ring_resize(Ring *r, size_t nsize) {
+static int ring_resize(struct ring *r, size_t nsize) {
         uint8_t *buf;
         size_t l;
 
@@ -141,7 +140,7 @@ static int ring_resize(Ring *r, size_t nsize) {
  * resizes the buffer if it is too small. It returns -ENOMEM on OOM and 0 on
  * success.
  */
-static int ring_grow(Ring *r, size_t add) {
+static int ring_grow(struct ring *r, size_t add) {
         size_t need;
 
         assert(r);
@@ -166,7 +165,7 @@ static int ring_grow(Ring *r, size_t add) {
  * Push @len bytes from @u8 into the ring buffer. The buffer is resized if it
  * is too small. -ENOMEM is returned on OOM, 0 on success.
  */
-int ring_push(Ring *r, const void *u8, size_t size) {
+int ring_push(struct ring *r, const void *u8, size_t size) {
         int err;
         size_t pos, l;
 
@@ -198,7 +197,7 @@ int ring_push(Ring *r, const void *u8, size_t size) {
  * Remove @len bytes from the start of the ring-buffer. Note that we protect
  * against overflows so removing more bytes than available is safe.
  */
-void ring_pull(Ring *r, size_t size) {
+void ring_pull(struct ring *r, size_t size) {
         assert(r);
 
         if (size > r->used)

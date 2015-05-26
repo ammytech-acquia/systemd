@@ -19,23 +19,26 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <net/if.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <stddef.h>
-#include <netdb.h>
+#include <sys/ioctl.h>
 
 #include "macro.h"
-#include "path-util.h"
 #include "util.h"
+#include "mkdir.h"
+#include "path-util.h"
 #include "socket-util.h"
 #include "missing.h"
 #include "fileio.h"
-#include "formats-util.h"
 
 int socket_address_parse(SocketAddress *a, const char *s) {
         char *e, *n;
@@ -50,6 +53,11 @@ int socket_address_parse(SocketAddress *a, const char *s) {
 
         if (*s == '[') {
                 /* IPv6 in [x:.....:z]:p notation */
+
+                if (!socket_ipv6_is_supported()) {
+                        log_warning("Binding to IPv6 address not available since kernel does not support IPv6.");
+                        return -EAFNOSUPPORT;
+                }
 
                 e = strchr(s+1, ']');
                 if (!e)
@@ -135,6 +143,11 @@ int socket_address_parse(SocketAddress *a, const char *s) {
                                 if (idx == 0)
                                         return -EINVAL;
 
+                                if (!socket_ipv6_is_supported()) {
+                                        log_warning("Binding to interface is not available since kernel does not support IPv6.");
+                                        return -EAFNOSUPPORT;
+                                }
+
                                 a->sockaddr.in6.sin6_family = AF_INET6;
                                 a->sockaddr.in6.sin6_port = htons((uint16_t) u);
                                 a->sockaddr.in6.sin6_scope_id = idx;
@@ -165,25 +178,6 @@ int socket_address_parse(SocketAddress *a, const char *s) {
                 }
         }
 
-        return 0;
-}
-
-int socket_address_parse_and_warn(SocketAddress *a, const char *s) {
-        SocketAddress b;
-        int r;
-
-        /* Similar to socket_address_parse() but warns for IPv6 sockets when we don't support them. */
-
-        r = socket_address_parse(&b, s);
-        if (r < 0)
-                return r;
-
-        if (!socket_ipv6_is_supported() && b.sockaddr.sa.sa_family == AF_INET6) {
-                log_warning("Binding to IPv6 address not available since kernel does not support IPv6.");
-                return -EAFNOSUPPORT;
-        }
-
-        *a = b;
         return 0;
 }
 
@@ -307,7 +301,7 @@ int socket_address_print(const SocketAddress *a, char **ret) {
                 return 0;
         }
 
-        return sockaddr_pretty(&a->sockaddr.sa, a->size, false, true, ret);
+        return sockaddr_pretty(&a->sockaddr.sa, a->size, false, ret);
 }
 
 bool socket_address_can_accept(const SocketAddress *a) {
@@ -328,6 +322,9 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
                 return false;
 
         if (a->type != b->type)
+                return false;
+
+        if (a->size != b->size)
                 return false;
 
         if (socket_address_family(a) != socket_address_family(b))
@@ -354,20 +351,14 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
                 break;
 
         case AF_UNIX:
-                if (a->size <= offsetof(struct sockaddr_un, sun_path) ||
-                    b->size <= offsetof(struct sockaddr_un, sun_path))
-                        return false;
 
                 if ((a->sockaddr.un.sun_path[0] == 0) != (b->sockaddr.un.sun_path[0] == 0))
                         return false;
 
                 if (a->sockaddr.un.sun_path[0]) {
-                        if (!path_equal_or_files_same(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path))
+                        if (!strneq(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, sizeof(a->sockaddr.un.sun_path)))
                                 return false;
                 } else {
-                        if (a->size != b->size)
-                                return false;
-
                         if (memcmp(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, a->size) != 0)
                                 return false;
                 }
@@ -375,6 +366,7 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
                 break;
 
         case AF_NETLINK:
+
                 if (a->protocol != b->protocol)
                         return false;
 
@@ -433,66 +425,68 @@ bool socket_ipv6_is_supported(void) {
         _cleanup_free_ char *l = NULL;
 
         if (access("/sys/module/ipv6", F_OK) != 0)
-                return false;
+                return 0;
 
         /* If we can't check "disable" parameter, assume enabled */
         if (read_one_line_file("/sys/module/ipv6/parameters/disable", &l) < 0)
-                return true;
+                return 1;
 
         /* If module was loaded with disable=1 no IPv6 available */
         return l[0] == '0';
 }
 
 bool socket_address_matches_fd(const SocketAddress *a, int fd) {
-        SocketAddress b;
-        socklen_t solen;
+        union sockaddr_union sa;
+        socklen_t salen = sizeof(sa), solen;
+        int protocol, type;
 
         assert(a);
         assert(fd >= 0);
 
-        b.size = sizeof(b.sockaddr);
-        if (getsockname(fd, &b.sockaddr.sa, &b.size) < 0)
+        if (getsockname(fd, &sa.sa, &salen) < 0)
                 return false;
 
-        if (b.sockaddr.sa.sa_family != a->sockaddr.sa.sa_family)
+        if (sa.sa.sa_family != a->sockaddr.sa.sa_family)
                 return false;
 
-        solen = sizeof(b.type);
-        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &b.type, &solen) < 0)
+        solen = sizeof(type);
+        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &solen) < 0)
                 return false;
 
-        if (b.type != a->type)
+        if (type != a->type)
                 return false;
 
         if (a->protocol != 0)  {
-                solen = sizeof(b.protocol);
-                if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &b.protocol, &solen) < 0)
+                solen = sizeof(protocol);
+                if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &protocol, &solen) < 0)
                         return false;
 
-                if (b.protocol != a->protocol)
+                if (protocol != a->protocol)
                         return false;
         }
 
-        return socket_address_equal(a, &b);
+        switch (sa.sa.sa_family) {
+
+        case AF_INET:
+                return sa.in.sin_port == a->sockaddr.in.sin_port &&
+                        sa.in.sin_addr.s_addr == a->sockaddr.in.sin_addr.s_addr;
+
+        case AF_INET6:
+                return sa.in6.sin6_port == a->sockaddr.in6.sin6_port &&
+                        memcmp(&sa.in6.sin6_addr, &a->sockaddr.in6.sin6_addr, sizeof(struct in6_addr)) == 0;
+
+        case AF_UNIX:
+                return salen == a->size &&
+                        memcmp(sa.un.sun_path, a->sockaddr.un.sun_path, salen - offsetof(struct sockaddr_un, sun_path)) == 0;
+
+        }
+
+        return false;
 }
 
-int sockaddr_port(const struct sockaddr *_sa) {
-        union sockaddr_union *sa = (union sockaddr_union*) _sa;
-
-        assert(sa);
-
-        if (!IN_SET(sa->sa.sa_family, AF_INET, AF_INET6))
-                return -EAFNOSUPPORT;
-
-        return ntohs(sa->sa.sa_family == AF_INET6 ?
-                       sa->in6.sin6_port :
-                       sa->in.sin_port);
-}
-
-int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_ipv6, bool include_port, char **ret) {
+int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_ipv6, char **ret) {
         union sockaddr_union *sa = (union sockaddr_union*) _sa;
         char *p;
-        int r;
 
         assert(sa);
         assert(salen >= sizeof(sa->sa.sa_family));
@@ -504,17 +498,12 @@ int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_
 
                 a = ntohl(sa->in.sin_addr.s_addr);
 
-                if (include_port)
-                        r = asprintf(&p,
-                                     "%u.%u.%u.%u:%u",
-                                     a >> 24, (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF,
-                                     ntohs(sa->in.sin_port));
-                else
-                        r = asprintf(&p,
-                                     "%u.%u.%u.%u",
-                                     a >> 24, (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF);
-                if (r < 0)
+                if (asprintf(&p,
+                             "%u.%u.%u.%u:%u",
+                             a >> 24, (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF,
+                             ntohs(sa->in.sin_port)) < 0)
                         return -ENOMEM;
+
                 break;
         }
 
@@ -523,37 +512,22 @@ int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_
                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF
                 };
 
-                if (translate_ipv6 &&
-                    memcmp(&sa->in6.sin6_addr, ipv4_prefix, sizeof(ipv4_prefix)) == 0) {
+                if (translate_ipv6 && memcmp(&sa->in6.sin6_addr, ipv4_prefix, sizeof(ipv4_prefix)) == 0) {
                         const uint8_t *a = sa->in6.sin6_addr.s6_addr+12;
-                        if (include_port)
-                                r = asprintf(&p,
-                                             "%u.%u.%u.%u:%u",
-                                             a[0], a[1], a[2], a[3],
-                                             ntohs(sa->in6.sin6_port));
-                        else
-                                r = asprintf(&p,
-                                             "%u.%u.%u.%u",
-                                             a[0], a[1], a[2], a[3]);
-                        if (r < 0)
+
+                        if (asprintf(&p,
+                                     "%u.%u.%u.%u:%u",
+                                     a[0], a[1], a[2], a[3],
+                                     ntohs(sa->in6.sin6_port)) < 0)
                                 return -ENOMEM;
                 } else {
                         char a[INET6_ADDRSTRLEN];
 
-                        inet_ntop(AF_INET6, &sa->in6.sin6_addr, a, sizeof(a));
-
-                        if (include_port) {
-                                r = asprintf(&p,
-                                             "[%s]:%u",
-                                             a,
-                                             ntohs(sa->in6.sin6_port));
-                                if (r < 0)
-                                        return -ENOMEM;
-                        } else {
-                                p = strdup(a);
-                                if (!p)
-                                        return -ENOMEM;
-                        }
+                        if (asprintf(&p,
+                                     "[%s]:%u",
+                                     inet_ntop(AF_INET6, &sa->in6.sin6_addr, a, sizeof(a)),
+                                     ntohs(sa->in6.sin6_port)) < 0)
+                                return -ENOMEM;
                 }
 
                 break;
@@ -590,7 +564,7 @@ int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_
                 break;
 
         default:
-                return -EOPNOTSUPP;
+                return -ENOTSUP;
         }
 
 
@@ -600,12 +574,13 @@ int sockaddr_pretty(const struct sockaddr *_sa, socklen_t salen, bool translate_
 
 int getpeername_pretty(int fd, char **ret) {
         union sockaddr_union sa;
-        socklen_t salen = sizeof(sa);
+        socklen_t salen;
         int r;
 
         assert(fd >= 0);
         assert(ret);
 
+        salen = sizeof(sa);
         if (getpeername(fd, &sa.sa, &salen) < 0)
                 return -errno;
 
@@ -628,16 +603,17 @@ int getpeername_pretty(int fd, char **ret) {
         /* For remote sockets we translate IPv6 addresses back to IPv4
          * if applicable, since that's nicer. */
 
-        return sockaddr_pretty(&sa.sa, salen, true, true, ret);
+        return sockaddr_pretty(&sa.sa, salen, true, ret);
 }
 
 int getsockname_pretty(int fd, char **ret) {
         union sockaddr_union sa;
-        socklen_t salen = sizeof(sa);
+        socklen_t salen;
 
         assert(fd >= 0);
         assert(ret);
 
+        salen = sizeof(sa);
         if (getsockname(fd, &sa.sa, &salen) < 0)
                 return -errno;
 
@@ -646,46 +622,7 @@ int getsockname_pretty(int fd, char **ret) {
          * listening sockets where the difference between IPv4 and
          * IPv6 matters. */
 
-        return sockaddr_pretty(&sa.sa, salen, false, true, ret);
-}
-
-int socknameinfo_pretty(union sockaddr_union *sa, socklen_t salen, char **_ret) {
-        int r;
-        char host[NI_MAXHOST], *ret;
-
-        assert(_ret);
-
-        r = getnameinfo(&sa->sa, salen, host, sizeof(host), NULL, 0,
-                        NI_IDN|NI_IDN_USE_STD3_ASCII_RULES);
-        if (r != 0) {
-                int saved_errno = errno;
-
-                r = sockaddr_pretty(&sa->sa, salen, true, true, &ret);
-                if (r < 0)
-                        return log_error_errno(r, "sockadd_pretty() failed: %m");
-
-                log_debug_errno(saved_errno, "getnameinfo(%s) failed: %m", ret);
-        } else {
-                ret = strdup(host);
-                if (!ret)
-                        return log_oom();
-        }
-
-        *_ret = ret;
-        return 0;
-}
-
-int getnameinfo_pretty(int fd, char **ret) {
-        union sockaddr_union sa;
-        socklen_t salen = sizeof(sa);
-
-        assert(fd >= 0);
-        assert(ret);
-
-        if (getsockname(fd, &sa.sa, &salen) < 0)
-                return log_error_errno(errno, "getsockname(%d) failed: %m", fd);
-
-        return socknameinfo_pretty(&sa, salen, ret);
+        return sockaddr_pretty(&sa.sa, salen, false, ret);
 }
 
 int socket_address_unlink(SocketAddress *a) {
@@ -701,6 +638,193 @@ int socket_address_unlink(SocketAddress *a) {
                 return -errno;
 
         return 1;
+}
+
+int in_addr_null(unsigned family, union in_addr_union *u) {
+        assert(u);
+
+        if (family == AF_INET)
+                return u->in.s_addr == 0;
+
+        if (family == AF_INET6)
+                return
+                        u->in6.s6_addr32[0] == 0 &&
+                        u->in6.s6_addr32[1] == 0 &&
+                        u->in6.s6_addr32[2] == 0 &&
+                        u->in6.s6_addr32[3] == 0;
+
+        return -EAFNOSUPPORT;
+}
+
+
+int in_addr_equal(unsigned family, union in_addr_union *a, union in_addr_union *b) {
+        assert(a);
+        assert(b);
+
+        if (family == AF_INET)
+                return a->in.s_addr == b->in.s_addr;
+
+        if (family == AF_INET6)
+                return
+                        a->in6.s6_addr32[0] == b->in6.s6_addr32[0] &&
+                        a->in6.s6_addr32[1] == b->in6.s6_addr32[1] &&
+                        a->in6.s6_addr32[2] == b->in6.s6_addr32[2] &&
+                        a->in6.s6_addr32[3] == b->in6.s6_addr32[3];
+
+        return -EAFNOSUPPORT;
+}
+
+int in_addr_prefix_intersect(
+                unsigned family,
+                const union in_addr_union *a,
+                unsigned aprefixlen,
+                const union in_addr_union *b,
+                unsigned bprefixlen) {
+
+        unsigned m;
+
+        assert(a);
+        assert(b);
+
+        /* Checks whether there are any addresses that are in both
+         * networks */
+
+        m = MIN(aprefixlen, bprefixlen);
+
+        if (family == AF_INET) {
+                uint32_t x, nm;
+
+                x = be32toh(a->in.s_addr ^ b->in.s_addr);
+                nm = (m == 0) ? 0 : 0xFFFFFFFFUL << (32 - m);
+
+                return (x & nm) == 0;
+        }
+
+        if (family == AF_INET6) {
+                unsigned i;
+
+                if (m > 128)
+                        m = 128;
+
+                for (i = 0; i < 16; i++) {
+                        uint8_t x, nm;
+
+                        x = a->in6.s6_addr[i] ^ b->in6.s6_addr[i];
+
+                        if (m < 8)
+                                nm = 0xFF << (8 - m);
+                        else
+                                nm = 0xFF;
+
+                        if ((x & nm) != 0)
+                                return 0;
+
+                        if (m > 8)
+                                m -= 8;
+                        else
+                                m = 0;
+                }
+
+                return 1;
+        }
+
+        return -EAFNOSUPPORT;
+}
+
+int in_addr_prefix_next(unsigned family, union in_addr_union *u, unsigned prefixlen) {
+        assert(u);
+
+        /* Increases the network part of an address by one. Returns
+         * positive it that succeeds, or 0 if this overflows. */
+
+        if (prefixlen <= 0)
+                return 0;
+
+        if (family == AF_INET) {
+                uint32_t c, n;
+
+                if (prefixlen > 32)
+                        prefixlen = 32;
+
+                c = be32toh(u->in.s_addr);
+                n = c + (1UL << (32 - prefixlen));
+                if (n < c)
+                        return 0;
+                n &= 0xFFFFFFFFUL << (32 - prefixlen);
+
+                u->in.s_addr = htobe32(n);
+                return 1;
+        }
+
+        if (family == AF_INET6) {
+                struct in6_addr add = {}, result;
+                uint8_t overflow = 0;
+                unsigned i;
+
+                if (prefixlen > 128)
+                        prefixlen = 128;
+
+                /* First calculate what we have to add */
+                add.s6_addr[(prefixlen-1) / 8] = 1 << (7 - (prefixlen-1) % 8);
+
+                for (i = 16; i > 0; i--) {
+                        unsigned j = i - 1;
+
+                        result.s6_addr[j] = u->in6.s6_addr[j] + add.s6_addr[j] + overflow;
+                        overflow = (result.s6_addr[j] < u->in6.s6_addr[j]);
+                }
+
+                if (overflow)
+                        return 0;
+
+                u->in6 = result;
+                return 1;
+        }
+
+        return -EAFNOSUPPORT;
+}
+
+int in_addr_to_string(unsigned family, const union in_addr_union *u, char **ret) {
+        char *x;
+        size_t l;
+
+        assert(u);
+        assert(ret);
+
+        if (family == AF_INET)
+                l = INET_ADDRSTRLEN;
+        else if (family == AF_INET6)
+                l = INET6_ADDRSTRLEN;
+        else
+                return -EAFNOSUPPORT;
+
+        x = new(char, l);
+        if (!x)
+                return -ENOMEM;
+
+        errno = 0;
+        if (!inet_ntop(family, u, x, l)) {
+                free(x);
+                return errno ? -errno : -EINVAL;
+        }
+
+        *ret = x;
+        return 0;
+}
+
+int in_addr_from_string(unsigned family, const char *s, union in_addr_union *ret) {
+
+        assert(s);
+        assert(ret);
+
+        if (!IN_SET(family, AF_INET, AF_INET6))
+                return -EAFNOSUPPORT;
+
+        errno = 0;
+        if (inet_pton(family, s, ret) <= 0)
+                return errno ? -errno : -EINVAL;
+
+        return 0;
 }
 
 static const char* const netlink_family_table[] = {
@@ -732,38 +856,3 @@ static const char* const socket_address_bind_ipv6_only_table[_SOCKET_ADDRESS_BIN
 };
 
 DEFINE_STRING_TABLE_LOOKUP(socket_address_bind_ipv6_only, SocketAddressBindIPv6Only);
-
-bool sockaddr_equal(const union sockaddr_union *a, const union sockaddr_union *b) {
-        assert(a);
-        assert(b);
-
-        if (a->sa.sa_family != b->sa.sa_family)
-                return false;
-
-        if (a->sa.sa_family == AF_INET)
-                return a->in.sin_addr.s_addr == b->in.sin_addr.s_addr;
-
-        if (a->sa.sa_family == AF_INET6)
-                return memcmp(&a->in6.sin6_addr, &b->in6.sin6_addr, sizeof(a->in6.sin6_addr)) == 0;
-
-        return false;
-}
-
-char* ether_addr_to_string(const struct ether_addr *addr, char buffer[ETHER_ADDR_TO_STRING_MAX]) {
-        assert(addr);
-        assert(buffer);
-
-        /* Like ether_ntoa() but uses %02x instead of %x to print
-         * ethernet addresses, which makes them look less funny. Also,
-         * doesn't use a static buffer. */
-
-        sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
-                addr->ether_addr_octet[0],
-                addr->ether_addr_octet[1],
-                addr->ether_addr_octet[2],
-                addr->ether_addr_octet[3],
-                addr->ether_addr_octet[4],
-                addr->ether_addr_octet[5]);
-
-        return buffer;
-}

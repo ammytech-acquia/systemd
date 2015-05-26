@@ -20,17 +20,21 @@
 ***/
 
 #include <errno.h>
+#include <pwd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 
 #include "sd-daemon.h"
+
+#include "strv.h"
+#include "conf-parser.h"
 #include "cgroup-util.h"
+#include "mkdir.h"
 #include "bus-util.h"
 #include "bus-error.h"
-#include "label.h"
-#include "machine-image.h"
 #include "machined.h"
-#include "formats-util.h"
 
 Manager *manager_new(void) {
         Manager *m;
@@ -40,9 +44,9 @@ Manager *manager_new(void) {
         if (!m)
                 return NULL;
 
-        m->machines = hashmap_new(&string_hash_ops);
-        m->machine_units = hashmap_new(&string_hash_ops);
-        m->machine_leaders = hashmap_new(NULL);
+        m->machines = hashmap_new(string_hash_func, string_compare_func);
+        m->machine_units = hashmap_new(string_hash_func, string_compare_func);
+        m->machine_leaders = hashmap_new(trivial_hash_func, trivial_compare_func);
 
         if (!m->machines || !m->machine_units || !m->machine_leaders) {
                 manager_free(m);
@@ -62,7 +66,6 @@ Manager *manager_new(void) {
 
 void manager_free(Manager *m) {
         Machine *machine;
-        Image *i;
 
         assert(m);
 
@@ -72,15 +75,6 @@ void manager_free(Manager *m) {
         hashmap_free(m->machines);
         hashmap_free(m->machine_units);
         hashmap_free(m->machine_leaders);
-
-        while ((i = hashmap_steal_first(m->image_cache)))
-                image_unref(i);
-
-        hashmap_free(m->image_cache);
-
-        sd_event_source_unref(m->image_cache_defer_event);
-
-        bus_verify_polkit_async_registry_free(m->polkit_registry);
 
         sd_bus_unref(m->bus);
         sd_event_unref(m->event);
@@ -101,7 +95,7 @@ int manager_enumerate_machines(Manager *m) {
                 if (errno == ENOENT)
                         return 0;
 
-                log_error_errno(errno, "Failed to open /run/systemd/machines: %m");
+                log_error("Failed to open /run/systemd/machines: %m");
                 return -errno;
         }
 
@@ -118,7 +112,7 @@ int manager_enumerate_machines(Manager *m) {
 
                 k = manager_add_machine(m, de->d_name, &machine);
                 if (k < 0) {
-                        log_error_errno(k, "Failed to add machine by file name %s: %m", de->d_name);
+                        log_error("Failed to add machine by file name %s: %s", de->d_name, strerror(-k));
 
                         r = k;
                         continue;
@@ -142,28 +136,28 @@ static int manager_connect_bus(Manager *m) {
         assert(!m->bus);
 
         r = sd_bus_default_system(&m->bus);
-        if (r < 0)
-                return log_error_errno(r, "Failed to connect to system bus: %m");
+        if (r < 0) {
+                log_error("Failed to connect to system bus: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_object_vtable(m->bus, NULL, "/org/freedesktop/machine1", "org.freedesktop.machine1.Manager", manager_vtable, m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add manager object vtable: %m");
+        if (r < 0) {
+                log_error("Failed to add manager object vtable: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_fallback_vtable(m->bus, NULL, "/org/freedesktop/machine1/machine", "org.freedesktop.machine1.Machine", machine_vtable, machine_object_find, m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add machine object vtable: %m");
+        if (r < 0) {
+                log_error("Failed to add machine object vtable: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_node_enumerator(m->bus, NULL, "/org/freedesktop/machine1/machine", machine_node_enumerator, m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add machine enumerator: %m");
-
-        r = sd_bus_add_fallback_vtable(m->bus, NULL, "/org/freedesktop/machine1/image", "org.freedesktop.machine1.Image", image_vtable, image_object_find, m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add image object vtable: %m");
-
-        r = sd_bus_add_node_enumerator(m->bus, NULL, "/org/freedesktop/machine1/image", image_node_enumerator, m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add image enumerator: %m");
+        if (r < 0) {
+                log_error("Failed to add machine enumerator: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_match(m->bus,
                              NULL,
@@ -174,8 +168,10 @@ static int manager_connect_bus(Manager *m) {
                              "path='/org/freedesktop/systemd1'",
                              match_job_removed,
                              m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for JobRemoved: %m");
+        if (r < 0) {
+                log_error("Failed to add match for JobRemoved: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_match(m->bus,
                              NULL,
@@ -186,20 +182,23 @@ static int manager_connect_bus(Manager *m) {
                              "path='/org/freedesktop/systemd1'",
                              match_unit_removed,
                              m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for UnitRemoved: %m");
+        if (r < 0) {
+                log_error("Failed to add match for UnitRemoved: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_match(m->bus,
                              NULL,
                              "type='signal',"
                              "sender='org.freedesktop.systemd1',"
                              "interface='org.freedesktop.DBus.Properties',"
-                             "member='PropertiesChanged',"
-                             "arg0='org.freedesktop.systemd1.Unit'",
+                             "member='PropertiesChanged'",
                              match_properties_changed,
                              m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for PropertiesChanged: %m");
+        if (r < 0) {
+                log_error("Failed to add match for PropertiesChanged: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_match(m->bus,
                              NULL,
@@ -210,8 +209,10 @@ static int manager_connect_bus(Manager *m) {
                              "path='/org/freedesktop/systemd1'",
                              match_reloading,
                              m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for Reloading: %m");
+        if (r < 0) {
+                log_error("Failed to add match for Reloading: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_call_method(
                         m->bus,
@@ -227,12 +228,16 @@ static int manager_connect_bus(Manager *m) {
         }
 
         r = sd_bus_request_name(m->bus, "org.freedesktop.machine1", 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+        if (r < 0) {
+                log_error("Failed to register name: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_attach_event(m->bus, m->event, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to attach bus to event loop: %m");
+        if (r < 0) {
+                log_error("Failed to attach bus to event loop: %s", strerror(-r));
+                return r;
+        }
 
         return 0;
 }
@@ -321,8 +326,6 @@ int main(int argc, char *argv[]) {
          * check stays in. */
         mkdir_label("/run/systemd/machines", 0755);
 
-        assert_se(sigprocmask_many(SIG_BLOCK, SIGCHLD, -1) >= 0);
-
         m = manager_new();
         if (!m) {
                 r = log_oom();
@@ -331,7 +334,7 @@ int main(int argc, char *argv[]) {
 
         r = manager_startup(m);
         if (r < 0) {
-                log_error_errno(r, "Failed to fully start up daemon: %m");
+                log_error("Failed to fully start up daemon: %s", strerror(-r));
                 goto finish;
         }
 
@@ -346,6 +349,9 @@ int main(int argc, char *argv[]) {
         log_debug("systemd-machined stopped as pid "PID_FMT, getpid());
 
 finish:
+        sd_notify(false,
+                  "STATUS=Shutting down...");
+
         if (m)
                 manager_free(m);
 

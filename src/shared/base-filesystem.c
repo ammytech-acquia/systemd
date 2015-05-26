@@ -22,12 +22,17 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <string.h>
+#include <assert.h>
 #include <unistd.h>
 
 #include "base-filesystem.h"
 #include "log.h"
 #include "macro.h"
+#include "strv.h"
 #include "util.h"
+#include "label.h"
+#include "mkdir.h"
 
 typedef struct BaseFilesystem {
         const char *dir;
@@ -37,34 +42,31 @@ typedef struct BaseFilesystem {
 } BaseFilesystem;
 
 static const BaseFilesystem table[] = {
-        { "bin",      0, "usr/bin\0",                  NULL },
-        { "lib",      0, "usr/lib\0",                  NULL },
-        { "root",  0755, NULL,                         NULL },
-        { "sbin",     0, "usr/sbin\0",                 NULL },
-        { "usr",   0755, NULL,                         NULL },
-        { "var",   0755, NULL,                         NULL },
-        { "etc",   0755, NULL,                         NULL },
+        { "bin",      0, "usr/bin",                             NULL },
+        { "lib",      0, "usr/lib",                             NULL },
+        { "root",  0755, NULL,                                  NULL },
+        { "sbin",     0, "usr/sbin",                            NULL },
 #if defined(__i386__) || defined(__x86_64__)
-        { "lib64",    0, "usr/lib/x86_64-linux-gnu\0"
-                         "usr/lib64\0",                "ld-linux-x86-64.so.2" },
+        { "lib64",    0, "usr/lib/x86_64-linux-gnu\0usr/lib64", "ld-linux-x86-64.so.2" },
 #endif
 };
 
-int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
+int base_filesystem_create(const char *root) {
         _cleanup_close_ int fd = -1;
         unsigned i;
-        int r = 0;
+        int r;
 
         fd = open(root, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
         if (fd < 0)
-                return log_error_errno(errno, "Failed to open root file system: %m");
+                return -errno;
 
         for (i = 0; i < ELEMENTSOF(table); i ++) {
-                if (faccessat(fd, table[i].dir, F_OK, AT_SYMLINK_NOFOLLOW) >= 0)
-                        continue;
-
                 if (table[i].target) {
-                        const char *target = NULL, *s;
+                        const char *target = NULL;
+                        const char *s;
+
+                        if (faccessat(fd, table[i].dir, F_OK, AT_SYMLINK_NOFOLLOW) >= 0)
+                                continue;
 
                         /* check if one of the targets exists */
                         NULSTR_FOREACH(s, table[i].target) {
@@ -91,25 +93,18 @@ int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
                                 continue;
 
                         r = symlinkat(target, fd, table[i].dir);
-                        if (r < 0 && errno != EEXIST)
-                                return log_error_errno(errno, "Failed to create symlink at %s/%s: %m", root, table[i].dir);
-
-                        if (uid != UID_INVALID || gid != UID_INVALID) {
-                                if (fchownat(fd, table[i].dir, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
-                                        return log_error_errno(errno, "Failed to chown symlink at %s/%s: %m", root, table[i].dir);
+                        if (r < 0 && errno != EEXIST) {
+                                log_error("Failed to create symlink at %s/%s: %m", root, table[i].dir);
+                                return -errno;
                         }
-
                         continue;
                 }
 
                 RUN_WITH_UMASK(0000)
                         r = mkdirat(fd, table[i].dir, table[i].mode);
-                if (r < 0 && errno != EEXIST)
-                        return log_error_errno(errno, "Failed to create directory at %s/%s: %m", root, table[i].dir);
-
-                if (uid != UID_INVALID || gid != UID_INVALID) {
-                        if (fchownat(fd, table[i].dir, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
-                                return log_error_errno(errno, "Failed to chown directory at %s/%s: %m", root, table[i].dir);
+                if (r < 0 && errno != EEXIST) {
+                        log_error("Failed to create directory at %s/%s: %m", root, table[i].dir);
+                        return -errno;
                 }
         }
 

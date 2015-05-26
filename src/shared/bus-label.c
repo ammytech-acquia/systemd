@@ -19,10 +19,13 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "util.h"
 #include "macro.h"
+#include "def.h"
 
 #include "bus-label.h"
 
@@ -63,35 +66,34 @@ char *bus_label_escape(const char *s) {
         return r;
 }
 
-char *bus_label_unescape_n(const char *f, size_t l) {
+char *bus_label_unescape(const char *f) {
         char *r, *t;
-        size_t i;
 
         assert_return(f, NULL);
 
         /* Special case for the empty string */
-        if (l == 1 && *f == '_')
+        if (streq(f, "_"))
                 return strdup("");
 
-        r = new(char, l + 1);
+        r = new(char, strlen(f) + 1);
         if (!r)
                 return NULL;
 
-        for (i = 0, t = r; i < l; ++i) {
-                if (f[i] == '_') {
+        for (t = r; *f; f++) {
+
+                if (*f == '_') {
                         int a, b;
 
-                        if (l - i < 3 ||
-                            (a = unhexchar(f[i + 1])) < 0 ||
-                            (b = unhexchar(f[i + 2])) < 0) {
+                        if ((a = unhexchar(f[1])) < 0 ||
+                            (b = unhexchar(f[2])) < 0) {
                                 /* Invalid escape code, let's take it literal then */
                                 *(t++) = '_';
                         } else {
                                 *(t++) = (char) ((a << 4) | b);
-                                i += 2;
+                                f += 2;
                         }
                 } else
-                        *(t++) = f[i];
+                        *(t++) = *f;
         }
 
         *t = 0;

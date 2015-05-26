@@ -21,15 +21,13 @@
 
 #include <unistd.h>
 
+#include "sd-messages.h"
 #include "conf-parser.h"
 #include "special.h"
 #include "sleep-config.h"
 #include "bus-util.h"
 #include "bus-error.h"
 #include "logind-action.h"
-#include "formats-util.h"
-#include "process-util.h"
-#include "terminal-util.h"
 
 int manager_handle_action(
                 Manager *m,
@@ -73,6 +71,24 @@ int manager_handle_action(
         }
 
         if (inhibit_key == INHIBIT_HANDLE_LID_SWITCH) {
+                int n;
+
+                /* If we are docked don't react to lid closing */
+                if (manager_is_docked(m)) {
+                        log_debug("Ignoring lid switch request, system is docked.");
+                        return 0;
+                }
+
+                /* If we have more than one display connected,
+                 * don't react to lid closing. */
+                n = manager_count_displays(m);
+                if (n < 0)
+                        log_warning("Display counting failed: %s", strerror(-n));
+                else if (n > 1) {
+                        log_debug("Ignoring lid switch request, %i displays connected.", n);
+                        return 0;
+                }
+
                 /* If the last system suspend or startup is too close,
                  * let's not suspend for now, to give USB docking
                  * stations some time to settle so that we can
@@ -115,7 +131,7 @@ int manager_handle_action(
 
         if (!supported) {
                 log_warning("Requested operation not supported, ignoring.");
-                return -EOPNOTSUPP;
+                return -ENOTSUP;
         }
 
         if (m->action_what) {

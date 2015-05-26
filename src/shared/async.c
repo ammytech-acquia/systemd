@@ -41,18 +41,24 @@ int asynchronous_job(void* (*func)(void *p), void *arg) {
          * only in long running processes. */
 
         r = pthread_attr_init(&a);
-        if (r > 0)
+        if (r != 0)
                 return -r;
 
         r = pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
-        if (r > 0)
+        if (r != 0) {
+                r = -r;
                 goto finish;
+        }
 
         r = pthread_create(&t, &a, func, arg);
+        if (r != 0) {
+                r = -r;
+                goto finish;
+        }
 
 finish:
         pthread_attr_destroy(&a);
-        return -r;
+        return r;
 }
 
 static void *sync_thread(void *p) {
@@ -67,7 +73,7 @@ int asynchronous_sync(void) {
 }
 
 static void *close_thread(void *p) {
-        assert_se(close_nointr(PTR_TO_INT(p)) != -EBADF);
+        safe_close(PTR_TO_INT(p));
         return NULL;
 }
 
@@ -80,13 +86,9 @@ int asynchronous_close(int fd) {
          * but it doesn't, so we work around it, and hide this as a
          * far away as we can. */
 
-        if (fd >= 0) {
-                PROTECT_ERRNO;
-
-                r = asynchronous_job(close_thread, INT_TO_PTR(fd));
-                if (r < 0)
-                         assert_se(close_nointr(fd) != -EBADF);
-        }
+        r = asynchronous_job(close_thread, INT_TO_PTR(fd));
+        if (r < 0)
+                safe_close(fd);
 
         return -1;
 }

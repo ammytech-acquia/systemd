@@ -22,20 +22,61 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <assert.h>
 #include <stdlib.h>
+#include <netinet/ether.h>
 
 #include "conf-parser.h"
-#include "conf-files.h"
 #include "util.h"
 #include "macro.h"
 #include "strv.h"
 #include "log.h"
 #include "utf8.h"
 #include "path-util.h"
+#include "set.h"
+#include "exit-status.h"
 #include "sd-messages.h"
 
+int log_syntax_internal(const char *unit, int level,
+                        const char *file, unsigned line, const char *func,
+                        const char *config_file, unsigned config_line,
+                        int error, const char *format, ...) {
+
+        _cleanup_free_ char *msg = NULL;
+        int r;
+        va_list ap;
+
+        va_start(ap, format);
+        r = vasprintf(&msg, format, ap);
+        va_end(ap);
+        if (r < 0)
+                return log_oom();
+
+        if (unit)
+                r = log_struct_internal(level,
+                                        file, line, func,
+                                        getpid() == 1 ? "UNIT=%s" : "USER_UNIT=%s", unit,
+                                        MESSAGE_ID(SD_MESSAGE_CONFIG_ERROR),
+                                        "CONFIG_FILE=%s", config_file,
+                                        "CONFIG_LINE=%u", config_line,
+                                        "ERRNO=%d", error > 0 ? error : EINVAL,
+                                        "MESSAGE=[%s:%u] %s", config_file, config_line, msg,
+                                        NULL);
+        else
+                r = log_struct_internal(level,
+                                        file, line, func,
+                                        MESSAGE_ID(SD_MESSAGE_CONFIG_ERROR),
+                                        "CONFIG_FILE=%s", config_file,
+                                        "CONFIG_LINE=%u", config_line,
+                                        "ERRNO=%d", error > 0 ? error : EINVAL,
+                                        "MESSAGE=[%s:%u] %s", config_file, config_line, msg,
+                                        NULL);
+
+        return r;
+}
+
 int config_item_table_lookup(
-                const void *table,
+                void *table,
                 const char *section,
                 const char *lvalue,
                 ConfigParserCallback *func,
@@ -43,7 +84,7 @@ int config_item_table_lookup(
                 void **data,
                 void *userdata) {
 
-        const ConfigTableItem *t;
+        ConfigTableItem *t;
 
         assert(table);
         assert(lvalue);
@@ -69,7 +110,7 @@ int config_item_table_lookup(
 }
 
 int config_item_perf_lookup(
-                const void *table,
+                void *table,
                 const char *section,
                 const char *lvalue,
                 ConfigParserCallback *func,
@@ -113,7 +154,7 @@ static int next_assignment(const char *unit,
                            const char *filename,
                            unsigned line,
                            ConfigItemLookup lookup,
-                           const void *table,
+                           void *table,
                            const char *section,
                            unsigned section_line,
                            const char *lvalue,
@@ -158,7 +199,7 @@ static int parse_line(const char* unit,
                       unsigned line,
                       const char *sections,
                       ConfigItemLookup lookup,
-                      const void *table,
+                      void *table,
                       bool relaxed,
                       bool allow_include,
                       char **section,
@@ -204,7 +245,7 @@ static int parse_line(const char* unit,
                 if (!fn)
                         return -ENOMEM;
 
-                return config_parse(unit, fn, NULL, sections, lookup, table, relaxed, false, false, userdata);
+                return config_parse(unit, fn, NULL, sections, lookup, table, relaxed, false, userdata);
         }
 
         if (*l == '[') {
@@ -282,10 +323,9 @@ int config_parse(const char *unit,
                  FILE *f,
                  const char *sections,
                  ConfigItemLookup lookup,
-                 const void *table,
+                 void *table,
                  bool relaxed,
                  bool allow_include,
-                 bool warn,
                  void *userdata) {
 
         _cleanup_free_ char *section = NULL, *continuation = NULL;
@@ -300,11 +340,7 @@ int config_parse(const char *unit,
         if (!f) {
                 f = ours = fopen(filename, "re");
                 if (!f) {
-                        /* Only log on request, except for ENOENT,
-                         * since we return 0 to the caller. */
-                        if (warn || errno == ENOENT)
-                                log_full(errno == ENOENT ? LOG_DEBUG : LOG_ERR,
-                                         "Failed to open configuration file '%s': %m", filename);
+                        log_full(errno == ENOENT ? LOG_DEBUG : LOG_ERR, "Failed to open configuration file '%s': %m", filename);
                         return errno == ENOENT ? 0 : -errno;
                 }
         }
@@ -319,7 +355,7 @@ int config_parse(const char *unit,
                         if (feof(f))
                                 break;
 
-                        log_error_errno(errno, "Failed to read configuration file '%s': %m", filename);
+                        log_error("Failed to read configuration file '%s': %m", filename);
                         return -errno;
                 }
 
@@ -327,11 +363,8 @@ int config_parse(const char *unit,
 
                 if (continuation) {
                         c = strappend(continuation, l);
-                        if (!c) {
-                                if (warn)
-                                        log_oom();
+                        if (!c)
                                 return -ENOMEM;
-                        }
 
                         free(continuation);
                         continuation = NULL;
@@ -353,11 +386,8 @@ int config_parse(const char *unit,
                                 continuation = c;
                         else {
                                 continuation = strdup(l);
-                                if (!continuation) {
-                                        if (warn)
-                                                log_oom();
+                                if (!continuation)
                                         return -ENOMEM;
-                                }
                         }
 
                         continue;
@@ -378,41 +408,6 @@ int config_parse(const char *unit,
                                userdata);
                 free(c);
 
-                if (r < 0) {
-                        if (warn)
-                                log_warning_errno(r, "Failed to parse file '%s': %m",
-                                                  filename);
-                        return r;
-                }
-        }
-
-        return 0;
-}
-
-/* Parse each config file in the specified directories. */
-int config_parse_many(const char *conf_file,
-                      const char *conf_file_dirs,
-                      const char *sections,
-                      ConfigItemLookup lookup,
-                      const void *table,
-                      bool relaxed,
-                      void *userdata) {
-        _cleanup_strv_free_ char **files = NULL;
-        char **fn;
-        int r;
-
-        r = conf_files_list_nulstr(&files, ".conf", NULL, conf_file_dirs);
-        if (r < 0)
-                return r;
-
-        if (conf_file) {
-                r = config_parse(NULL, conf_file, NULL, sections, lookup, table, relaxed, false, true, userdata);
-                if (r < 0)
-                        return r;
-        }
-
-        STRV_FOREACH(fn, files) {
-                r = config_parse(NULL, *fn, NULL, sections, lookup, table, relaxed, false, true, userdata);
                 if (r < 0)
                         return r;
         }
@@ -665,8 +660,7 @@ int config_parse_strv(const char *unit,
                       void *data,
                       void *userdata) {
 
-        char ***sv = data;
-        const char *word, *state;
+        char *** sv = data, *w, *state;
         size_t l;
         int r;
 
@@ -691,16 +685,15 @@ int config_parse_strv(const char *unit,
                 return 0;
         }
 
-        FOREACH_WORD_QUOTED(word, l, rvalue, state) {
+        FOREACH_WORD_QUOTED(w, l, rvalue, state) {
                 char *n;
 
-                n = strndup(word, l);
+                n = strndup(w, l);
                 if (!n)
                         return log_oom();
 
                 if (!utf8_is_valid(n)) {
                         log_invalid_utf8(unit, LOG_ERR, filename, line, EINVAL, rvalue);
-                        free(n);
                         continue;
                 }
 
@@ -708,37 +701,45 @@ int config_parse_strv(const char *unit,
                 if (r < 0)
                         return log_oom();
         }
-        if (!isempty(state))
-                log_syntax(unit, LOG_ERR, filename, line, EINVAL,
-                           "Trailing garbage, ignoring.");
 
         return 0;
 }
 
-int config_parse_mode(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
+int config_parse_mode(const char *unit,
+                      const char *filename,
+                      unsigned line,
+                      const char *section,
                       unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
+                      const char *lvalue,
+                      int ltype,
+                      const char *rvalue,
+                      void *data,
+                      void *userdata) {
 
         mode_t *m = data;
+        long l;
+        char *x = NULL;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
         assert(data);
 
-        if (parse_mode(rvalue, m) < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, errno, "Failed to parse mode value, ignoring: %s", rvalue);
+        errno = 0;
+        l = strtol(rvalue, &x, 8);
+        if (!x || x == rvalue || *x || errno) {
+                log_syntax(unit, LOG_ERR, filename, line, errno,
+                           "Failed to parse mode value, ignoring: %s", rvalue);
                 return 0;
         }
 
+        if (l < 0000 || l > 07777) {
+                log_syntax(unit, LOG_ERR, filename, line, ERANGE,
+                           "Mode value out of range, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        *m = (mode_t) l;
         return 0;
 }
 
@@ -764,7 +765,8 @@ int config_parse_log_facility(
 
         x = log_facility_unshifted_from_string(rvalue);
         if (x < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, EINVAL, "Failed to parse log facility, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_ERR, filename, line, EINVAL,
+                           "Failed to parse log facility, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -795,7 +797,8 @@ int config_parse_log_level(
 
         x = log_level_from_string(rvalue);
         if (x < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, EINVAL, "Failed to parse log level, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_ERR, filename, line, EINVAL,
+                           "Failed to parse log level, ignoring: %s", rvalue);
                 return 0;
         }
 

@@ -21,8 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <sys/types.h>
 
 /*
  * Our default bloom filter has the following parameters:

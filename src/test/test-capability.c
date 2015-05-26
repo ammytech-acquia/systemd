@@ -17,6 +17,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/capability.h>
 #include <sys/socket.h>
@@ -69,7 +70,7 @@ static int setup_tests(void) {
 
         nobody = getpwnam("nobody");
         if (!nobody) {
-                log_error_errno(errno, "Could not find nobody user: %m");
+                log_error("Could not find nobody user: %m");
                 return -EXIT_TEST_SKIP;
         }
         test_uid = nobody->pw_uid;

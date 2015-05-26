@@ -19,65 +19,96 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include "systemd/sd-id128.h"
 #include "unit.h"
 #include "specifier.h"
+#include "path-util.h"
 #include "strv.h"
 #include "unit-name.h"
 #include "unit-printf.h"
 #include "macro.h"
 #include "cgroup-util.h"
-#include "formats-util.h"
+#include "special.h"
 
 static int specifier_prefix_and_instance(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
+        char *n;
 
         assert(u);
 
-        return unit_name_to_prefix_and_instance(u->id, ret);
+        n = unit_name_to_prefix_and_instance(u->id);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_prefix(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
+        char *n;
 
         assert(u);
 
-        return unit_name_to_prefix(u->id, ret);
+        n = unit_name_to_prefix(u->id);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_prefix_unescaped(char specifier, void *data, void *userdata, char **ret) {
-        _cleanup_free_ char *p = NULL;
         Unit *u = userdata;
-        int r;
+        _cleanup_free_ char *p = NULL;
+        char *n;
 
         assert(u);
 
-        r = unit_name_to_prefix(u->id, &p);
-        if (r < 0)
-                return r;
+        p = unit_name_to_prefix(u->id);
+        if (!p)
+                return -ENOMEM;
 
-        return unit_name_unescape(p, ret);
+        n = unit_name_unescape(p);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_instance_unescaped(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
+        char *n;
 
         assert(u);
 
         if (!u->instance)
-                return -EINVAL;
+                return -ENOTSUP;
 
-        return unit_name_unescape(u->instance, ret);
+        n = unit_name_unescape(u->instance);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_filename(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
+        char *n;
 
         assert(u);
 
         if (u->instance)
-                return unit_name_path_unescape(u->instance, ret);
+                n = unit_name_path_unescape(u->instance);
         else
-                return unit_name_to_path(u->id, ret);
+                n = unit_name_to_path(u->id);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_cgroup(char specifier, void *data, void *userdata, char **ret) {
@@ -99,35 +130,26 @@ static int specifier_cgroup(char specifier, void *data, void *userdata, char **r
 
 static int specifier_cgroup_root(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
+        const char *slice;
         char *n;
+        int r;
 
         assert(u);
 
-        n = strdup(u->manager->cgroup_root);
-        if (!n)
-                return -ENOMEM;
-
-        *ret = n;
-        return 0;
-}
-
-static int specifier_cgroup_slice(char specifier, void *data, void *userdata, char **ret) {
-        Unit *u = userdata;
-        char *n;
-
-        assert(u);
-
-        if (UNIT_ISSET(u->slice)) {
-                Unit *slice;
-
-                slice = UNIT_DEREF(u->slice);
-
-                if (slice->cgroup_path)
-                        n = strdup(slice->cgroup_path);
-                else
-                        n = unit_default_cgroup_path(slice);
-        } else
+        slice = unit_slice_name(u);
+        if (specifier == 'R' || !slice)
                 n = strdup(u->manager->cgroup_root);
+        else {
+                _cleanup_free_ char *p = NULL;
+
+                r = cg_slice_to_path(slice, &p);
+                if (r < 0)
+                        return r;
+
+                n = strjoin(u->manager->cgroup_root, "/", p, NULL);
+                if (!n)
+                        return -ENOMEM;
+        }
 
         *ret = n;
         return 0;
@@ -140,12 +162,12 @@ static int specifier_runtime(char specifier, void *data, void *userdata, char **
 
         assert(u);
 
-        if (u->manager->running_as == MANAGER_SYSTEM)
+        if (u->manager->running_as == SYSTEMD_SYSTEM)
                 e = "/run";
         else {
                 e = getenv("XDG_RUNTIME_DIR");
                 if (!e)
-                        return -EOPNOTSUPP;
+                        return -ENOTSUP;
         }
 
         n = strdup(e);
@@ -160,15 +182,15 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
         char *printed = NULL;
         Unit *u = userdata;
         ExecContext *c;
-        int r = 0;
+        int r;
 
         assert(u);
 
         c = unit_get_exec_context(u);
         if (!c)
-                return -EINVAL;
+                return -ENOTSUP;
 
-        if (u->manager->running_as == MANAGER_SYSTEM) {
+        if (u->manager->running_as == SYSTEMD_SYSTEM) {
 
                 /* We cannot use NSS from PID 1, hence try to make the
                  * best of it in that case, and fail if we can't help
@@ -186,7 +208,7 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
                                 if (r < 0)
                                         return -ENODATA;
 
-                                r = asprintf(&printed, UID_FMT, uid);
+                                asprintf(&printed, UID_FMT, uid);
                         }
                 }
 
@@ -209,10 +231,10 @@ static int specifier_user_name(char specifier, void *data, void *userdata, char 
                 if (specifier == 'u')
                         printed = strdup(username);
                 else
-                        r = asprintf(&printed, UID_FMT, uid);
+                        asprintf(&printed, UID_FMT, uid);
         }
 
-        if (r < 0 || !printed)
+        if (!printed)
                 return -ENOMEM;
 
         *ret = printed;
@@ -229,9 +251,9 @@ static int specifier_user_home(char specifier, void *data, void *userdata, char 
 
         c = unit_get_exec_context(u);
         if (!c)
-                return -EOPNOTSUPP;
+                return -ENOTSUP;
 
-        if (u->manager->running_as == MANAGER_SYSTEM) {
+        if (u->manager->running_as == SYSTEMD_SYSTEM) {
 
                 /* We cannot use NSS from PID 1, hence try to make the
                  * best of it if we can, but fail if we can't */
@@ -239,7 +261,7 @@ static int specifier_user_home(char specifier, void *data, void *userdata, char 
                 if (!c->user || streq(c->user, "root") || streq(c->user, "0"))
                         n = strdup("/root");
                 else
-                        return -EOPNOTSUPP;
+                        return -ENOTSUP;
 
         } else {
 
@@ -277,9 +299,9 @@ static int specifier_user_shell(char specifier, void *data, void *userdata, char
 
         c = unit_get_exec_context(u);
         if (!c)
-                return -EOPNOTSUPP;
+                return -ENOTSUP;
 
-        if (u->manager->running_as == MANAGER_SYSTEM) {
+        if (u->manager->running_as == SYSTEMD_SYSTEM) {
 
                 /* We cannot use NSS from PID 1, hence try to make the
                  * best of it if we can, but fail if we can't */
@@ -287,7 +309,7 @@ static int specifier_user_shell(char specifier, void *data, void *userdata, char
                 if (!c->user || streq(c->user, "root") || streq(c->user, "0"))
                         n = strdup("/bin/sh");
                 else
-                        return -EOPNOTSUPP;
+                        return -ENOTSUP;
 
         } else {
 
@@ -372,7 +394,7 @@ int unit_full_printf(Unit *u, const char *format, char **ret) {
 
                 { 'f', specifier_filename,            NULL },
                 { 'c', specifier_cgroup,              NULL },
-                { 'r', specifier_cgroup_slice,        NULL },
+                { 'r', specifier_cgroup_root,         NULL },
                 { 'R', specifier_cgroup_root,         NULL },
                 { 't', specifier_runtime,             NULL },
                 { 'U', specifier_user_name,           NULL },

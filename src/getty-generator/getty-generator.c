@@ -31,8 +31,6 @@
 #include "virt.h"
 #include "fileio.h"
 #include "path-util.h"
-#include "process-util.h"
-#include "terminal-util.h"
 
 static const char *arg_dest = "/tmp";
 
@@ -43,18 +41,20 @@ static int add_symlink(const char *fservice, const char *tservice) {
         assert(fservice);
         assert(tservice);
 
-        from = strjoina(SYSTEM_DATA_UNIT_PATH "/", fservice);
-        to = strjoina(arg_dest, "/getty.target.wants/", tservice);
+        from = strappenda(SYSTEM_DATA_UNIT_PATH "/", fservice);
+        to = strappenda3(arg_dest, "/getty.target.wants/", tservice);
 
         mkdir_parents_label(to, 0755);
 
         r = symlink(from, to);
         if (r < 0) {
-                /* In case console=hvc0 is passed this will very likely result in EEXIST */
                 if (errno == EEXIST)
+                        /* In case console=hvc0 is passed this will very likely result in EEXIST */
                         return 0;
-
-                return log_error_errno(errno, "Failed to create symlink %s: %m", to);
+                else {
+                        log_error("Failed to create symlink %s: %m", to);
+                        return -errno;
+                }
         }
 
         return 0;
@@ -62,30 +62,28 @@ static int add_symlink(const char *fservice, const char *tservice) {
 
 static int add_serial_getty(const char *tty) {
         _cleanup_free_ char *n = NULL;
-        int r;
 
         assert(tty);
 
         log_debug("Automatically adding serial getty for /dev/%s.", tty);
 
-        r = unit_name_from_path_instance("serial-getty", tty, ".service", &n);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate service name: %m");
+        n = unit_name_from_path_instance("serial-getty", tty, ".service");
+        if (!n)
+                return log_oom();
 
         return add_symlink("serial-getty@.service", n);
 }
 
 static int add_container_getty(const char *tty) {
         _cleanup_free_ char *n = NULL;
-        int r;
 
         assert(tty);
 
         log_debug("Automatically adding container getty for /dev/pts/%s.", tty);
 
-        r = unit_name_from_path_instance("container-getty", tty, ".service", &n);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate service name: %m");
+        n = unit_name_from_path_instance("container-getty", tty, ".service");
+        if (!n)
+                return log_oom();
 
         return add_symlink("container-getty@.service", n);
 }
@@ -99,7 +97,7 @@ static int verify_tty(const char *name) {
          * friends. Let's check that and open the device and run
          * isatty() on it. */
 
-        p = strjoina("/dev/", name);
+        p = strappenda("/dev/", name);
 
         /* O_NONBLOCK is essential here, to make sure we don't wait
          * for DCD */
@@ -156,14 +154,14 @@ int main(int argc, char *argv[]) {
 
                 r = getenv_for_pid(1, "container_ttys", &container_ttys);
                 if (r > 0) {
-                        const char *word, *state;
+                        char *w, *state;
                         size_t l;
 
-                        FOREACH_WORD(word, l, container_ttys, state) {
+                        FOREACH_WORD(w, l, container_ttys, state) {
                                 const char *t;
                                 char tty[l + 1];
 
-                                memcpy(tty, word, l);
+                                memcpy(tty, w, l);
                                 tty[l] = 0;
 
                                 /* First strip off /dev/ if it is specified */
@@ -186,15 +184,15 @@ int main(int argc, char *argv[]) {
         }
 
         if (read_one_line_file("/sys/class/tty/console/active", &active) >= 0) {
-                const char *word, *state;
+                char *w, *state;
                 size_t l;
 
                 /* Automatically add in a serial getty on all active
                  * kernel consoles */
-                FOREACH_WORD(word, l, active, state) {
+                FOREACH_WORD(w, l, active, state) {
                         _cleanup_free_ char *tty = NULL;
 
-                        tty = strndup(word, l);
+                        tty = strndup(w, l);
                         if (!tty) {
                                 log_oom();
                                 return EXIT_FAILURE;
@@ -220,7 +218,7 @@ int main(int argc, char *argv[]) {
         NULSTR_FOREACH(j, virtualization_consoles) {
                 char *p;
 
-                p = strjoina("/sys/class/tty/", j);
+                p = strappenda("/sys/class/tty/", j);
                 if (access(p, F_OK) < 0)
                         continue;
 

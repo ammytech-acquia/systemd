@@ -45,14 +45,12 @@ Prioq *prioq_new(compare_func_t compare_func) {
         return q;
 }
 
-Prioq* prioq_free(Prioq *q) {
+void prioq_free(Prioq *q) {
         if (!q)
-                return NULL;
+                return;
 
         free(q->items);
         free(q);
-
-        return NULL;
 }
 
 int prioq_ensure_allocated(Prioq **q, compare_func_t compare_func) {

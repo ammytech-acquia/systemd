@@ -20,6 +20,7 @@
 ***/
 
 #include <unistd.h>
+#include <string.h>
 
 #include "watchdog.h"
 #include "log.h"
@@ -34,13 +35,13 @@ int main(int argc, char *argv[]) {
 
         r = watchdog_set_timeout(&t);
         if (r < 0)
-                log_warning_errno(r, "Failed to open watchdog: %m");
+                log_warning("Failed to open watchdog: %s", strerror(-r));
 
         for (i = 0; i < 5; i++) {
                 log_info("Pinging...");
                 r = watchdog_ping();
                 if (r < 0)
-                        log_warning_errno(r, "Failed to ping watchdog: %m");
+                        log_warning("Failed to ping watchdog: %s", strerror(-r));
 
                 usleep(t/2);
         }
