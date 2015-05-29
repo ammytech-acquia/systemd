@@ -19,25 +19,18 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <stdlib.h>
-#include <arpa/inet.h>
-#include <stdio.h>
-#include <net/if.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <stddef.h>
-#include <sys/ioctl.h>
 
 #include "macro.h"
 #include "util.h"
 #include "mkdir.h"
-#include "socket-util.h"
 #include "missing.h"
-#include "label.h"
+#include "selinux-util.h"
+#include "socket-util.h"
 
 int socket_address_listen(
                 const SocketAddress *a,
@@ -64,7 +57,7 @@ int socket_address_listen(
                 return -EAFNOSUPPORT;
 
         if (label) {
-                r = label_socket_set(label);
+                r = mac_selinux_create_socket_prepare(label);
                 if (r < 0)
                         return r;
         }
@@ -73,7 +66,7 @@ int socket_address_listen(
         r = fd < 0 ? -errno : 0;
 
         if (label)
-                label_socket_clear();
+                mac_selinux_create_socket_clear();
 
         if (r < 0)
                 return r;
@@ -93,13 +86,13 @@ int socket_address_listen(
                 if (free_bind) {
                         one = 1;
                         if (setsockopt(fd, IPPROTO_IP, IP_FREEBIND, &one, sizeof(one)) < 0)
-                                log_warning("IP_FREEBIND failed: %m");
+                                log_warning_errno(errno, "IP_FREEBIND failed: %m");
                 }
 
                 if (transparent) {
                         one = 1;
                         if (setsockopt(fd, IPPROTO_IP, IP_TRANSPARENT, &one, sizeof(one)) < 0)
-                                log_warning("IP_TRANSPARENT failed: %m");
+                                log_warning_errno(errno, "IP_TRANSPARENT failed: %m");
                 }
         }
 
@@ -116,10 +109,7 @@ int socket_address_listen(
                 /* Enforce the right access mode for the socket */
                 old_mask = umask(~ socket_mode);
 
-                /* Include the original umask in our mask */
-                umask(~socket_mode | old_mask);
-
-                r = label_bind(fd, &a->sockaddr.sa, a->size);
+                r = mac_selinux_bind(fd, &a->sockaddr.sa, a->size);
 
                 if (r < 0 && errno == EADDRINUSE) {
                         /* Unlink and try again */
@@ -150,7 +140,8 @@ int make_socket_fd(int log_level, const char* address, int flags) {
 
         r = socket_address_parse(&a, address);
         if (r < 0) {
-                log_error("Failed to parse socket: %s", strerror(-r));
+                log_error("Failed to parse socket address \"%s\": %s",
+                          address, strerror(-r));
                 return r;
         }
 
@@ -160,13 +151,11 @@ int make_socket_fd(int log_level, const char* address, int flags) {
                 _cleanup_free_ char *p = NULL;
 
                 r = socket_address_print(&a, &p);
-                if (r < 0) {
-                        log_error("socket_address_print(): %s", strerror(-r));
-                        return r;
-                }
+                if (r < 0)
+                        return log_error_errno(r, "socket_address_print(): %m");
 
                 if (fd < 0)
-                        log_error("Failed to listen on %s: %s", p, strerror(-r));
+                        log_error_errno(fd, "Failed to listen on %s: %m", p);
                 else
                         log_full(log_level, "Listening on %s", p);
         }

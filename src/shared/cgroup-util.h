@@ -34,7 +34,8 @@ typedef enum CGroupControllerMask {
         CGROUP_CPUACCT = 2,
         CGROUP_BLKIO = 4,
         CGROUP_MEMORY = 8,
-        CGROUP_DEVICE = 16
+        CGROUP_DEVICE = 16,
+        _CGROUP_CONTROLLER_MASK_ALL = 31
 } CGroupControllerMask;
 
 /*
@@ -84,6 +85,7 @@ int cg_attach_fallback(const char *controller, const char *path, pid_t pid);
 int cg_create_and_attach(const char *controller, const char *path, pid_t pid);
 
 int cg_set_attribute(const char *controller, const char *path, const char *attribute, const char *value);
+int cg_get_attribute(const char *controller, const char *path, const char *attribute, char **ret);
 
 int cg_set_group_access(const char *controller, const char *path, mode_t mode, uid_t uid, gid_t gid);
 int cg_set_task_access(const char *controller, const char *path, mode_t mode, uid_t uid, gid_t gid);
@@ -102,6 +104,7 @@ int cg_path_get_unit(const char *path, char **unit);
 int cg_path_get_user_unit(const char *path, char **unit);
 int cg_path_get_machine_name(const char *path, char **machine);
 int cg_path_get_slice(const char *path, char **slice);
+int cg_path_get_user_slice(const char *path, char **slice);
 
 int cg_shift_path(const char *cgroup, const char *cached_root, const char **shifted);
 int cg_pid_get_path_shifted(pid_t pid, const char *cached_root, char **cgroup);
@@ -112,6 +115,7 @@ int cg_pid_get_unit(pid_t pid, char **unit);
 int cg_pid_get_user_unit(pid_t pid, char **unit);
 int cg_pid_get_machine_name(pid_t pid, char **machine);
 int cg_pid_get_slice(pid_t pid, char **slice);
+int cg_pid_get_user_slice(pid_t pid, char **slice);
 
 int cg_path_decode_unit(const char *cgroup, char **unit);
 
@@ -125,9 +129,11 @@ int cg_slice_to_path(const char *unit, char **ret);
 typedef const char* (*cg_migrate_callback_t)(CGroupControllerMask mask, void *userdata);
 
 int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask mask, const char *path);
-int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t pid);
-int cg_attach_many_everywhere(CGroupControllerMask supported, const char *path, Set* pids);
+int cg_attach_everywhere(CGroupControllerMask supported, const char *path, pid_t pid, cg_migrate_callback_t callback, void *userdata);
+int cg_attach_many_everywhere(CGroupControllerMask supported, const char *path, Set* pids, cg_migrate_callback_t callback, void *userdata);
 int cg_migrate_everywhere(CGroupControllerMask supported, const char *from, const char *to, cg_migrate_callback_t callback, void *userdata);
 int cg_trim_everywhere(CGroupControllerMask supported, const char *path, bool delete_root);
 
 CGroupControllerMask cg_mask_supported(void);
+
+int cg_kernel_controllers(Set *controllers);

@@ -1,5 +1,5 @@
 '\" t
-.TH "SYSTEMD\-SYSTEM\&.CONF" "5" "" "systemd 215" "systemd-system.conf"
+.TH "SYSTEMD\-SYSTEM\&.CONF" "5" "" "systemd 220" "systemd-system.conf"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -20,17 +20,52 @@
 .\" * MAIN CONTENT STARTS HERE *
 .\" -----------------------------------------------------------------
 .SH "NAME"
-systemd-system.conf, systemd-user.conf \- System and session service manager configuration file
+systemd-system.conf, system.conf.d, systemd-user.conf, user.conf.d \- System and session service manager configuration files
 .SH "SYNOPSIS"
 .PP
 /etc/systemd/system\&.conf
 .PP
+/etc/systemd/system\&.conf\&.d/*\&.conf
+.PP
+/run/systemd/system\&.conf\&.d/*\&.conf
+.PP
+/usr/lib/systemd/system\&.conf\&.d/*\&.conf
+.PP
 /etc/systemd/user\&.conf
+.PP
+/etc/systemd/user\&.conf\&.d/*\&.conf
+.PP
+/run/systemd/user\&.conf\&.d/*\&.conf
+.PP
+/usr/lib/systemd/user\&.conf\&.d/*\&.conf
 .SH "DESCRIPTION"
 .PP
-When run as system instance systemd reads the configuration file
-system\&.conf, otherwise
-user\&.conf\&. These configuration files contain a few settings controlling basic manager operations\&.
+When run as a system instance, systemd interprets the configuration file
+system\&.conf
+and the files in
+system\&.conf\&.d
+directories; when run as a user instance, systemd interprets the configuration file
+user\&.conf
+and the files in
+user\&.conf\&.d
+directories\&. These configuration files contain a few settings controlling basic manager operations\&.
+.SH "CONFIGURATION DIRECTORIES AND PRECEDENCE"
+.PP
+Default configuration is defined during compilation, so a configuration file is only needed when it is necessary to deviate from those defaults\&. By default the configuration file in
+/etc/systemd/
+contains commented out entries showing the defaults as a guide to the administrator\&. This file can be edited to create local overrides\&.
+.PP
+When packages need to customize the configuration, they can install configuration snippets in
+/usr/lib/systemd/*\&.conf\&.d/\&. Files in
+/etc/
+are reserved for the local administrator, who may use this logic to override the configuration files installed by vendor packages\&. The main configuration file is read before any of the configuration directories, and has the lowest precedence; entries in a file in any configuration directory override entries in the single configuration file\&. Files in the
+*\&.conf\&.d/
+configuration subdirectories are sorted by their filename in lexicographic order, regardless of which of the subdirectories they reside in\&. If multiple files specify the same option, the entry in the file with the lexicographically latest name takes precedence\&. It is recommended to prefix all filenames in those subdirectories with a two\-digit number and a dash, to simplify the ordering of the files\&.
+.PP
+To disable a configuration file supplied by the vendor, the recommended way is to place a symlink to
+/dev/null
+in the configuration directory in
+/etc/, with the same filename as the vendor configuration file\&.
 .SH "OPTIONS"
 .PP
 All options are configured in the
@@ -138,6 +173,12 @@ for details on the per\-unit settings)\&. For non\-service units,
 sets the default
 \fITimeoutSec=\fR
 value\&.
+\fIDefaultTimeoutStartSec=\fR
+and
+\fIDefaultTimeoutStopSec=\fR
+default to 90s\&.
+\fIDefaultRestartSec=\fR
+defaults to 100ms\&.
 .RE
 .PP
 \fIDefaultStartLimitInterval=\fR, \fIDefaultStartLimitBurst=\fR
@@ -148,6 +189,10 @@ and
 \fIStartLimitBurst=\fR\&. See
 \fBsystemd.service\fR(5)
 for details on the per\-service settings\&.
+\fIDefaultStartLimitInterval=\fR
+defaults to 10s\&.
+\fIDefaultStartLimitBurst=\fR
+defaults to 5\&.
 .RE
 .PP
 \fIDefaultEnvironment=\fR

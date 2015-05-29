@@ -1,3 +1,4 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 /***
   This file is part of systemd.
 
@@ -18,14 +19,8 @@
 ***/
 
 #include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
-#include <string.h>
 #include <getopt.h>
-#include <syslog.h>
-#include <fcntl.h>
 #include <sys/epoll.h>
 
 #include "libudev.h"
@@ -33,14 +28,6 @@
 #include "util.h"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
-_printf_(6,0)
-static void log_fn(struct udev *udev,
-                   int priority, const char *file, int line, const char *fn,
-                   const char *format, va_list args) {
-        printf("test-libudev: %s %s:%d ", fn, file, line);
-        vprintf(format, args);
-}
 
 static void print_device(struct udev_device *device) {
         const char *str;
@@ -317,6 +304,7 @@ static int test_queue(struct udev *udev) {
 
 static int test_enumerate(struct udev *udev, const char *subsystem) {
         struct udev_enumerate *udev_enumerate;
+        int r;
 
         printf("enumerate '%s'\n", subsystem == NULL ? "<all>" : subsystem);
         udev_enumerate = udev_enumerate_new(udev);
@@ -352,7 +340,11 @@ static int test_enumerate(struct udev *udev, const char *subsystem) {
         if (udev_enumerate == NULL)
                 return -1;
         udev_enumerate_add_match_subsystem(udev_enumerate,"block");
-        udev_enumerate_add_match_is_initialized(udev_enumerate);
+        r = udev_enumerate_add_match_is_initialized(udev_enumerate);
+        if (r < 0) {
+                udev_enumerate_unref(udev_enumerate);
+                return r;
+        }
         udev_enumerate_scan_devices(udev_enumerate);
         test_enumerate_print_list(udev_enumerate);
         udev_enumerate_unref(udev_enumerate);
@@ -407,7 +399,7 @@ static void test_hwdb(struct udev *udev, const char *modalias) {
         printf("\n");
 
         hwdb = udev_hwdb_unref(hwdb);
-        assert(hwdb == NULL);
+        assert_se(hwdb == NULL);
 }
 
 int main(int argc, char *argv[]) {
@@ -423,6 +415,7 @@ int main(int argc, char *argv[]) {
         const char *syspath = "/devices/virtual/mem/null";
         const char *subsystem = NULL;
         char path[1024];
+        int c;
 
         udev = udev_new();
         printf("context: %p\n", udev);
@@ -430,37 +423,38 @@ int main(int argc, char *argv[]) {
                 printf("no context\n");
                 return 1;
         }
-        udev_set_log_fn(udev, log_fn);
-        printf("set log: %p\n", log_fn);
 
-        for (;;) {
-                int option;
+        while ((c = getopt_long(argc, argv, "p:s:dhV", options, NULL)) >= 0)
+                switch (c) {
 
-                option = getopt_long(argc, argv, "+p:s:dhV", options, NULL);
-                if (option == -1)
-                        break;
-
-                switch (option) {
                 case 'p':
                         syspath = optarg;
                         break;
+
                 case 's':
                         subsystem = optarg;
                         break;
+
                 case 'd':
-                        if (udev_get_log_priority(udev) < LOG_INFO)
-                                udev_set_log_priority(udev, LOG_INFO);
+                        if (log_get_max_level() < LOG_INFO)
+                                log_set_max_level(LOG_INFO);
                         break;
+
                 case 'h':
                         printf("--debug --syspath= --subsystem= --help\n");
                         goto out;
+
                 case 'V':
                         printf("%s\n", VERSION);
                         goto out;
-                default:
+
+                case '?':
                         goto out;
+
+                default:
+                        assert_not_reached("Unhandled option code.");
                 }
-        }
+
 
         /* add sys path if needed */
         if (!startswith(syspath, "/sys")) {

@@ -29,10 +29,10 @@
 #include "util.h"
 #include "unit-name.h"
 #include "path-util.h"
+#include "fstab-util.h"
 #include "mount-setup.h"
 #include "special.h"
 #include "mkdir.h"
-#include "fileio.h"
 #include "generator.h"
 #include "strv.h"
 #include "virt.h"
@@ -43,58 +43,49 @@ static char *arg_root_what = NULL;
 static char *arg_root_fstype = NULL;
 static char *arg_root_options = NULL;
 static int arg_root_rw = -1;
+static char *arg_usr_what = NULL;
+static char *arg_usr_fstype = NULL;
+static char *arg_usr_options = NULL;
 
+static int add_swap(
+                const char *what,
+                struct mntent *me,
+                bool noauto,
+                bool nofail) {
 
-static int mount_find_pri(struct mntent *me, int *ret) {
-        char *end, *pri;
-        unsigned long r;
-
-        assert(me);
-        assert(ret);
-
-        pri = hasmntopt(me, "pri");
-        if (!pri)
-                return 0;
-
-        pri += 4;
-
-        errno = 0;
-        r = strtoul(pri, &end, 10);
-        if (errno > 0)
-                return -errno;
-
-        if (end == pri || (*end != ',' && *end != 0))
-                return -EINVAL;
-
-        *ret = (int) r;
-        return 1;
-}
-
-static int add_swap(const char *what, struct mntent *me) {
-        _cleanup_free_ char *name = NULL, *unit = NULL, *lnk = NULL;
+        _cleanup_free_ char *name = NULL, *unit = NULL, *lnk = NULL, *filtered = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        bool noauto;
         int r, pri = -1;
+        const char *opts;
 
         assert(what);
         assert(me);
+
+        if (access("/proc/swaps", F_OK) < 0) {
+                log_info("Swap not supported, ignoring fstab swap entry for %s.", what);
+                return 0;
+        }
 
         if (detect_container(NULL) > 0) {
                 log_info("Running in a container, ignoring fstab swap entry for %s.", what);
                 return 0;
         }
 
-        r = mount_find_pri(me, &pri);
+        opts = me->mnt_opts;
+        r = fstab_find_pri(opts, &pri);
         if (r < 0) {
-                log_error("Failed to parse priority");
-                return pri;
+                log_error_errno(r, "Failed to parse priority, ignoring: %m");
+
+                /* Remove invalid pri field */
+                r = fstab_filter_options(opts, "pri\0", NULL, NULL, &filtered);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse options: %m");
+                opts = filtered;
         }
 
-        noauto = !!hasmntopt(me, "noauto");
-
-        name = unit_name_from_path(what, ".swap");
-        if (!name)
-                return log_oom();
+        r = unit_name_from_path(what, ".swap", &name);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate unit name: %m");
 
         unit = strjoin(arg_dest, "/", name, NULL);
         if (!unit)
@@ -105,7 +96,7 @@ static int add_swap(const char *what, struct mntent *me) {
                 if (errno == EEXIST)
                         log_error("Failed to create swap unit file %s, as it already exists. Duplicate entry in /etc/fstab?", unit);
                 else
-                        log_error("Failed to create unit file %s: %m", unit);
+                        log_error_errno(errno, "Failed to create unit file %s: %m", unit);
                 return -errno;
         }
 
@@ -118,32 +109,32 @@ static int add_swap(const char *what, struct mntent *me) {
                 "What=%s\n",
                 what);
 
+        /* Note that we currently pass the priority field twice, once
+         * in Priority=, and once in Options= */
         if (pri >= 0)
-                fprintf(f,
-                        "Priority=%i\n",
-                        pri);
+                fprintf(f, "Priority=%i\n", pri);
 
-        fflush(f);
-        if (ferror(f)) {
-                log_error("Failed to write unit file %s: %m", unit);
-                return -errno;
-        }
+        if (!isempty(opts) && !streq(opts, "defaults"))
+                fprintf(f, "Options=%s\n", opts);
+
+        r = fflush_and_check(f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write unit file %s: %m", unit);
 
         /* use what as where, to have a nicer error message */
-        r = generator_write_timeouts(arg_dest, what, what, me->mnt_opts, NULL);
+        r = generator_write_timeouts(arg_dest, what, what, opts, NULL);
         if (r < 0)
                 return r;
 
         if (!noauto) {
-                lnk = strjoin(arg_dest, "/" SPECIAL_SWAP_TARGET ".wants/", name, NULL);
+                lnk = strjoin(arg_dest, "/" SPECIAL_SWAP_TARGET,
+                              nofail ? ".wants/" : ".requires/", name, NULL);
                 if (!lnk)
                         return log_oom();
 
                 mkdir_parents_label(lnk, 0755);
-                if (symlink(unit, lnk) < 0) {
-                        log_error("Failed to create symlink %s: %m", lnk);
-                        return -errno;
-                }
+                if (symlink(unit, lnk) < 0)
+                        return log_error_errno(errno, "Failed to create symlink %s: %m", lnk);
         }
 
         return 0;
@@ -152,17 +143,97 @@ static int add_swap(const char *what, struct mntent *me) {
 static bool mount_is_network(struct mntent *me) {
         assert(me);
 
-        return
-                hasmntopt(me, "_netdev") ||
-                fstype_is_network(me->mnt_type);
+        return fstab_test_option(me->mnt_opts, "_netdev\0") ||
+               fstype_is_network(me->mnt_type);
 }
 
 static bool mount_in_initrd(struct mntent *me) {
         assert(me);
 
-        return
-                hasmntopt(me, "x-initrd.mount") ||
-                streq(me->mnt_dir, "/usr");
+        return fstab_test_option(me->mnt_opts, "x-initrd.mount\0") ||
+               streq(me->mnt_dir, "/usr");
+}
+
+static int write_idle_timeout(FILE *f, const char *where, const char *opts) {
+        _cleanup_free_ char *timeout = NULL;
+        char timespan[FORMAT_TIMESPAN_MAX];
+        usec_t u;
+        int r;
+
+        r = fstab_filter_options(opts, "x-systemd.idle-timeout\0", NULL, &timeout, NULL);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse options: %m");
+        if (r == 0)
+                return 0;
+
+        r = parse_sec(timeout, &u);
+        if (r < 0) {
+                log_warning("Failed to parse timeout for %s, ignoring: %s", where, timeout);
+                return 0;
+        }
+
+        fprintf(f, "TimeoutIdleSec=%s\n", format_timespan(timespan, sizeof(timespan), u, 0));
+
+        return 0;
+}
+
+static int write_requires_after(FILE *f, const char *opts) {
+        _cleanup_strv_free_ char **names = NULL, **units = NULL;
+        _cleanup_free_ char *res = NULL;
+        char **s;
+        int r;
+
+        assert(f);
+        assert(opts);
+
+        r = fstab_extract_values(opts, "x-systemd.requires", &names);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse options: %m");
+        if (r == 0)
+                return 0;
+
+        STRV_FOREACH(s, names) {
+                char *x;
+
+                r = unit_name_mangle_with_suffix(*s, UNIT_NAME_NOGLOB, ".mount", &x);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to generate unit name: %m");
+                r = strv_consume(&units, x);
+                if (r < 0)
+                        return log_oom();
+        }
+
+        if (units) {
+                res = strv_join(units, " ");
+                if (!res)
+                        return log_oom();
+                fprintf(f, "After=%1$s\nRequires=%1$s\n", res);
+        }
+
+        return 0;
+}
+
+static int write_requires_mounts_for(FILE *f, const char *opts) {
+        _cleanup_strv_free_ char **paths = NULL;
+        _cleanup_free_ char *res = NULL;
+        int r;
+
+        assert(f);
+        assert(opts);
+
+        r = fstab_extract_values(opts, "x-systemd.requires-mounts-for", &paths);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse options: %m");
+        if (r == 0)
+                return 0;
+
+        res = strv_join(paths, " ");
+        if (!res)
+                return log_oom();
+
+        fprintf(f, "RequiresMountsFor=%s\n", res);
+
+        return 0;
 }
 
 static int add_mount(
@@ -202,15 +273,19 @@ static int add_mount(
                 return 0;
 
         if (path_equal(where, "/")) {
-                /* The root disk is not an option */
-                automount = false;
-                noauto = false;
-                nofail = false;
+                if (noauto)
+                        log_warning("Ignoring \"noauto\" for root device");
+                if (nofail)
+                        log_warning("Ignoring \"nofail\" for root device");
+                if (automount)
+                        log_warning("Ignoring automount option for root device");
+
+                noauto = nofail = automount = false;
         }
 
-        name = unit_name_from_path(where, ".mount");
-        if (!name)
-                return log_oom();
+        r = unit_name_from_path(where, ".mount", &name);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate unit name: %m");
 
         unit = strjoin(arg_dest, "/", name, NULL);
         if (!unit)
@@ -221,7 +296,7 @@ static int add_mount(
                 if (errno == EEXIST)
                         log_error("Failed to create mount unit file %s, as it already exists. Duplicate entry in /etc/fstab?", unit);
                 else
-                        log_error("Failed to create unit file %s: %m", unit);
+                        log_error_errno(errno, "Failed to create unit file %s: %m", unit);
                 return -errno;
         }
 
@@ -234,6 +309,15 @@ static int add_mount(
 
         if (post && !noauto && !nofail && !automount)
                 fprintf(f, "Before=%s\n", post);
+
+        if (!automount && opts) {
+                 r = write_requires_after(f, opts);
+                 if (r < 0)
+                         return r;
+                 r = write_requires_mounts_for(f, opts);
+                 if (r < 0)
+                         return r;
+        }
 
         if (passno != 0) {
                 r = generator_write_fsck_deps(f, arg_dest, what, where, fstype);
@@ -259,11 +343,9 @@ static int add_mount(
         if (!isempty(filtered) && !streq(filtered, "defaults"))
                 fprintf(f, "Options=%s\n", filtered);
 
-        fflush(f);
-        if (ferror(f)) {
-                log_error("Failed to write unit file %s: %m", unit);
-                return -errno;
-        }
+        r = fflush_and_check(f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write unit file %s: %m", unit);
 
         if (!noauto && post) {
                 lnk = strjoin(arg_dest, "/", post, nofail || automount ? ".wants/" : ".requires/", name, NULL);
@@ -271,16 +353,14 @@ static int add_mount(
                         return log_oom();
 
                 mkdir_parents_label(lnk, 0755);
-                if (symlink(unit, lnk) < 0) {
-                        log_error("Failed to create symlink %s: %m", lnk);
-                        return -errno;
-                }
+                if (symlink(unit, lnk) < 0)
+                        return log_error_errno(errno, "Failed to create symlink %s: %m", lnk);
         }
 
         if (automount) {
-                automount_name = unit_name_from_path(where, ".automount");
-                if (!automount_name)
-                        return log_oom();
+                r = unit_name_from_path(where, ".automount", &automount_name);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to generate unit name: %m");
 
                 automount_unit = strjoin(arg_dest, "/", automount_name, NULL);
                 if (!automount_unit)
@@ -288,10 +368,8 @@ static int add_mount(
 
                 fclose(f);
                 f = fopen(automount_unit, "wxe");
-                if (!f) {
-                        log_error("Failed to create unit file %s: %m", automount_unit);
-                        return -errno;
-                }
+                if (!f)
+                        return log_error_errno(errno, "Failed to create unit file %s: %m", automount_unit);
 
                 fprintf(f,
                         "# Automatically generated by systemd-fstab-generator\n\n"
@@ -305,16 +383,27 @@ static int add_mount(
                                 "Before=%s\n",
                                 post);
 
+                if (opts) {
+                        r = write_requires_after(f, opts);
+                        if (r < 0)
+                                return r;
+                        r = write_requires_mounts_for(f, opts);
+                        if (r < 0)
+                                return r;
+                }
+
                 fprintf(f,
                         "[Automount]\n"
                         "Where=%s\n",
                         where);
 
-                fflush(f);
-                if (ferror(f)) {
-                        log_error("Failed to write unit file %s: %m", automount_unit);
-                        return -errno;
-                }
+                r = write_idle_timeout(f, where, opts);
+                if (r < 0)
+                        return r;
+
+                r = fflush_and_check(f);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to write unit file %s: %m", automount_unit);
 
                 free(lnk);
                 lnk = strjoin(arg_dest, "/", post, nofail ? ".wants/" : ".requires/", automount_name, NULL);
@@ -322,10 +411,8 @@ static int add_mount(
                         return log_oom();
 
                 mkdir_parents_label(lnk, 0755);
-                if (symlink(automount_unit, lnk) < 0) {
-                        log_error("Failed to create symlink %s: %m", lnk);
-                        return -errno;
-                }
+                if (symlink(automount_unit, lnk) < 0)
+                        return log_error_errno(errno, "Failed to create symlink %s: %m", lnk);
         }
 
         return 0;
@@ -343,12 +430,13 @@ static int parse_fstab(bool initrd) {
                 if (errno == ENOENT)
                         return 0;
 
-                log_error("Failed to open %s: %m", fstab_path);
+                log_error_errno(errno, "Failed to open %s: %m", fstab_path);
                 return -errno;
         }
 
         while ((me = getmntent(f))) {
                 _cleanup_free_ char *where = NULL, *what = NULL;
+                bool noauto, nofail;
                 int k;
 
                 if (initrd && !mount_in_initrd(me))
@@ -358,7 +446,7 @@ static int parse_fstab(bool initrd) {
                 if (!what)
                         return log_oom();
 
-                if (detect_container(NULL) > 0 && is_device_path(what)) {
+                if (is_device_path(what) && path_is_read_only_fs("sys") > 0) {
                         log_info("Running in a container, ignoring fstab device entry for %s.", what);
                         continue;
                 }
@@ -370,20 +458,21 @@ static int parse_fstab(bool initrd) {
                 if (is_path(where))
                         path_kill_slashes(where);
 
-                log_debug("Found entry what=%s where=%s type=%s", what, where, me->mnt_type);
+                noauto = fstab_test_yes_no_option(me->mnt_opts, "noauto\0" "auto\0");
+                nofail = fstab_test_yes_no_option(me->mnt_opts, "nofail\0" "fail\0");
+                log_debug("Found entry what=%s where=%s type=%s nofail=%s noauto=%s",
+                          what, where, me->mnt_type,
+                          yes_no(noauto), yes_no(nofail));
 
                 if (streq(me->mnt_type, "swap"))
-                        k = add_swap(what, me);
+                        k = add_swap(what, me, noauto, nofail);
                 else {
-                        bool noauto, nofail, automount;
+                        bool automount;
                         const char *post;
 
-                        noauto = !!hasmntopt(me, "noauto");
-                        nofail = !!hasmntopt(me, "nofail");
-                        automount =
-                                  hasmntopt(me, "comment=systemd.automount") ||
-                                  hasmntopt(me, "x-systemd.automount");
-
+                        automount = fstab_test_option(me->mnt_opts,
+                                                      "comment=systemd.automount\0"
+                                                      "x-systemd.automount\0");
                         if (initrd)
                                 post = SPECIAL_INITRD_FS_TARGET;
                         else if (mount_in_initrd(me))
@@ -412,27 +501,24 @@ static int parse_fstab(bool initrd) {
         return r;
 }
 
-static int add_root_mount(void) {
+static int add_sysroot_mount(void) {
         _cleanup_free_ char *what = NULL;
         const char *opts;
 
         if (isempty(arg_root_what)) {
-                log_debug("Could not find a root= entry on the kernel commandline.");
+                log_debug("Could not find a root= entry on the kernel command line.");
                 return 0;
         }
 
         what = fstab_node_to_udev_node(arg_root_what);
-        if (!path_is_absolute(what)) {
-                log_debug("Skipping entry what=%s where=/sysroot type=%s", what, strna(arg_root_fstype));
-                return 0;
-        }
+        if (!what)
+                return log_oom();
 
         if (!arg_root_options)
                 opts = arg_root_rw > 0 ? "rw" : "ro";
         else if (arg_root_rw >= 0 ||
-                 (!mount_test_option(arg_root_options, "ro") &&
-                  !mount_test_option(arg_root_options, "rw")))
-                opts = strappenda3(arg_root_options, ",", arg_root_rw > 0 ? "rw" : "ro");
+                 !fstab_test_option(arg_root_options, "ro\0" "rw\0"))
+                opts = strjoina(arg_root_options, ",", arg_root_rw > 0 ? "rw" : "ro");
         else
                 opts = arg_root_options;
 
@@ -440,6 +526,63 @@ static int add_root_mount(void) {
         return add_mount(what,
                          "/sysroot",
                          arg_root_fstype,
+                         opts,
+                         is_device_path(what) ? 1 : 0,
+                         false,
+                         false,
+                         false,
+                         SPECIAL_INITRD_ROOT_FS_TARGET,
+                         "/proc/cmdline");
+}
+
+static int add_sysroot_usr_mount(void) {
+        _cleanup_free_ char *what = NULL;
+        const char *opts;
+
+        if (!arg_usr_what && !arg_usr_fstype && !arg_usr_options)
+                return 0;
+
+        if (arg_root_what && !arg_usr_what) {
+                arg_usr_what = strdup(arg_root_what);
+
+                if (!arg_usr_what)
+                        return log_oom();
+        }
+
+        if (arg_root_fstype && !arg_usr_fstype) {
+                arg_usr_fstype = strdup(arg_root_fstype);
+
+                if (!arg_usr_fstype)
+                        return log_oom();
+        }
+
+        if (arg_root_options && !arg_usr_options) {
+                arg_usr_options = strdup(arg_root_options);
+
+                if (!arg_usr_options)
+                        return log_oom();
+        }
+
+        if (!arg_usr_what)
+                return 0;
+
+        what = fstab_node_to_udev_node(arg_usr_what);
+        if (!path_is_absolute(what)) {
+                log_debug("Skipping entry what=%s where=/sysroot/usr type=%s", what, strna(arg_usr_fstype));
+                return -1;
+        }
+
+        if (!arg_usr_options)
+                opts = arg_root_rw > 0 ? "rw" : "ro";
+        else if (!fstab_test_option(arg_usr_options, "ro\0" "rw\0"))
+                opts = strjoina(arg_usr_options, ",", arg_root_rw > 0 ? "rw" : "ro");
+        else
+                opts = arg_usr_options;
+
+        log_debug("Found entry what=%s where=/sysroot/usr type=%s", what, strna(arg_usr_fstype));
+        return add_mount(what,
+                         "/sysroot/usr",
+                         arg_usr_fstype,
                          opts,
                          1,
                          false,
@@ -452,9 +595,9 @@ static int add_root_mount(void) {
 static int parse_proc_cmdline_item(const char *key, const char *value) {
         int r;
 
-        /* root= and roofstype= may occur more than once, the last
-         * instance should take precedence.  In the case of multiple
-         * rootflags= the arguments should be concatenated */
+        /* root=, usr=, usrfstype= and roofstype= may occur more than once, the last
+         * instance should take precedence.  In the case of multiple rootflags=
+         * or usrflags= the arguments should be concatenated */
 
         if (STR_IN_SET(key, "fstab", "rd.fstab") && value) {
 
@@ -466,16 +609,12 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
 
         } else if (streq(key, "root") && value) {
 
-                free(arg_root_what);
-                arg_root_what = strdup(value);
-                if (!arg_root_what)
+                if (free_and_strdup(&arg_root_what, value) < 0)
                         return log_oom();
 
         } else if (streq(key, "rootfstype") && value) {
 
-                free(arg_root_fstype);
-                arg_root_fstype = strdup(value);
-                if (!arg_root_fstype)
+                if (free_and_strdup(&arg_root_fstype, value) < 0)
                         return log_oom();
 
         } else if (streq(key, "rootflags") && value) {
@@ -489,6 +628,28 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
 
                 free(arg_root_options);
                 arg_root_options = o;
+
+        } else if (streq(key, "mount.usr") && value) {
+
+                if (free_and_strdup(&arg_usr_what, value) < 0)
+                        return log_oom();
+
+        } else if (streq(key, "mount.usrfstype") && value) {
+
+                if (free_and_strdup(&arg_usr_fstype, value) < 0)
+                        return log_oom();
+
+        } else if (streq(key, "mount.usrflags") && value) {
+                char *o;
+
+                o = arg_usr_options ?
+                        strjoin(arg_usr_options, ",", value, NULL) :
+                        strdup(value);
+                if (!o)
+                        return log_oom();
+
+                free(arg_usr_options);
+                arg_usr_options = o;
 
         } else if (streq(key, "rw") && !value)
                 arg_root_rw = true;
@@ -515,12 +676,16 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
-        if (parse_proc_cmdline(parse_proc_cmdline_item) < 0)
-                return EXIT_FAILURE;
+        r = parse_proc_cmdline(parse_proc_cmdline_item);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
 
-        /* Always honour root= in the kernel command line if we are in an initrd */
-        if (in_initrd())
-                r = add_root_mount();
+        /* Always honour root= and usr= in the kernel command line if we are in an initrd */
+        if (in_initrd()) {
+                r = add_sysroot_mount();
+                if (r == 0)
+                        r = add_sysroot_usr_mount();
+        }
 
         /* Honour /etc/fstab only when that's enabled */
         if (arg_fstab_enabled) {
@@ -542,6 +707,14 @@ int main(int argc, char *argv[]) {
                                 r = k;
                 }
         }
+
+        free(arg_root_what);
+        free(arg_root_fstype);
+        free(arg_root_options);
+
+        free(arg_usr_what);
+        free(arg_usr_fstype);
+        free(arg_usr_options);
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

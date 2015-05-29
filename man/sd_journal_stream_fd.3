@@ -1,5 +1,5 @@
 '\" t
-.TH "SD_JOURNAL_STREAM_FD" "3" "" "systemd 215" "sd_journal_stream_fd"
+.TH "SD_JOURNAL_STREAM_FD" "3" "" "systemd 220" "sd_journal_stream_fd"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -49,7 +49,7 @@ for more information)\&. The second argument shall be the default priority level
 \fBLOG_DEBUG\fR, as defined in
 syslog\&.h, see
 \fBsyslog\fR(3)
-for details\&. The third argument is a boolean: if true kernel\-style log priority level prefixes (such as
+for details\&. The third argument is a boolean: if true kernel\-style log level prefixes (such as
 \fBSD_WARNING\fR) are interpreted, see
 \fBsd-daemon\fR(3)
 for more information\&.
@@ -82,23 +82,23 @@ Creating a log stream suitable for
 #include <systemd/sd\-daemon\&.h>
 
 int main(int argc, char *argv[]) {
-        int fd;
-        FILE *log;
-        fd = sd_journal_stream_fd("test", LOG_INFO, 1);
-        if (fd < 0) {
-                fprintf(stderr, "Failed to create stream fd: %s\en", strerror(\-fd));
-                return 1;
-        }
-        log = fdopen(fd, "w");
-        if (!log) {
-                fprintf(stderr, "Failed to create file object: %m\en");
-                close(fd);
-                return 1;
-        }
-        fprintf(log, "Hello World!\en");
-        fprintf(log, SD_WARNING "This is a warning!\en");
-        fclose(log);
-        return 0;
+  int fd;
+  FILE *log;
+  fd = sd_journal_stream_fd("test", LOG_INFO, 1);
+  if (fd < 0) {
+    fprintf(stderr, "Failed to create stream fd: %s\en", strerror(\-fd));
+    return 1;
+  }
+  log = fdopen(fd, "w");
+  if (!log) {
+    fprintf(stderr, "Failed to create file object: %m\en");
+    close(fd);
+    return 1;
+  }
+  fprintf(log, "Hello World!\en");
+  fprintf(log, SD_WARNING "This is a warning!\en");
+  fclose(log);
+  return 0;
 }
 .fi
 .if n \{\

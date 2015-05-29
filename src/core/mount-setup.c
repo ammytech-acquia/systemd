@@ -21,11 +21,7 @@
 
 #include <sys/mount.h>
 #include <errno.h>
-#include <sys/stat.h>
 #include <stdlib.h>
-#include <string.h>
-#include <libgen.h>
-#include <assert.h>
 #include <unistd.h>
 #include <ftw.h>
 
@@ -43,7 +39,7 @@
 #include "virt.h"
 #include "efivars.h"
 #include "smack-util.h"
-#include "def.h"
+#include "cgroup-util.h"
 
 typedef enum MountMode {
         MNT_NONE  =        0,
@@ -63,45 +59,54 @@ typedef struct MountPoint {
 
 /* The first three entries we might need before SELinux is up. The
  * fourth (securityfs) is needed by IMA to load a custom policy. The
- * other ones we can delay until SELinux and IMA are loaded. */
+ * other ones we can delay until SELinux and IMA are loaded. When
+ * SMACK is enabled we need smackfs, too, so it's a fifth one. */
+#ifdef HAVE_SMACK
 #define N_EARLY_MOUNT 5
+#else
+#define N_EARLY_MOUNT 4
+#endif
 
 static const MountPoint mount_table[] = {
-        { "sysfs",      "/sys",                      "sysfs",      NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "proc",       "/proc",                     "proc",       NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "devtmpfs",   "/dev",                      "devtmpfs",   "mode=755", MS_NOSUID|MS_STRICTATIME,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "securityfs", "/sys/kernel/security",      "securityfs", NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_NONE },
+        { "sysfs",       "/sys",                      "sysfs",      NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "proc",        "/proc",                     "proc",       NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "devtmpfs",    "/dev",                      "devtmpfs",   "mode=755",                MS_NOSUID|MS_STRICTATIME,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "securityfs",  "/sys/kernel/security",      "securityfs", NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_NONE                   },
 #ifdef HAVE_SMACK
-        { "smackfs",    "/sys/fs/smackfs",           "smackfs",    "smackfsdef=*", MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
-          use_smack,  MNT_FATAL },
-        { "tmpfs",      "/dev/shm",                  "tmpfs",      "mode=1777,smackfsroot=*", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
-          use_smack,  MNT_FATAL },
+        { "smackfs",     "/sys/fs/smackfs",           "smackfs",    "smackfsdef=*",            MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          mac_smack_use, MNT_FATAL                  },
+        { "tmpfs",       "/dev/shm",                  "tmpfs",      "mode=1777,smackfsroot=*", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+          mac_smack_use, MNT_FATAL                  },
 #endif
-        { "tmpfs",      "/dev/shm",                  "tmpfs",      "mode=1777", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "devpts",     "/dev/pts",                  "devpts",     "mode=620,gid=" STRINGIFY(TTY_GID), MS_NOSUID|MS_NOEXEC,
-          NULL,       MNT_IN_CONTAINER },
+        { "tmpfs",       "/dev/shm",                  "tmpfs",      "mode=1777",               MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "devpts",      "/dev/pts",                  "devpts",     "mode=620,gid=" STRINGIFY(TTY_GID), MS_NOSUID|MS_NOEXEC,
+          NULL,          MNT_IN_CONTAINER           },
 #ifdef HAVE_SMACK
-        { "tmpfs",      "/run",                      "tmpfs",      "mode=755,smackfsroot=*", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
-          use_smack,  MNT_FATAL },
+        { "tmpfs",       "/run",                      "tmpfs",      "mode=755,smackfsroot=*",  MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+          mac_smack_use, MNT_FATAL                  },
 #endif
-        { "tmpfs",      "/run",                      "tmpfs",      "mode=755", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "tmpfs",      "/sys/fs/cgroup",            "tmpfs",      "mode=755", MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "cgroup",     "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd,xattr", MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_IN_CONTAINER },
-        { "cgroup",     "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd", MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_FATAL|MNT_IN_CONTAINER },
-        { "pstore",     "/sys/fs/pstore",            "pstore",     NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,       MNT_NONE },
+        { "tmpfs",       "/run",                      "tmpfs",      "mode=755",                MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "tmpfs",       "/sys/fs/cgroup",            "tmpfs",      "mode=755",                MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd,xattr", MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_IN_CONTAINER           },
+        { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd",       MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "pstore",      "/sys/fs/pstore",            "pstore",     NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_NONE                   },
 #ifdef ENABLE_EFI
-        { "efivarfs",   "/sys/firmware/efi/efivars", "efivarfs",   NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          is_efi_boot, MNT_NONE },
+        { "efivarfs",    "/sys/firmware/efi/efivars", "efivarfs",   NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          is_efi_boot,   MNT_NONE                   },
+#endif
+#ifdef ENABLE_KDBUS
+        { "kdbusfs",    "/sys/fs/kdbus",             "kdbusfs",    NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,       MNT_IN_CONTAINER },
 #endif
 };
 
@@ -111,12 +116,6 @@ static const MountPoint mount_table[] = {
 static const char ignore_paths[] =
         /* SELinux file systems */
         "/sys/fs/selinux\0"
-        "/selinux\0"
-        /* Legacy cgroup mount points */
-        "/dev/cgroup\0"
-        "/cgroup\0"
-        /* Legacy kernel file system */
-        "/proc/bus/usb\0"
         /* Container bind mounts */
         "/proc/sys\0"
         "/dev/console\0"
@@ -158,9 +157,8 @@ static int mount_one(const MountPoint *p, bool relabel) {
                 label_fix(p->where, true, true);
 
         r = path_is_mount_point(p->where, true);
-        if (r < 0)
+        if (r < 0 && r != -ENOENT)
                 return r;
-
         if (r > 0)
                 return 0;
 
@@ -218,49 +216,17 @@ int mount_setup_early(void) {
 
 int mount_cgroup_controllers(char ***join_controllers) {
         _cleanup_set_free_free_ Set *controllers = NULL;
-        _cleanup_fclose_ FILE *f;
-        char buf[LINE_MAX];
         int r;
 
         /* Mount all available cgroup controllers that are built into the kernel. */
 
-        f = fopen("/proc/cgroups", "re");
-        if (!f) {
-                log_error("Failed to enumerate cgroup controllers: %m");
-                return 0;
-        }
-
-        controllers = set_new(string_hash_func, string_compare_func);
+        controllers = set_new(&string_hash_ops);
         if (!controllers)
                 return log_oom();
 
-        /* Ignore the header line */
-        (void) fgets(buf, sizeof(buf), f);
-
-        for (;;) {
-                char *controller;
-                int enabled = 0;
-
-                if (fscanf(f, "%ms %*i %*i %i", &controller, &enabled) != 2) {
-
-                        if (feof(f))
-                                break;
-
-                        log_error("Failed to parse /proc/cgroups.");
-                        return -EIO;
-                }
-
-                if (!enabled) {
-                        free(controller);
-                        continue;
-                }
-
-                r = set_consume(controllers, controller);
-                if (r < 0) {
-                        log_error("Failed to add controller to set.");
-                        return r;
-                }
-        }
+        r = cg_kernel_controllers(controllers);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enumerate cgroup controllers: %m");
 
         for (;;) {
                 _cleanup_free_ char *options = NULL, *controller = NULL, *where = NULL;
@@ -331,21 +297,20 @@ int mount_cgroup_controllers(char ***join_controllers) {
                                         return log_oom();
 
                                 r = symlink(options, t);
-                                if (r < 0 && errno != EEXIST) {
-                                        log_error("Failed to create symlink %s: %m", t);
-                                        return -errno;
-                                }
+                                if (r < 0 && errno != EEXIST)
+                                        return log_error_errno(errno, "Failed to create symlink %s: %m", t);
                         }
                 }
         }
 
         /* Now that we mounted everything, let's make the tmpfs the
          * cgroup file systems are mounted into read-only. */
-        mount("tmpfs", "/sys/fs/cgroup", "tmpfs", MS_REMOUNT|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME|MS_RDONLY, "mode=755");
+        (void) mount("tmpfs", "/sys/fs/cgroup", "tmpfs", MS_REMOUNT|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME|MS_RDONLY, "mode=755");
 
         return 0;
 }
 
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 static int nftw_cb(
                 const char *fpath,
                 const struct stat *sb,
@@ -367,18 +332,24 @@ static int nftw_cb(
 
         return FTW_CONTINUE;
 };
+#endif
 
 int mount_setup(bool loaded_policy) {
-        int r;
         unsigned i;
+        int r = 0;
 
         for (i = 0; i < ELEMENTSOF(mount_table); i ++) {
-                r = mount_one(mount_table + i, true);
+                int j;
 
-                if (r < 0)
-                        return r;
+                j = mount_one(mount_table + i, loaded_policy);
+                if (r == 0)
+                        r = j;
         }
 
+        if (r < 0)
+                return r;
+
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
         /* Nodes in devtmpfs and /run need to be manually updated for
          * the appropriate labels, after mounting. The other virtual
          * API file systems like /sys and /proc do not need that, they
@@ -397,11 +368,12 @@ int mount_setup(bool loaded_policy) {
                 log_info("Relabelled /dev and /run in %s.",
                          format_timespan(timespan, sizeof(timespan), after_relabel - before_relabel, 0));
         }
+#endif
 
         /* Create a few default symlinks, which are normally created
          * by udevd, but some scripts might need them before we start
          * udevd. */
-        dev_setup(NULL);
+        dev_setup(NULL, UID_INVALID, GID_INVALID);
 
         /* Mark the root directory as shared in regards to mount
          * propagation. The kernel defaults to "private", but we think
@@ -411,7 +383,7 @@ int mount_setup(bool loaded_policy) {
          * propagation mode to private if needed. */
         if (detect_container(NULL) <= 0)
                 if (mount(NULL, "/", NULL, MS_REC|MS_SHARED, NULL) < 0)
-                        log_warning("Failed to set up the root directory for shared mount propagation: %m");
+                        log_warning_errno(errno, "Failed to set up the root directory for shared mount propagation: %m");
 
         /* Create a few directories we always want around, Note that
          * sd_booted() checks for /run/systemd/system, so this mkdir

@@ -52,17 +52,27 @@ static int property_get_unit(
         return sd_bus_message_append(reply, "(so)", j->unit->id, p);
 }
 
-static int method_cancel(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+int bus_job_method_cancel(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Job *j = userdata;
         int r;
 
-        assert(bus);
         assert(message);
         assert(j);
 
-        r = selinux_unit_access_check(j->unit, message, "stop", error);
+        r = mac_selinux_unit_access_check(j->unit, message, "stop", error);
         if (r < 0)
                 return r;
+
+        /* Access is granted to the job owner */
+        if (!sd_bus_track_contains(j->clients, sd_bus_message_get_sender(message))) {
+
+                /* And for everybody else consult PolicyKit */
+                r = bus_verify_manage_units_async(j->unit->manager, message, error);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+        }
 
         job_finish_and_invalidate(j, JOB_CANCELED, true);
 
@@ -71,7 +81,7 @@ static int method_cancel(sd_bus *bus, sd_bus_message *message, void *userdata, s
 
 const sd_bus_vtable bus_job_vtable[] = {
         SD_BUS_VTABLE_START(0),
-        SD_BUS_METHOD("Cancel", NULL, NULL, method_cancel, 0),
+        SD_BUS_METHOD("Cancel", NULL, NULL, bus_job_method_cancel, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_PROPERTY("Id", "u", NULL, offsetof(Job, id), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Unit", "(so)", property_get_unit, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("JobType", "s", property_get_type, offsetof(Job, type), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -132,9 +142,9 @@ void bus_job_send_change_signal(Job *j) {
                 j->in_dbus_queue = false;
         }
 
-        r = bus_foreach_bus(j->manager, j->subscribed, j->sent_dbus_new_signal ? send_changed_signal : send_new_signal, j);
+        r = bus_foreach_bus(j->manager, j->clients, j->sent_dbus_new_signal ? send_changed_signal : send_new_signal, j);
         if (r < 0)
-                log_debug("Failed to send job change signal for %u: %s", j->id, strerror(-r));
+                log_debug_errno(r, "Failed to send job change signal for %u: %m", j->id);
 
         j->sent_dbus_new_signal = true;
 }
@@ -176,7 +186,7 @@ void bus_job_send_removed_signal(Job *j) {
         if (!j->sent_dbus_new_signal)
                 bus_job_send_change_signal(j);
 
-        r = bus_foreach_bus(j->manager, j->subscribed, send_removed_signal, j);
+        r = bus_foreach_bus(j->manager, j->clients, send_removed_signal, j);
         if (r < 0)
-                log_debug("Failed to send job remove signal for %u: %s", j->id, strerror(-r));
+                log_debug_errno(r, "Failed to send job remove signal for %u: %m", j->id);
 }

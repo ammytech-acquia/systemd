@@ -20,7 +20,6 @@
 ***/
 
 #include <unistd.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -30,7 +29,6 @@
 #include "log.h"
 #include "util.h"
 #include "path-util.h"
-#include "set.h"
 #include "mount-setup.h"
 #include "exit-status.h"
 
@@ -60,11 +58,11 @@ int main(int argc, char *argv[]) {
                 if (errno == ENOENT)
                         return EXIT_SUCCESS;
 
-                log_error("Failed to open /etc/fstab: %m");
+                log_error_errno(errno, "Failed to open /etc/fstab: %m");
                 return EXIT_FAILURE;
         }
 
-        pids = hashmap_new(trivial_hash_func, trivial_compare_func);
+        pids = hashmap_new(NULL);
         if (!pids) {
                 log_error("Failed to allocate set");
                 goto finish;
@@ -87,7 +85,7 @@ int main(int argc, char *argv[]) {
 
                 pid = fork();
                 if (pid < 0) {
-                        log_error("Failed to fork: %m");
+                        log_error_errno(errno, "Failed to fork: %m");
                         ret = EXIT_FAILURE;
                         continue;
                 }
@@ -96,15 +94,15 @@ int main(int argc, char *argv[]) {
                         const char *arguments[5];
                         /* Child */
 
-                        arguments[0] = "/bin/mount";
+                        arguments[0] = MOUNT_PATH;
                         arguments[1] = me->mnt_dir;
                         arguments[2] = "-o";
                         arguments[3] = "remount";
                         arguments[4] = NULL;
 
-                        execv("/bin/mount", (char **) arguments);
+                        execv(MOUNT_PATH, (char **) arguments);
 
-                        log_error("Failed to execute /bin/mount: %m");
+                        log_error_errno(errno, "Failed to execute " MOUNT_PATH ": %m");
                         _exit(EXIT_FAILURE);
                 }
 
@@ -120,7 +118,7 @@ int main(int argc, char *argv[]) {
 
                 k = hashmap_put(pids, UINT_TO_PTR(pid), s);
                 if (k < 0) {
-                        log_error("Failed to add PID to set: %s", strerror(-k));
+                        log_error_errno(k, "Failed to add PID to set: %m");
                         ret = EXIT_FAILURE;
                         continue;
                 }
@@ -135,7 +133,7 @@ int main(int argc, char *argv[]) {
                         if (errno == EINTR)
                                 continue;
 
-                        log_error("waitid() failed: %m");
+                        log_error_errno(errno, "waitid() failed: %m");
                         ret = EXIT_FAILURE;
                         break;
                 }
@@ -144,9 +142,9 @@ int main(int argc, char *argv[]) {
                 if (s) {
                         if (!is_clean_exit(si.si_code, si.si_status, NULL)) {
                                 if (si.si_code == CLD_EXITED)
-                                        log_error("/bin/mount for %s exited with exit status %i.", s, si.si_status);
+                                        log_error(MOUNT_PATH " for %s exited with exit status %i.", s, si.si_status);
                                 else
-                                        log_error("/bin/mount for %s terminated by signal %s.", s, signal_to_string(si.si_status));
+                                        log_error(MOUNT_PATH " for %s terminated by signal %s.", s, signal_to_string(si.si_status));
 
                                 ret = EXIT_FAILURE;
                         }

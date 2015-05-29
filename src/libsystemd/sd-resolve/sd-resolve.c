@@ -19,28 +19,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
-#include <sys/select.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <pwd.h>
-#include <netinet/in.h>
-#include <arpa/nameser.h>
 #include <resolv.h>
-#include <dirent.h>
-#include <sys/time.h>
-#include <sys/resource.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/prctl.h>
-#include <sys/poll.h>
+#include <poll.h>
 
 #include "util.h"
 #include "list.h"
@@ -85,9 +74,9 @@ struct sd_resolve {
         pthread_t workers[WORKERS_MAX];
         unsigned n_valid_workers;
 
-        unsigned current_id, current_index;
+        unsigned current_id;
         sd_resolve_query* query_array[QUERIES_MAX];
-        unsigned n_queries, n_done;
+        unsigned n_queries, n_done, n_outstanding;
 
         sd_event_source *event_source;
         sd_event *event;
@@ -461,7 +450,7 @@ static int handle_request(int out_fd, const Packet *packet, size_t length) {
                  assert(length >= sizeof(ResRequest));
                  assert(length == sizeof(ResRequest) + res_req->dname_len);
 
-                 dname = (const char *) req + sizeof(ResRequest);
+                 dname = (const char *) res_req + sizeof(ResRequest);
 
                  if (req->type == REQUEST_RES_QUERY)
                          ret = res_query(dname, res_req->class, res_req->type, (unsigned char *) &answer, BUFSIZE);
@@ -526,7 +515,7 @@ static int start_threads(sd_resolve *resolve, unsigned extra) {
         unsigned n;
         int r;
 
-        n = resolve->n_queries + extra - resolve->n_done;
+        n = resolve->n_outstanding + extra;
         n = CLAMP(n, WORKERS_MIN, WORKERS_MAX);
 
         while (resolve->n_valid_workers < n) {
@@ -664,7 +653,7 @@ static void resolve_free(sd_resolve *resolve) {
 
                 /* Send one termination packet for each worker */
                 for (i = 0; i < resolve->n_valid_workers; i++)
-                        send(resolve->fds[REQUEST_SEND_FD], &req, req.length, MSG_NOSIGNAL);
+                        (void) send(resolve->fds[REQUEST_SEND_FD], &req, req.length, MSG_NOSIGNAL);
         }
 
         /* Now terminate them and wait until they are gone. */
@@ -772,12 +761,14 @@ static int complete_query(sd_resolve *resolve, sd_resolve_query *q) {
                 assert_not_reached("Cannot complete unknown query type");
         }
 
-        resolve->current = sd_resolve_query_unref(q);
+        resolve->current = NULL;
 
         if (q->floating) {
                 resolve_query_disconnect(q);
                 sd_resolve_query_unref(q);
         }
+
+        sd_resolve_query_unref(q);
 
         return r;
 }
@@ -851,6 +842,9 @@ static int handle_response(sd_resolve *resolve, const Packet *packet, size_t len
                 resolve->dead = true;
                 return 0;
         }
+
+        assert(resolve->n_outstanding > 0);
+        resolve->n_outstanding--;
 
         q = lookup_query(resolve, resp->id);
         if (!q)
@@ -1022,21 +1016,17 @@ static int alloc_query(sd_resolve *resolve, bool floating, sd_resolve_query **_q
         if (r < 0)
                 return r;
 
-        while (resolve->query_array[resolve->current_index]) {
-                resolve->current_index++;
+        while (resolve->query_array[resolve->current_id % QUERIES_MAX])
                 resolve->current_id++;
 
-                resolve->current_index %= QUERIES_MAX;
-        }
-
-        q = resolve->query_array[resolve->current_index] = new0(sd_resolve_query, 1);
+        q = resolve->query_array[resolve->current_id % QUERIES_MAX] = new0(sd_resolve_query, 1);
         if (!q)
                 return -ENOMEM;
 
         q->n_ref = 1;
         q->resolve = resolve;
         q->floating = floating;
-        q->id = resolve->current_id;
+        q->id = resolve->current_id++;
 
         if (!floating)
                 sd_resolve_ref(resolve);
@@ -1100,6 +1090,8 @@ _public_ int sd_resolve_getaddrinfo(
                 sd_resolve_query_unref(q);
                 return -errno;
         }
+
+        resolve->n_outstanding++;
 
         if (_q)
                 *_q = q;
@@ -1169,6 +1161,8 @@ _public_ int sd_resolve_getnameinfo(
                 return -errno;
         }
 
+        resolve->n_outstanding++;
+
         if (_q)
                 *_q = q;
 
@@ -1232,6 +1226,8 @@ static int resolve_res(
                 sd_resolve_query_unref(q);
                 return -errno;
         }
+
+        resolve->n_outstanding++;
 
         if (_q)
                 *_q = q;

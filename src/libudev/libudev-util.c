@@ -17,20 +17,12 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-#include <dirent.h>
 #include <ctype.h>
-#include <fcntl.h>
-#include <time.h>
-#include <pwd.h>
-#include <grp.h>
-#include <sys/stat.h>
-#include <sys/param.h>
 
 #include "device-nodes.h"
 #include "libudev.h"
@@ -44,102 +36,6 @@
  *
  * Utilities useful when dealing with devices and device node names.
  */
-
-int util_delete_path(struct udev *udev, const char *path)
-{
-        char p[UTIL_PATH_SIZE];
-        char *pos;
-        int err = 0;
-
-        if (path[0] == '/')
-                while(path[1] == '/')
-                        path++;
-        strscpy(p, sizeof(p), path);
-        pos = strrchr(p, '/');
-        if (pos == p || pos == NULL)
-                return 0;
-
-        for (;;) {
-                *pos = '\0';
-                pos = strrchr(p, '/');
-
-                /* don't remove the last one */
-                if ((pos == p) || (pos == NULL))
-                        break;
-
-                err = rmdir(p);
-                if (err < 0) {
-                        if (errno == ENOENT)
-                                err = 0;
-                        break;
-                }
-        }
-        return err;
-}
-
-uid_t util_lookup_user(struct udev *udev, const char *user)
-{
-        char *endptr;
-        struct passwd pwbuf;
-        struct passwd *pw;
-        uid_t uid;
-        size_t buflen = sysconf(_SC_GETPW_R_SIZE_MAX);
-        char *buf = alloca(buflen);
-
-        if (streq(user, "root"))
-                return 0;
-        uid = strtoul(user, &endptr, 10);
-        if (endptr[0] == '\0')
-                return uid;
-
-        errno = getpwnam_r(user, &pwbuf, buf, buflen, &pw);
-        if (pw != NULL)
-                return pw->pw_uid;
-        if (errno == 0 || errno == ENOENT || errno == ESRCH)
-                udev_err(udev, "specified user '%s' unknown\n", user);
-        else
-                udev_err(udev, "error resolving user '%s': %m\n", user);
-        return 0;
-}
-
-gid_t util_lookup_group(struct udev *udev, const char *group)
-{
-        char *endptr;
-        struct group grbuf;
-        struct group *gr;
-        gid_t gid = 0;
-        size_t buflen = sysconf(_SC_GETPW_R_SIZE_MAX);
-        char *buf = NULL;
-
-        if (streq(group, "root"))
-                return 0;
-        gid = strtoul(group, &endptr, 10);
-        if (endptr[0] == '\0')
-                return gid;
-        gid = 0;
-        for (;;) {
-                char *newbuf;
-
-                newbuf = realloc(buf, buflen);
-                if (!newbuf)
-                        break;
-                buf = newbuf;
-                errno = getgrnam_r(group, &grbuf, buf, buflen, &gr);
-                if (gr != NULL) {
-                        gid = gr->gr_gid;
-                } else if (errno == ERANGE) {
-                        buflen *= 2;
-                        continue;
-                } else if (errno == 0 || errno == ENOENT || errno == ESRCH) {
-                        udev_err(udev, "specified group '%s' unknown\n", group);
-                } else {
-                        udev_err(udev, "error resolving group '%s': %m\n", group);
-                }
-                break;
-        }
-        free(buf);
-        return gid;
-}
 
 /* handle "[<SUBSYSTEM>/<KERNEL>]<attribute>" format */
 int util_resolve_subsys_kernel(struct udev *udev, const char *string,
@@ -189,7 +85,7 @@ int util_resolve_subsys_kernel(struct udev *udev, const char *string,
                         strscpy(result, maxsize, val);
                 else
                         result[0] = '\0';
-                udev_dbg(udev, "value '[%s/%s]%s' is '%s'\n", subsys, sysname, attr, result);
+                log_debug("value '[%s/%s]%s' is '%s'", subsys, sysname, attr, result);
         } else {
                 size_t l;
                 char *s;
@@ -198,7 +94,7 @@ int util_resolve_subsys_kernel(struct udev *udev, const char *string,
                 l = strpcpyl(&s, maxsize, udev_device_get_syspath(dev), NULL);
                 if (attr != NULL)
                         strpcpyl(&s, l, "/", attr, NULL);
-                udev_dbg(udev, "path '[%s/%s]%s' is '%s'\n", subsys, sysname, attr, result);
+                log_debug("path '[%s/%s]%s' is '%s'", subsys, sysname, attr, result);
         }
         udev_device_unref(dev);
         return 0;
@@ -255,16 +151,15 @@ int util_log_priority(const char *priority)
         char *endptr;
         int prio;
 
-        prio = strtol(priority, &endptr, 10);
-        if (endptr[0] == '\0' || isspace(endptr[0]))
-                return prio;
-        if (startswith(priority, "err"))
-                return LOG_ERR;
-        if (startswith(priority, "info"))
-                return LOG_INFO;
-        if (startswith(priority, "debug"))
-                return LOG_DEBUG;
-        return 0;
+        prio = strtoul(priority, &endptr, 10);
+        if (endptr[0] == '\0' || isspace(endptr[0])) {
+                if (prio >= 0 && prio <= 7)
+                        return prio;
+                else
+                        return -ERANGE;
+        }
+
+        return log_level_from_string(priority);
 }
 
 size_t util_path_encode(const char *src, char *dest, size_t size)
@@ -321,7 +216,7 @@ int util_replace_whitespace(const char *str, char *to, size_t len)
 
         /* strip leading whitespace */
         i = 0;
-        while (isspace(str[i]) && (i < len))
+        while ((i < len) && isspace(str[i]))
                 i++;
 
         j = 0;
@@ -414,29 +309,4 @@ uint64_t util_string_bloom64(const char *str)
         bits |= 1LLU << ((hash >> 12) & 63);
         bits |= 1LLU << ((hash >> 18) & 63);
         return bits;
-}
-
-ssize_t print_kmsg(const char *fmt, ...)
-{
-        _cleanup_close_ int fd = -1;
-        va_list ap;
-        char text[1024];
-        ssize_t len;
-        ssize_t ret;
-
-        fd = open("/dev/kmsg", O_WRONLY|O_NOCTTY|O_CLOEXEC);
-        if (fd < 0)
-                return -errno;
-
-        len = snprintf(text, sizeof(text), "<30>systemd-udevd[%u]: ", getpid());
-
-        va_start(ap, fmt);
-        len += vsnprintf(text + len, sizeof(text) - len, fmt, ap);
-        va_end(ap);
-
-        ret = write(fd, text, len);
-        if (ret < 0)
-                return -errno;
-
-        return ret;
 }

@@ -25,15 +25,13 @@
 #include "log.h"
 
 #include "sd-bus.h"
-#include "bus-message.h"
-#include "bus-error.h"
 #include "bus-kernel.h"
 #include "bus-util.h"
 #include "bus-dump.h"
 
 int main(int argc, char *argv[]) {
         _cleanup_close_ int bus_ref = -1;
-        _cleanup_free_ char *name = NULL, *bus_name = NULL, *address = NULL;
+        _cleanup_free_ char *name = NULL, *bus_name = NULL, *address = NULL, *bname = NULL;
         _cleanup_bus_message_unref_ sd_bus_message *m = NULL;
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *ua = NULL, *ub = NULL, *the_string = NULL;
@@ -44,6 +42,8 @@ int main(int argc, char *argv[]) {
         log_set_max_level(LOG_DEBUG);
 
         assert_se(asprintf(&name, "deine-mutter-%u", (unsigned) getpid()) >= 0);
+
+        bus_kernel_fix_attach_mask();
 
         bus_ref = bus_kernel_create_bus(name, false, &bus_name);
         if (bus_ref == -ENOENT)
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
         r = sd_bus_new(&b);
         assert_se(r >= 0);
 
-        r = sd_bus_set_name(a, "a");
+        r = sd_bus_set_description(a, "a");
         assert_se(r >= 0);
 
         r = sd_bus_set_address(a, address);
@@ -70,10 +70,10 @@ int main(int argc, char *argv[]) {
         assert_se(r >= 0);
 
         assert_se(sd_bus_negotiate_timestamp(a, 1) >= 0);
-        assert_se(sd_bus_negotiate_creds(a, _SD_BUS_CREDS_ALL) >= 0);
+        assert_se(sd_bus_negotiate_creds(a, true, _SD_BUS_CREDS_ALL) >= 0);
 
-        assert_se(sd_bus_negotiate_timestamp(b, 1) >= 0);
-        assert_se(sd_bus_negotiate_creds(b, _SD_BUS_CREDS_ALL) >= 0);
+        assert_se(sd_bus_negotiate_timestamp(b, 0) >= 0);
+        assert_se(sd_bus_negotiate_creds(b, true, 0) >= 0);
 
         r = sd_bus_start(a);
         assert_se(r >= 0);
@@ -81,11 +81,14 @@ int main(int argc, char *argv[]) {
         r = sd_bus_start(b);
         assert_se(r >= 0);
 
+        assert_se(sd_bus_negotiate_timestamp(b, 1) >= 0);
+        assert_se(sd_bus_negotiate_creds(b, true, _SD_BUS_CREDS_ALL) >= 0);
+
         r = sd_bus_get_unique_name(a, &ua);
         assert_se(r >= 0);
         printf("unique a: %s\n", ua);
 
-        r = sd_bus_get_name(a, &nn);
+        r = sd_bus_get_description(a, &nn);
         assert_se(r >= 0);
         printf("name of a: %s\n", nn);
 
@@ -93,9 +96,12 @@ int main(int argc, char *argv[]) {
         assert_se(r >= 0);
         printf("unique b: %s\n", ub);
 
-        r = sd_bus_get_name(b, &nn);
+        r = sd_bus_get_description(b, &nn);
         assert_se(r >= 0);
         printf("name of b: %s\n", nn);
+
+        assert_se(bus_kernel_get_bus_name(b, &bname) >= 0);
+        assert_se(endswith(bname, name));
 
         r = sd_bus_call_method(a, "this.doesnt.exist", "/foo", "meh.mah", "muh", &error, NULL, "s", "yayayay");
         assert_se(sd_bus_error_has_name(&error, SD_BUS_ERROR_SERVICE_UNKNOWN));
@@ -111,13 +117,13 @@ int main(int argc, char *argv[]) {
         assert_se(r == -EBUSY);
 
         r = sd_bus_process_priority(b, -10, &m);
-        assert_se(r == -ENOMSG);
+        assert_se(r == 0);
 
         r = sd_bus_process(b, &m);
         assert_se(r > 0);
         assert_se(m);
 
-        bus_message_dump(m, stdout, true);
+        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
         assert_se(sd_bus_message_rewind(m, true) >= 0);
 
         r = sd_bus_message_read(m, "s", &the_string);
@@ -154,7 +160,7 @@ int main(int argc, char *argv[]) {
                 assert_se(r > 0);
                 assert_se(m);
 
-                bus_message_dump(m, stdout, true);
+                bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
                 assert_se(sd_bus_message_rewind(m, true) >= 0);
 
                 if (sd_bus_message_is_method_call(m, "an.inter.face", "AMethod")) {

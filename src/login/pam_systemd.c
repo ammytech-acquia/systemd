@@ -24,7 +24,6 @@
 #include <sys/file.h>
 #include <pwd.h>
 #include <endian.h>
-#include <sys/capability.h>
 
 #include <security/pam_modules.h>
 #include <security/_pam_macros.h>
@@ -41,6 +40,9 @@
 #include "socket-util.h"
 #include "fileio.h"
 #include "bus-error.h"
+#include "formats-util.h"
+#include "terminal-util.h"
+#include "hostname-util.h"
 
 static int parse_argv(
                 pam_handle_t *handle,
@@ -114,7 +116,7 @@ static int get_user_data(
         }
 
         *ret_pw = pw;
-        *ret_username = username ? username : pw->pw_name;
+        *ret_username = username;
 
         return PAM_SUCCESS;
 }
@@ -180,11 +182,10 @@ static int export_legacy_dbus_address(
         int r;
 
         /* skip export if kdbus is not active */
-        if (access("/dev/kdbus", F_OK) < 0)
+        if (access("/sys/fs/kdbus", F_OK) < 0)
                 return PAM_SUCCESS;
 
-        if (asprintf(&s, KERNEL_USER_BUS_FMT ";" UNIX_USER_BUS_FMT,
-                     uid, runtime) < 0) {
+        if (asprintf(&s, KERNEL_USER_BUS_ADDRESS_FMT ";" UNIX_USER_BUS_ADDRESS_FMT, uid, runtime) < 0) {
                 pam_syslog(handle, LOG_ERR, "Failed to set bus variable.");
                 return PAM_BUF_ERR;
         }
@@ -213,7 +214,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 *seat = NULL,
                 *type = NULL, *class = NULL,
                 *class_pam = NULL, *type_pam = NULL, *cvtnr = NULL, *desktop = NULL;
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_close_unref_ sd_bus *bus = NULL;
         int session_fd = -1, existing, r;
         bool debug = false, remote;
         struct passwd *pw;
@@ -336,7 +337,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         /* If this fails vtnr will be 0, that's intended */
         if (!isempty(cvtnr))
-                safe_atou32(cvtnr, &vtnr);
+                (void) safe_atou32(cvtnr, &vtnr);
 
         if (!isempty(display) && !vtnr) {
                 if (isempty(seat))
@@ -346,7 +347,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         }
 
         if (seat && !streq(seat, "seat0") && vtnr != 0) {
-                pam_syslog(handle, LOG_DEBUG, "Ignoring vtnr %d for %s which is not seat0", vtnr, seat);
+                pam_syslog(handle, LOG_DEBUG, "Ignoring vtnr %"PRIu32" for %s which is not seat0", vtnr, seat);
                 vtnr = 0;
         }
 
@@ -369,7 +370,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         if (debug)
                 pam_syslog(handle, LOG_DEBUG, "Asking logind to create session: "
-                           "uid=%u pid=%u service=%s type=%s class=%s desktop=%s seat=%s vtnr=%u tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
+                           "uid="UID_FMT" pid="PID_FMT" service=%s type=%s class=%s desktop=%s seat=%s vtnr=%"PRIu32" tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
                            pw->pw_uid, getpid(),
                            strempty(service),
                            type, class, strempty(desktop),
@@ -496,7 +497,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                 int argc, const char **argv) {
 
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_close_unref_ sd_bus *bus = NULL;
         const void *existing = NULL;
         const char *id;
         int r;

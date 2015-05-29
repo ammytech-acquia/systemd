@@ -29,7 +29,7 @@
 #include <assert.h>
 #include <sys/socket.h>
 
-#include <systemd/sd-daemon.h>
+#include "systemd/sd-daemon.h"
 #include "pyutil.h"
 #include "macro.h"
 
@@ -225,7 +225,7 @@ static PyObject* is_socket_inet(PyObject *self, PyObject *args) {
                               &fd, &family, &type, &listening, &port))
                 return NULL;
 
-        if (port < 0 || port > INT16_MAX) {
+        if (port < 0 || port > UINT16_MAX) {
                 set_error(-EINVAL, NULL, "port must fit into uint16_t");
                 return NULL;
         }

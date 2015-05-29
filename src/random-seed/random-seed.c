@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
         ssize_t k;
         int r;
         FILE *f;
+        bool refresh_seed_file = true;
 
         if (argc != 2) {
                 log_error("This program requires one argument.");
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]) {
 
         r = mkdir_parents_label(RANDOM_SEED, 0755);
         if (r < 0) {
-                log_error("Failed to create directory " RANDOM_SEED_DIR ": %s", strerror(-r));
+                log_error_errno(r, "Failed to create directory " RANDOM_SEED_DIR ": %m");
                 goto finish;
         }
 
@@ -86,79 +87,77 @@ int main(int argc, char *argv[]) {
                 if (seed_fd < 0) {
                         seed_fd = open(RANDOM_SEED, O_RDONLY|O_CLOEXEC|O_NOCTTY);
                         if (seed_fd < 0) {
-                                log_error("Failed to open " RANDOM_SEED ": %m");
-                                r = -errno;
+                                r = log_error_errno(errno, "Failed to open " RANDOM_SEED ": %m");
                                 goto finish;
                         }
+
+                        refresh_seed_file = false;
                 }
 
                 random_fd = open("/dev/urandom", O_RDWR|O_CLOEXEC|O_NOCTTY, 0600);
                 if (random_fd < 0) {
                         random_fd = open("/dev/urandom", O_WRONLY|O_CLOEXEC|O_NOCTTY, 0600);
                         if (random_fd < 0) {
-                                log_error("Failed to open /dev/urandom: %m");
-                                r = -errno;
+                                r = log_error_errno(errno, "Failed to open /dev/urandom: %m");
                                 goto finish;
                         }
                 }
 
                 k = loop_read(seed_fd, buf, buf_size, false);
-                if (k <= 0) {
+                if (k < 0)
+                        r = log_error_errno(k, "Failed to read seed from " RANDOM_SEED ": %m");
+                else if (k == 0)
+                        log_debug("Seed file " RANDOM_SEED " not yet initialized, proceeding.");
+                else {
+                        (void) lseek(seed_fd, 0, SEEK_SET);
 
-                        if (r != 0)
-                                log_error("Failed to read seed from " RANDOM_SEED ": %m");
-
-                        r = k == 0 ? -EIO : (int) k;
-
-                } else {
-                        lseek(seed_fd, 0, SEEK_SET);
-
-                        k = loop_write(random_fd, buf, (size_t) k, false);
-                        if (k <= 0) {
-                                log_error("Failed to write seed to /dev/urandom: %s", r < 0 ? strerror(-r) : "short write");
-
-                                r = k == 0 ? -EIO : (int) k;
-                        }
+                        r = loop_write(random_fd, buf, (size_t) k, false);
+                        if (r < 0)
+                                log_error_errno(r, "Failed to write seed to /dev/urandom: %m");
                 }
 
         } else if (streq(argv[1], "save")) {
 
                 seed_fd = open(RANDOM_SEED, O_WRONLY|O_CLOEXEC|O_NOCTTY|O_CREAT, 0600);
                 if (seed_fd < 0) {
-                        log_error("Failed to open " RANDOM_SEED ": %m");
-                        r = -errno;
+                        r = log_error_errno(errno, "Failed to open " RANDOM_SEED ": %m");
                         goto finish;
                 }
 
                 random_fd = open("/dev/urandom", O_RDONLY|O_CLOEXEC|O_NOCTTY);
                 if (random_fd < 0) {
-                        log_error("Failed to open /dev/urandom: %m");
-                        r = -errno;
+                        r = log_error_errno(errno, "Failed to open /dev/urandom: %m");
                         goto finish;
                 }
 
         } else {
-                log_error("Unknown verb %s.", argv[1]);
+                log_error("Unknown verb '%s'.", argv[1]);
                 r = -EINVAL;
                 goto finish;
         }
 
-        /* This is just a safety measure. Given that we are root and
-         * most likely created the file ourselves the mode and owner
-         * should be correct anyway. */
-        fchmod(seed_fd, 0600);
-        fchown(seed_fd, 0, 0);
+        if (refresh_seed_file) {
 
-        k = loop_read(random_fd, buf, buf_size, false);
-        if (k <= 0) {
-                log_error("Failed to read new seed from /dev/urandom: %s", r < 0 ? strerror(-r) : "EOF");
-                r = k == 0 ? -EIO : (int) k;
-        } else {
-                r = loop_write(seed_fd, buf, (size_t) k, false);
-                if (r <= 0) {
-                        log_error("Failed to write new random seed file: %s", r < 0 ? strerror(-r) : "short write");
-                        r = r == 0 ? -EIO : r;
+                /* This is just a safety measure. Given that we are root and
+                 * most likely created the file ourselves the mode and owner
+                 * should be correct anyway. */
+                (void) fchmod(seed_fd, 0600);
+                (void) fchown(seed_fd, 0, 0);
+
+                k = loop_read(random_fd, buf, buf_size, false);
+                if (k < 0) {
+                        r = log_error_errno(k, "Failed to read new seed from /dev/urandom: %m");
+                        goto finish;
                 }
+                if (k == 0) {
+                        log_error("Got EOF while reading from /dev/urandom.");
+                        r = -EIO;
+                        goto finish;
+                }
+
+                r = loop_write(seed_fd, buf, (size_t) k, false);
+                if (r < 0)
+                        log_error_errno(r, "Failed to write new random seed file: %m");
         }
 
 finish:

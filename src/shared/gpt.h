@@ -19,6 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#pragma once
+
+#include <endian.h>
+
 #include "sd-id128.h"
 
 /* We only support root disk discovery for x86, x86-64 and ARM for
@@ -42,10 +46,10 @@
 #  define GPT_ROOT_NATIVE GPT_ROOT_X86
 #endif
 
-#if defined(__aarch64__) && !defined(WORDS_BIGENDIAN)
+#if defined(__aarch64__) && (__BYTE_ORDER != __BIG_ENDIAN)
 #  define GPT_ROOT_NATIVE GPT_ROOT_ARM_64
 #  define GPT_ROOT_SECONDARY GPT_ROOT_ARM
-#elif defined(__arm__) && !defined(WORDS_BIGENDIAN)
+#elif defined(__arm__) && (__BYTE_ORDER != __BIG_ENDIAN)
 #  define GPT_ROOT_NATIVE GPT_ROOT_ARM
 #endif
 
@@ -55,3 +59,5 @@
  * just because we saw no point in defining any other values here. */
 #define GPT_FLAG_READ_ONLY (1ULL << 60)
 #define GPT_FLAG_NO_AUTO (1ULL << 63)
+
+#define GPT_LINUX_GENERIC SD_ID128_MAKE(0f,c6,3d,af,84,83,47,72,8e,79,3d,69,d8,47,7d,e4)

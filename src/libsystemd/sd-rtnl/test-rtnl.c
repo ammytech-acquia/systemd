@@ -29,13 +29,31 @@
 #include "rtnl-util.h"
 #include "event-util.h"
 #include "missing.h"
-#include "rtnl-internal.h"
+
+static void test_message_link_bridge(sd_rtnl *rtnl) {
+        _cleanup_rtnl_message_unref_ sd_rtnl_message *message = NULL;
+        uint32_t cost;
+
+        assert_se(sd_rtnl_message_new_link(rtnl, &message, RTM_NEWLINK, 1) >= 0);
+        assert_se(sd_rtnl_message_link_set_family(message, PF_BRIDGE) >= 0);
+        assert_se(sd_rtnl_message_open_container(message, IFLA_PROTINFO) >= 0);
+        assert_se(sd_rtnl_message_append_u32(message, IFLA_BRPORT_COST, 10) >= 0);
+        assert_se(sd_rtnl_message_close_container(message) >= 0);
+
+        assert_se(sd_rtnl_message_rewind(message) >= 0);
+
+        assert_se(sd_rtnl_message_enter_container(message, IFLA_PROTINFO) >= 0);
+        assert_se(sd_rtnl_message_read_u32(message, IFLA_BRPORT_COST, &cost) >= 0);
+        assert_se(cost == 10);
+        assert_se(sd_rtnl_message_exit_container(message) >= 0);
+}
 
 static void test_link_configure(sd_rtnl *rtnl, int ifindex) {
-        _cleanup_rtnl_message_unref_ sd_rtnl_message *message;
+        _cleanup_rtnl_message_unref_ sd_rtnl_message *message = NULL;
         const char *mac = "98:fe:94:3f:c6:18", *name = "test";
+        char buffer[ETHER_ADDR_TO_STRING_MAX];
         unsigned int mtu = 1450, mtu_out;
-        char *name_out;
+        const char *name_out;
         struct ether_addr mac_out;
 
         /* we'd really like to test NEWLINK, but let's not mess with the running kernel */
@@ -51,7 +69,7 @@ static void test_link_configure(sd_rtnl *rtnl, int ifindex) {
         assert_se(streq(name, name_out));
 
         assert_se(sd_rtnl_message_read_ether_addr(message, IFLA_ADDRESS, &mac_out) >= 0);
-        assert_se(streq(mac, ether_ntoa(&mac_out)));
+        assert_se(streq(mac, ether_addr_to_string(&mac_out, buffer)));
 
         assert_se(sd_rtnl_message_read_u32(message, IFLA_MTU, &mtu_out) >= 0);
         assert_se(mtu == mtu_out);
@@ -61,7 +79,7 @@ static void test_link_get(sd_rtnl *rtnl, int ifindex) {
         sd_rtnl_message *m;
         sd_rtnl_message *r;
         unsigned int mtu = 1500;
-        char *str_data;
+        const char *str_data;
         uint8_t u8_data;
         uint32_t u32_data;
         struct ether_addr eth_data;
@@ -108,7 +126,7 @@ static void test_address_get(sd_rtnl *rtnl, int ifindex) {
         sd_rtnl_message *r;
         struct in_addr in_data;
         struct ifa_cacheinfo cache;
-        char *label;
+        const char *label;
 
         assert_se(sd_rtnl_message_new_addr(rtnl, &m, RTM_GETADDR, ifindex, AF_INET) >= 0);
         assert_se(m);
@@ -132,9 +150,9 @@ static void test_route(void) {
         uint32_t index = 2, u32_data;
         int r;
 
-        r = sd_rtnl_message_new_route(NULL, &req, RTM_NEWROUTE, AF_INET);
+        r = sd_rtnl_message_new_route(NULL, &req, RTM_NEWROUTE, AF_INET, RTPROT_STATIC);
         if (r < 0) {
-                log_error("Could not create RTM_NEWROUTE message: %s", strerror(-r));
+                log_error_errno(r, "Could not create RTM_NEWROUTE message: %m");
                 return;
         }
 
@@ -142,13 +160,13 @@ static void test_route(void) {
 
         r = sd_rtnl_message_append_in_addr(req, RTA_GATEWAY, &addr);
         if (r < 0) {
-                log_error("Could not append RTA_GATEWAY attribute: %s", strerror(-r));
+                log_error_errno(r, "Could not append RTA_GATEWAY attribute: %m");
                 return;
         }
 
         r = sd_rtnl_message_append_u32(req, RTA_OIF, index);
         if (r < 0) {
-                log_error("Could not append RTA_OIF attribute: %s", strerror(-r));
+                log_error_errno(r, "Could not append RTA_OIF attribute: %m");
                 return;
         }
 
@@ -174,7 +192,8 @@ static void test_multiple(void) {
 }
 
 static int link_handler(sd_rtnl *rtnl, sd_rtnl_message *m, void *userdata) {
-        char *ifname = userdata, *data;
+        char *ifname = userdata;
+        const char *data;
 
         assert_se(rtnl);
         assert_se(m);
@@ -221,7 +240,7 @@ static int pipe_handler(sd_rtnl *rtnl, sd_rtnl_message *m, void *userdata) {
 
         r = sd_rtnl_message_get_errno(m);
 
-        log_info("%d left in pipe. got reply: %s", *counter, strerror(-r));
+        log_info_errno(r, "%d left in pipe. got reply: %m", *counter);
 
         assert_se(r >= 0);
 
@@ -277,7 +296,7 @@ static void test_container(void) {
         _cleanup_rtnl_message_unref_ sd_rtnl_message *m = NULL;
         uint16_t u16_data;
         uint32_t u32_data;
-        char *string_data;
+        const char *string_data;
 
         assert_se(sd_rtnl_message_new_link(NULL, &m, RTM_NEWLINK, 0) >= 0);
 
@@ -333,8 +352,8 @@ static void test_get_addresses(sd_rtnl *rtnl) {
 
         for (m = reply; m; m = sd_rtnl_message_next(m)) {
                 uint16_t type;
-                unsigned char family, scope, flags;
-                int ifindex;
+                unsigned char scope, flags;
+                int family, ifindex;
 
                 assert_se(sd_rtnl_message_get_type(m, &type) >= 0);
                 assert_se(type == RTM_NEWADDR);
@@ -351,13 +370,22 @@ static void test_get_addresses(sd_rtnl *rtnl) {
         }
 }
 
+static void test_message(void) {
+        _cleanup_rtnl_message_unref_ sd_rtnl_message *m = NULL;
+
+        assert_se(rtnl_message_new_synthetic_error(-ETIMEDOUT, 1, &m) >= 0);
+        assert_se(sd_rtnl_message_get_errno(m) == -ETIMEDOUT);
+}
+
 int main(void) {
         sd_rtnl *rtnl;
         sd_rtnl_message *m;
         sd_rtnl_message *r;
-        char *string_data;
+        const char *string_data;
         int if_loopback;
         uint16_t type;
+
+        test_message();
 
         test_match();
 
@@ -382,6 +410,8 @@ int main(void) {
         test_link_configure(rtnl, if_loopback);
 
         test_get_addresses(rtnl);
+
+        test_message_link_bridge(rtnl);
 
         assert_se(sd_rtnl_message_new_link(rtnl, &m, RTM_GETLINK, if_loopback) >= 0);
         assert_se(m);

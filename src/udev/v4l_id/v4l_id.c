@@ -26,40 +26,43 @@
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
 
-int main (int argc, char *argv[])
-{
+#include "util.h"
+
+int main(int argc, char *argv[]) {
         static const struct option options[] = {
                 { "help", no_argument, NULL, 'h' },
                 {}
         };
-        int fd;
+        _cleanup_close_ int fd = -1;
         char *device;
         struct v4l2_capability v2cap;
+        int c;
 
-        while (1) {
-                int option;
+        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0)
 
-                option = getopt_long(argc, argv, "h", options, NULL);
-                if (option == -1)
-                        break;
-
-                switch (option) {
+                switch (c) {
                 case 'h':
-                        printf("Usage: v4l_id [--help] <device file>\n\n");
+                        printf("%s [-h,--help] <device file>\n\n"
+                               "Video4Linux device identification.\n\n"
+                               "  -h  Print this message\n"
+                               , program_invocation_short_name);
                         return 0;
-                default:
-                        return 1;
-                }
-        }
-        device = argv[optind];
+                case '?':
+                        return -EINVAL;
 
+                default:
+                        assert_not_reached("Unhandled option");
+                }
+
+        device = argv[optind];
         if (device == NULL)
                 return 2;
-        fd = open (device, O_RDONLY);
+
+        fd = open(device, O_RDONLY);
         if (fd < 0)
                 return 3;
 
-        if (ioctl (fd, VIDIOC_QUERYCAP, &v2cap) == 0) {
+        if (ioctl(fd, VIDIOC_QUERYCAP, &v2cap) == 0) {
                 printf("ID_V4L_VERSION=2\n");
                 printf("ID_V4L_PRODUCT=%s\n", v2cap.card);
                 printf("ID_V4L_CAPABILITIES=:");
@@ -78,6 +81,5 @@ int main (int argc, char *argv[])
                 printf("\n");
         }
 
-        close (fd);
         return 0;
 }
