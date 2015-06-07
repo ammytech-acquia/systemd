@@ -22,11 +22,8 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <locale.h>
-#include <string.h>
-#include <sys/timex.h>
 
 #include "sd-bus.h"
 #include "bus-util.h"
@@ -36,7 +33,7 @@
 #include "build.h"
 #include "strv.h"
 #include "pager.h"
-#include "time-dst.h"
+#include "terminal-util.h"
 
 static bool arg_no_pager = false;
 static bool arg_ask_password = true;
@@ -76,62 +73,42 @@ typedef struct StatusInfo {
         bool ntp_synced;
 } StatusInfo;
 
-static const char *jump_str(int delta_minutes, char *s, size_t size) {
-        if (delta_minutes == 60)
-                return "one hour forward";
-        if (delta_minutes == -60)
-                return "one hour backwards";
-        if (delta_minutes < 0) {
-                snprintf(s, size, "%i minutes backwards", -delta_minutes);
-                return s;
-        }
-        if (delta_minutes > 0) {
-                snprintf(s, size, "%i minutes forward", delta_minutes);
-                return s;
-        }
-        return "";
-}
-
 static void print_status_info(const StatusInfo *i) {
         char a[FORMAT_TIMESTAMP_MAX];
-        char b[FORMAT_TIMESTAMP_MAX];
-        char s[32];
         struct tm tm;
         time_t sec;
         bool have_time = false;
-        _cleanup_free_ char *zc = NULL, *zn = NULL;
-        time_t t, tc, tn;
-        int dn = 0;
-        bool is_dstc = false, is_dstn = false;
+        const char *old_tz = NULL, *tz;
         int r;
 
         assert(i);
 
-        /* Enforce the values of /etc/localtime */
-        if (getenv("TZ")) {
-                fprintf(stderr, "Warning: Ignoring the TZ variable. Reading the system's time zone setting only.\n\n");
-                unsetenv("TZ");
-        }
+        /* Save the old $TZ */
+        tz = getenv("TZ");
+        if (tz)
+                old_tz = strdupa(tz);
+
+        /* Set the new $TZ */
+        if (setenv("TZ", i->timezone, true) < 0)
+                log_warning_errno(errno, "Failed to set TZ environment variable, ignoring: %m");
+        else
+                tzset();
 
         if (i->time != 0) {
                 sec = (time_t) (i->time / USEC_PER_SEC);
                 have_time = true;
-        } else if (arg_transport == BUS_TRANSPORT_LOCAL) {
+        } else if (IN_SET(arg_transport, BUS_TRANSPORT_LOCAL, BUS_TRANSPORT_MACHINE)) {
                 sec = time(NULL);
                 have_time = true;
         } else
-                fprintf(stderr, "Warning: Could not get time from timedated and not operating locally.\n\n");
+                log_warning("Could not get time from timedated and not operating locally, ignoring.");
 
         if (have_time) {
-                zero(tm);
-                assert_se(strftime(a, sizeof(a), "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&sec, &tm)) > 0);
-                char_array_0(a);
-                printf("      Local time: %s\n", a);
+                xstrftime(a, "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&sec, &tm));
+                printf("      Local time: %.*s\n", (int) sizeof(a), a);
 
-                zero(tm);
-                assert_se(strftime(a, sizeof(a), "%a %Y-%m-%d %H:%M:%S UTC", gmtime_r(&sec, &tm)) > 0);
-                char_array_0(a);
-                printf("  Universal time: %s\n", a);
+                xstrftime(a, "%a %Y-%m-%d %H:%M:%S UTC", gmtime_r(&sec, &tm));
+                printf("  Universal time: %.*s\n", (int) sizeof(a), a);
         } else {
                 printf("      Local time: %s\n", "n/a");
                 printf("  Universal time: %s\n", "n/a");
@@ -140,72 +117,40 @@ static void print_status_info(const StatusInfo *i) {
         if (i->rtc_time > 0) {
                 time_t rtc_sec;
 
-                rtc_sec = (time_t)(i->rtc_time / USEC_PER_SEC);
-                zero(tm);
-                assert_se(strftime(a, sizeof(a), "%a %Y-%m-%d %H:%M:%S", gmtime_r(&rtc_sec, &tm)) > 0);
-                char_array_0(a);
-                printf("        RTC time: %s\n", a);
+                rtc_sec = (time_t) (i->rtc_time / USEC_PER_SEC);
+                xstrftime(a, "%a %Y-%m-%d %H:%M:%S", gmtime_r(&rtc_sec, &tm));
+                printf("        RTC time: %.*s\n", (int) sizeof(a), a);
         } else
                 printf("        RTC time: %s\n", "n/a");
 
-        if (have_time) {
-                zero(tm);
-                assert_se(strftime(a, sizeof(a), "%Z, %z", localtime_r(&sec, &tm)) > 0);
-                char_array_0(a);
-        }
+        if (have_time)
+                xstrftime(a, "%Z, %z", localtime_r(&sec, &tm));
 
-        printf("       Time zone: %s (%s)\n"
-               "     NTP enabled: %s\n"
+        /* Restore the $TZ */
+        if (old_tz)
+                r = setenv("TZ", old_tz, true);
+        else
+                r = unsetenv("TZ");
+        if (r < 0)
+                log_warning_errno(errno, "Failed to set TZ environment variable, ignoring: %m");
+        else
+                tzset();
+
+        printf("       Time zone: %s (%.*s)\n"
+               " Network time on: %s\n"
                "NTP synchronized: %s\n"
                " RTC in local TZ: %s\n",
-               strna(i->timezone), have_time ? a : "n/a",
+               strna(i->timezone), (int) sizeof(a), have_time ? a : "n/a",
                i->ntp_capable ? yes_no(i->ntp_enabled) : "n/a",
                yes_no(i->ntp_synced),
                yes_no(i->rtc_local));
 
-        if (have_time) {
-                r = time_get_dst(sec, "/etc/localtime",
-                                 &tc, &zc, &is_dstc,
-                                 &tn, &dn, &zn, &is_dstn);
-                if (r < 0)
-                        printf("      DST active: %s\n", "n/a");
-                else {
-                        printf("      DST active: %s\n", yes_no(is_dstc));
-
-                        t = tc - 1;
-                        zero(tm);
-                        assert_se(strftime(a, sizeof(a), "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&t, &tm)) > 0);
-                        char_array_0(a);
-
-                        zero(tm);
-                        assert_se(strftime(b, sizeof(b), "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&tc, &tm)) > 0);
-                        char_array_0(b);
-                        printf(" Last DST change: DST %s at\n"
-                               "                  %s\n"
-                               "                  %s\n",
-                               is_dstc ? "began" : "ended", a, b);
-
-                        t = tn - 1;
-                        zero(tm);
-                        assert_se(strftime(a, sizeof(a), "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&t, &tm)) > 0);
-                        char_array_0(a);
-
-                        zero(tm);
-                        assert_se(strftime(b, sizeof(b), "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&tn, &tm)) > 0);
-                        char_array_0(b);
-                        printf(" Next DST change: DST %s (the clock jumps %s) at\n"
-                               "                  %s\n"
-                               "                  %s\n",
-                               is_dstn ? "begins" : "ends", jump_str(dn, s, sizeof(s)), a, b);
-                }
-        } else
-                printf("      DST active: %s\n", yes_no(is_dstc));
-
         if (i->rtc_local)
                 fputs("\n" ANSI_HIGHLIGHT_ON
-                      "Warning: The RTC is configured to maintain time in the local time zone. This\n"
-                      "         mode is not fully supported and will create various problems with time\n"
-                      "         zone changes and daylight saving time adjustments. If at all possible, use\n"
+                      "Warning: The system is configured to read the RTC time in the local time zone. This\n"
+                      "         mode can not be fully supported. It will create various problems with time\n"
+                      "         zone changes and daylight saving time adjustments. The RTC time is never updated,\n"
+                      "         it relies on external facilities to maintain it. If at all possible, use\n"
                       "         RTC in UTC by calling 'timedatectl set-local-rtc 0'" ANSI_HIGHLIGHT_OFF ".\n", stdout);
 }
 
@@ -231,7 +176,7 @@ static int show_status(sd_bus *bus, char **args, unsigned n) {
                                    map,
                                    &info);
         if (r < 0) {
-                log_error("Failed to query server: %s", strerror(-r));
+                log_error_errno(r, "Failed to query server: %m");
                 goto fail;
         }
 
@@ -355,76 +300,23 @@ static int set_ntp(sd_bus *bus, char **args, unsigned n) {
 }
 
 static int list_timezones(sd_bus *bus, char **args, unsigned n) {
-        _cleanup_fclose_ FILE *f = NULL;
         _cleanup_strv_free_ char **zones = NULL;
-        size_t n_zones = 0;
+        int r;
 
         assert(args);
         assert(n == 1);
 
-        f = fopen("/usr/share/zoneinfo/zone.tab", "re");
-        if (!f) {
-                log_error("Failed to open time zone database: %m");
-                return -errno;
-        }
-
-        for (;;) {
-                char l[LINE_MAX], *p, **z, *w;
-                size_t k;
-
-                if (!fgets(l, sizeof(l), f)) {
-                        if (feof(f))
-                                break;
-
-                        log_error("Failed to read time zone database: %m");
-                        return -errno;
-                }
-
-                p = strstrip(l);
-
-                if (isempty(p) || *p == '#')
-                        continue;
-
-                /* Skip over country code */
-                p += strcspn(p, WHITESPACE);
-                p += strspn(p, WHITESPACE);
-
-                /* Skip over coordinates */
-                p += strcspn(p, WHITESPACE);
-                p += strspn(p, WHITESPACE);
-
-                /* Found timezone name */
-                k = strcspn(p, WHITESPACE);
-                if (k <= 0)
-                        continue;
-
-                w = strndup(p, k);
-                if (!w)
-                        return log_oom();
-
-                z = realloc(zones, sizeof(char*) * (n_zones + 2));
-                if (!z) {
-                        free(w);
-                        return log_oom();
-                }
-
-                zones = z;
-                zones[n_zones++] = w;
-        }
-
-        if (zones)
-                zones[n_zones] = NULL;
+        r = get_timezones(&zones);
+        if (r < 0)
+                return log_error_errno(r, "Failed to read list of time zones: %m");
 
         pager_open_if_enabled();
-
-        strv_sort(zones);
         strv_print(zones);
 
         return 0;
 }
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...] COMMAND ...\n\n"
                "Query or change system time and date settings.\n\n"
                "  -h --help                Show this help message\n"
@@ -440,10 +332,8 @@ static int help(void) {
                "  set-timezone ZONE        Set system time zone\n"
                "  list-timezones           Show known time zones\n"
                "  set-local-rtc BOOL       Control whether RTC is in local time\n"
-               "  set-ntp BOOL             Control whether NTP is enabled\n",
+               "  set-ntp BOOL             Enable or disable network time synchronization\n",
                program_invocation_short_name);
-
-        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -471,12 +361,13 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -489,7 +380,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'M':
-                        arg_transport = BUS_TRANSPORT_CONTAINER;
+                        arg_transport = BUS_TRANSPORT_MACHINE;
                         arg_host = optarg;
                         break;
 
@@ -511,7 +402,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         return 1;
 }
@@ -597,7 +487,7 @@ static int timedatectl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_close_unref_ sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -610,7 +500,7 @@ int main(int argc, char *argv[]) {
 
         r = bus_open_transport(arg_transport, arg_host, false, &bus);
         if (r < 0) {
-                log_error("Failed to create bus connection: %s", strerror(-r));
+                log_error_errno(r, "Failed to create bus connection: %m");
                 goto finish;
         }
 

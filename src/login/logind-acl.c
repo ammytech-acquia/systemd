@@ -19,13 +19,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/acl.h>
-#include <acl/libacl.h>
 
 #include "util.h"
+#include "formats-util.h"
 #include "acl-util.h"
 #include "set.h"
 #include "logind-acl.h"
@@ -190,7 +188,7 @@ int devnode_acl_all(struct udev *udev,
 
         assert(udev);
 
-        nodes = set_new(string_hash_func, string_compare_func);
+        nodes = set_new(&string_hash_ops);
         if (!nodes)
                 return -ENOMEM;
 
@@ -256,8 +254,7 @@ int devnode_acl_all(struct udev *udev,
                 FOREACH_DIRENT(dent, dir, return -errno) {
                         _cleanup_free_ char *unescaped_devname = NULL;
 
-                        unescaped_devname = cunescape(dent->d_name);
-                        if (!unescaped_devname)
+                        if (cunescape(dent->d_name, UNESCAPE_RELAX, &unescaped_devname) < 0)
                                 return -ENOMEM;
 
                         n = strappend("/dev/", unescaped_devname);
@@ -277,11 +274,14 @@ int devnode_acl_all(struct udev *udev,
         SET_FOREACH(n, nodes, i) {
                 int k;
 
-                log_debug("Fixing up ACLs at %s for seat %s", n, seat);
+                log_debug("Changing ACLs at %s for seat %s (uid "UID_FMT"→"UID_FMT"%s%s)",
+                          n, seat, old_uid, new_uid,
+                          del ? " del" : "", add ? " add" : "");
+
                 k = devnode_acl(n, flush, del, old_uid, add, new_uid);
                 if (k == -ENOENT)
                         log_debug("Device %s disappeared while setting ACLs", n);
-                else if (k < 0)
+                else if (k < 0 && r == 0)
                         r = k;
         }
 

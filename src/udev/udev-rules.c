@@ -35,6 +35,7 @@
 #include "strbuf.h"
 #include "strv.h"
 #include "util.h"
+#include "sysctl-util.h"
 
 #define PREALLOC_TOKEN          2048
 
@@ -82,7 +83,7 @@ static unsigned int rules_add_string(struct udev_rules *rules, const char *s) {
         return strbuf_add_string(rules->strbuf, s, strlen(s));
 }
 
-/* KEY=="", KEY!="", KEY+="", KEY="", KEY:="" */
+/* KEY=="", KEY!="", KEY+="", KEY-="", KEY="", KEY:="" */
 enum operation_type {
         OP_UNSET,
 
@@ -91,6 +92,7 @@ enum operation_type {
         OP_MATCH_MAX,
 
         OP_ADD,
+        OP_REMOVE,
         OP_ASSIGN,
         OP_ASSIGN_FINAL,
 };
@@ -127,6 +129,7 @@ enum token_type {
         TK_M_DRIVER,                    /* val */
         TK_M_WAITFOR,                   /* val */
         TK_M_ATTR,                      /* val, attr */
+        TK_M_SYSCTL,                    /* val, attr */
 
         TK_M_PARENTS_MIN,
         TK_M_KERNELS,                   /* val */
@@ -137,7 +140,6 @@ enum token_type {
         TK_M_PARENTS_MAX,
 
         TK_M_TEST,                      /* val, mode_t */
-        TK_M_EVENT_TIMEOUT,             /* int */
         TK_M_PROGRAM,                   /* val */
         TK_M_IMPORT_FILE,               /* val */
         TK_M_IMPORT_PROG,               /* val */
@@ -166,6 +168,7 @@ enum token_type {
         TK_A_NAME,                      /* val */
         TK_A_DEVLINK,                   /* val */
         TK_A_ATTR,                      /* val, attr */
+        TK_A_SYSCTL,                    /* val, attr */
         TK_A_RUN_BUILTIN,               /* val, bool */
         TK_A_RUN_PROGRAM,               /* val, bool */
         TK_A_GOTO,                      /* size_t */
@@ -201,7 +204,6 @@ struct token {
                                 uid_t uid;
                                 gid_t gid;
                                 int devlink_prio;
-                                int event_timeout;
                                 int watch;
                                 enum udev_builtin_cmd builtin_cmd;
                         };
@@ -218,8 +220,7 @@ struct rule_tmp {
 };
 
 #ifdef DEBUG
-static const char *operation_str(enum operation_type type)
-{
+static const char *operation_str(enum operation_type type) {
         static const char *operation_strs[] = {
                 [OP_UNSET] =            "UNSET",
                 [OP_MATCH] =            "match",
@@ -227,6 +228,7 @@ static const char *operation_str(enum operation_type type)
                 [OP_MATCH_MAX] =        "MATCH_MAX",
 
                 [OP_ADD] =              "add",
+                [OP_REMOVE] =           "remove",
                 [OP_ASSIGN] =           "assign",
                 [OP_ASSIGN_FINAL] =     "assign-final",
 }        ;
@@ -234,8 +236,7 @@ static const char *operation_str(enum operation_type type)
         return operation_strs[type];
 }
 
-static const char *string_glob_str(enum string_glob_type type)
-{
+static const char *string_glob_str(enum string_glob_type type) {
         static const char *string_glob_strs[] = {
                 [GL_UNSET] =            "UNSET",
                 [GL_PLAIN] =            "plain",
@@ -248,8 +249,7 @@ static const char *string_glob_str(enum string_glob_type type)
         return string_glob_strs[type];
 }
 
-static const char *token_str(enum token_type type)
-{
+static const char *token_str(enum token_type type) {
         static const char *token_strs[] = {
                 [TK_UNSET] =                    "UNSET",
                 [TK_RULE] =                     "RULE",
@@ -265,6 +265,7 @@ static const char *token_str(enum token_type type)
                 [TK_M_DRIVER] =                 "M DRIVER",
                 [TK_M_WAITFOR] =                "M WAITFOR",
                 [TK_M_ATTR] =                   "M ATTR",
+                [TK_M_SYSCTL] =                 "M SYSCTL",
 
                 [TK_M_PARENTS_MIN] =            "M PARENTS_MIN",
                 [TK_M_KERNELS] =                "M KERNELS",
@@ -275,7 +276,6 @@ static const char *token_str(enum token_type type)
                 [TK_M_PARENTS_MAX] =            "M PARENTS_MAX",
 
                 [TK_M_TEST] =                   "M TEST",
-                [TK_M_EVENT_TIMEOUT] =          "M EVENT_TIMEOUT",
                 [TK_M_PROGRAM] =                "M PROGRAM",
                 [TK_M_IMPORT_FILE] =            "M IMPORT_FILE",
                 [TK_M_IMPORT_PROG] =            "M IMPORT_PROG",
@@ -304,6 +304,7 @@ static const char *token_str(enum token_type type)
                 [TK_A_NAME] =                   "A NAME",
                 [TK_A_DEVLINK] =                "A DEVLINK",
                 [TK_A_ATTR] =                   "A ATTR",
+                [TK_A_SYSCTL] =                 "A SYSCTL",
                 [TK_A_RUN_BUILTIN] =            "A RUN_BUILTIN",
                 [TK_A_RUN_PROGRAM] =            "A RUN_PROGRAM",
                 [TK_A_GOTO] =                   "A GOTO",
@@ -314,8 +315,7 @@ static const char *token_str(enum token_type type)
         return token_strs[type];
 }
 
-static void dump_token(struct udev_rules *rules, struct token *token)
-{
+static void dump_token(struct udev_rules *rules, struct token *token) {
         enum token_type type = token->type;
         enum operation_type op = token->key.op;
         enum string_glob_type glob = token->key.glob;
@@ -368,9 +368,11 @@ static void dump_token(struct udev_rules *rules, struct token *token)
                 log_debug("%s %i '%s'", token_str(type), token->key.builtin_cmd, value);
                 break;
         case TK_M_ATTR:
+        case TK_M_SYSCTL:
         case TK_M_ATTRS:
         case TK_M_ENV:
         case TK_A_ATTR:
+        case TK_A_SYSCTL:
         case TK_A_ENV:
                 log_debug("%s %s '%s' '%s'(%s)",
                           token_str(type), operation_str(op), attr, value, string_glob_str(glob));
@@ -409,9 +411,6 @@ static void dump_token(struct udev_rules *rules, struct token *token)
         case TK_A_SECLABEL:
                 log_debug("%s %s '%s' '%s'", token_str(type), operation_str(op), attr, value);
                 break;
-        case TK_M_EVENT_TIMEOUT:
-                log_debug("%s %u", token_str(type), token->key.event_timeout);
-                break;
         case TK_A_GOTO:
                 log_debug("%s '%s' %u", token_str(type), value, token->key.rule_goto);
                 break;
@@ -427,8 +426,7 @@ static void dump_token(struct udev_rules *rules, struct token *token)
         }
 }
 
-static void dump_rules(struct udev_rules *rules)
-{
+static void dump_rules(struct udev_rules *rules) {
         unsigned int i;
 
         log_debug("dumping %u (%zu bytes) tokens, %u (%zu bytes) strings",
@@ -444,8 +442,7 @@ static inline void dump_token(struct udev_rules *rules, struct token *token) {}
 static inline void dump_rules(struct udev_rules *rules) {}
 #endif /* DEBUG */
 
-static int add_token(struct udev_rules *rules, struct token *token)
-{
+static int add_token(struct udev_rules *rules, struct token *token) {
         /* grow buffer if needed */
         if (rules->token_cur+1 >= rules->token_max) {
                 struct token *tokens;
@@ -467,11 +464,11 @@ static int add_token(struct udev_rules *rules, struct token *token)
         return 0;
 }
 
-static uid_t add_uid(struct udev_rules *rules, const char *owner)
-{
+static uid_t add_uid(struct udev_rules *rules, const char *owner) {
         unsigned int i;
-        uid_t uid;
+        uid_t uid = 0;
         unsigned int off;
+        int r;
 
         /* lookup, if we know it already */
         for (i = 0; i < rules->uids_cur; i++) {
@@ -481,7 +478,13 @@ static uid_t add_uid(struct udev_rules *rules, const char *owner)
                         return uid;
                 }
         }
-        uid = util_lookup_user(rules->udev, owner);
+        r = get_user_creds(&owner, &uid, NULL, NULL, NULL);
+        if (r < 0) {
+                if (r == -ENOENT || r == -ESRCH)
+                        log_error("specified user '%s' unknown", owner);
+                else
+                        log_error_errno(r, "error resolving user '%s': %m", owner);
+        }
 
         /* grow buffer if needed */
         if (rules->uids_cur+1 >= rules->uids_max) {
@@ -508,11 +511,11 @@ static uid_t add_uid(struct udev_rules *rules, const char *owner)
         return uid;
 }
 
-static gid_t add_gid(struct udev_rules *rules, const char *group)
-{
+static gid_t add_gid(struct udev_rules *rules, const char *group) {
         unsigned int i;
-        gid_t gid;
+        gid_t gid = 0;
         unsigned int off;
+        int r;
 
         /* lookup, if we know it already */
         for (i = 0; i < rules->gids_cur; i++) {
@@ -522,7 +525,13 @@ static gid_t add_gid(struct udev_rules *rules, const char *group)
                         return gid;
                 }
         }
-        gid = util_lookup_group(rules->udev, group);
+        r = get_group_creds(&group, &gid);
+        if (r < 0) {
+                if (r == -ENOENT || r == -ESRCH)
+                        log_error("specified group '%s' unknown", group);
+                else
+                        log_error_errno(r, "error resolving group '%s': %m", group);
+        }
 
         /* grow buffer if needed */
         if (rules->gids_cur+1 >= rules->gids_max) {
@@ -549,12 +558,10 @@ static gid_t add_gid(struct udev_rules *rules, const char *group)
         return gid;
 }
 
-static int import_property_from_string(struct udev_device *dev, char *line)
-{
+static int import_property_from_string(struct udev_device *dev, char *line) {
         char *key;
         char *val;
         size_t len;
-        struct udev_list_entry *entry;
 
         /* find key */
         key = line;
@@ -605,16 +612,12 @@ static int import_property_from_string(struct udev_device *dev, char *line)
                 val++;
         }
 
-        entry = udev_device_add_property(dev, key, val);
-        /* store in db, skip private keys */
-        if (key[0] != '.')
-                udev_list_entry_set_num(entry, true);
+        udev_device_add_property(dev, key, val);
 
         return 0;
 }
 
-static int import_file_into_properties(struct udev_device *dev, const char *filename)
-{
+static int import_file_into_properties(struct udev_device *dev, const char *filename) {
         FILE *f;
         char line[UTIL_LINE_SIZE];
 
@@ -627,8 +630,10 @@ static int import_file_into_properties(struct udev_device *dev, const char *file
         return 0;
 }
 
-static int import_program_into_properties(struct udev_event *event, const char *program, const sigset_t *sigmask)
-{
+static int import_program_into_properties(struct udev_event *event,
+                                          usec_t timeout_usec,
+                                          usec_t timeout_warn_usec,
+                                          const char *program, const sigset_t *sigmask) {
         struct udev_device *dev = event->dev;
         char **envp;
         char result[UTIL_LINE_SIZE];
@@ -636,7 +641,7 @@ static int import_program_into_properties(struct udev_event *event, const char *
         int err;
 
         envp = udev_device_get_properties_envp(dev);
-        err = udev_event_spawn(event, program, envp, sigmask, result, sizeof(result));
+        err = udev_event_spawn(event, timeout_usec, timeout_warn_usec, program, envp, sigmask, result, sizeof(result));
         if (err < 0)
                 return err;
 
@@ -655,8 +660,7 @@ static int import_program_into_properties(struct udev_event *event, const char *
         return 0;
 }
 
-static int import_parent_into_properties(struct udev_device *dev, const char *filter)
-{
+static int import_parent_into_properties(struct udev_device *dev, const char *filter) {
         struct udev_device *dev_parent;
         struct udev_list_entry *list_entry;
 
@@ -669,20 +673,14 @@ static int import_parent_into_properties(struct udev_device *dev, const char *fi
                 const char *val = udev_list_entry_get_value(list_entry);
 
                 if (fnmatch(filter, key, 0) == 0) {
-                        struct udev_list_entry *entry;
-
-                        entry = udev_device_add_property(dev, key, val);
-                        /* store in db, skip private keys */
-                        if (key[0] != '.')
-                                udev_list_entry_set_num(entry, true);
+                        udev_device_add_property(dev, key, val);
                 }
         }
         return 0;
 }
 
 #define WAIT_LOOP_PER_SECOND                50
-static int wait_for_file(struct udev_device *dev, const char *file, int timeout)
-{
+static int wait_for_file(struct udev_device *dev, const char *file, int timeout) {
         char filepath[UTIL_PATH_SIZE];
         char devicepath[UTIL_PATH_SIZE];
         struct stat stats;
@@ -716,8 +714,7 @@ static int wait_for_file(struct udev_device *dev, const char *file, int timeout)
         return -1;
 }
 
-static int attr_subst_subdir(char *attr, size_t len)
-{
+static int attr_subst_subdir(char *attr, size_t len) {
         bool found = false;
 
         if (strstr(attr, "/*/")) {
@@ -754,8 +751,7 @@ static int attr_subst_subdir(char *attr, size_t len)
         return found;
 }
 
-static int get_key(struct udev *udev, char **line, char **key, enum operation_type *op, char **value)
-{
+static int get_key(struct udev *udev, char **line, char **key, enum operation_type *op, char **value) {
         char *linepos;
         char *temp;
 
@@ -780,7 +776,7 @@ static int get_key(struct udev *udev, char **line, char **key, enum operation_ty
                         break;
                 if (linepos[0] == '=')
                         break;
-                if ((linepos[0] == '+') || (linepos[0] == '!') || (linepos[0] == ':'))
+                if ((linepos[0] == '+') || (linepos[0] == '-') || (linepos[0] == '!') || (linepos[0] == ':'))
                         if (linepos[1] == '=')
                                 break;
         }
@@ -803,6 +799,9 @@ static int get_key(struct udev *udev, char **line, char **key, enum operation_ty
                 linepos += 2;
         } else if (linepos[0] == '+' && linepos[1] == '=') {
                 *op = OP_ADD;
+                linepos += 2;
+        } else if (linepos[0] == '-' && linepos[1] == '=') {
+                *op = OP_REMOVE;
                 linepos += 2;
         } else if (linepos[0] == '=') {
                 *op = OP_ASSIGN;
@@ -842,8 +841,7 @@ static int get_key(struct udev *udev, char **line, char **key, enum operation_ty
 }
 
 /* extract possible KEY{attr} */
-static const char *get_key_attribute(struct udev *udev, char *str)
-{
+static const char *get_key_attribute(struct udev *udev, char *str) {
         char *pos;
         char *attr;
 
@@ -863,8 +861,7 @@ static const char *get_key_attribute(struct udev *udev, char *str)
 
 static int rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
                         enum operation_type op,
-                        const char *value, const void *data)
-{
+                        const char *value, const void *data) {
         struct token *token = &rule_tmp->token[rule_tmp->token_cur];
         const char *attr = NULL;
 
@@ -907,8 +904,10 @@ static int rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
                 break;
         case TK_M_ENV:
         case TK_M_ATTR:
+        case TK_M_SYSCTL:
         case TK_M_ATTRS:
         case TK_A_ATTR:
+        case TK_A_SYSCTL:
         case TK_A_ENV:
         case TK_A_SECLABEL:
                 attr = data;
@@ -941,9 +940,6 @@ static int rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
                 break;
         case TK_A_MODE_ID:
                 token->key.mode = *(mode_t *)data;
-                break;
-        case TK_M_EVENT_TIMEOUT:
-                token->key.event_timeout = *(int *)data;
                 break;
         case TK_RULE:
         case TK_M_PARENTS_MIN:
@@ -1008,8 +1004,7 @@ static int rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
         return 0;
 }
 
-static int sort_token(struct udev_rules *rules, struct rule_tmp *rule_tmp)
-{
+static int sort_token(struct udev_rules *rules, struct rule_tmp *rule_tmp) {
         unsigned int i;
         unsigned int start = 0;
         unsigned int end = rule_tmp->token_cur;
@@ -1044,15 +1039,14 @@ static int sort_token(struct udev_rules *rules, struct rule_tmp *rule_tmp)
 }
 
 static int add_rule(struct udev_rules *rules, char *line,
-                    const char *filename, unsigned int filename_off, unsigned int lineno)
-{
+                    const char *filename, unsigned int filename_off, unsigned int lineno) {
         char *linepos;
         const char *attr;
-        struct rule_tmp rule_tmp;
+        struct rule_tmp rule_tmp = {
+                .rules = rules,
+                .rule.type = TK_RULE,
+        };
 
-        memzero(&rule_tmp, sizeof(struct rule_tmp));
-        rule_tmp.rules = rules;
-        rule_tmp.rule.type = TK_RULE;
         /* the offset in the rule is limited to unsigned short */
         if (filename_off < USHRT_MAX)
                 rule_tmp.rule.rule.filename_off = filename_off;
@@ -1073,15 +1067,14 @@ static int add_rule(struct udev_rules *rules, char *line,
 
                         /* If we aren't at the end of the line, this is a parsing error.
                          * Make a best effort to describe where the problem is. */
-                        if (*linepos != '\n') {
-                                char buf[2] = {linepos[1]};
+                        if (!strchr(NEWLINE, *linepos)) {
+                                char buf[2] = {*linepos};
                                 _cleanup_free_ char *tmp;
 
                                 tmp = cescape(buf);
-                                log_error("invalid key/value pair in file %s on line %u,"
-                                          "starting at character %tu ('%s')\n",
+                                log_error("invalid key/value pair in file %s on line %u, starting at character %tu ('%s')",
                                           filename, lineno, linepos - line + 1, tmp);
-                                if (linepos[1] == '#')
+                                if (*linepos == '#')
                                         log_error("hint: comments can only start at beginning of line");
                         }
                         break;
@@ -1147,11 +1140,31 @@ static int add_rule(struct udev_rules *rules, char *line,
                                 log_error("error parsing ATTR attribute");
                                 goto invalid;
                         }
-                        if (op < OP_MATCH_MAX) {
-                                rule_add_key(&rule_tmp, TK_M_ATTR, op, value, attr);
-                        } else {
-                                rule_add_key(&rule_tmp, TK_A_ATTR, op, value, attr);
+                        if (op == OP_REMOVE) {
+                                log_error("invalid ATTR operation");
+                                goto invalid;
                         }
+                        if (op < OP_MATCH_MAX)
+                                rule_add_key(&rule_tmp, TK_M_ATTR, op, value, attr);
+                        else
+                                rule_add_key(&rule_tmp, TK_A_ATTR, op, value, attr);
+                        continue;
+                }
+
+                if (startswith(key, "SYSCTL{")) {
+                        attr = get_key_attribute(rules->udev, key + strlen("SYSCTL"));
+                        if (attr == NULL) {
+                                log_error("error parsing SYSCTL attribute");
+                                goto invalid;
+                        }
+                        if (op == OP_REMOVE) {
+                                log_error("invalid SYSCTL operation");
+                                goto invalid;
+                        }
+                        if (op < OP_MATCH_MAX)
+                                rule_add_key(&rule_tmp, TK_M_SYSCTL, op, value, attr);
+                        else
+                                rule_add_key(&rule_tmp, TK_A_SYSCTL, op, value, attr);
                         continue;
                 }
 
@@ -1159,6 +1172,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                         attr = get_key_attribute(rules->udev, key + strlen("SECLABEL"));
                         if (!attr) {
                                 log_error("error parsing SECLABEL attribute");
+                                goto invalid;
+                        }
+                        if (op == OP_REMOVE) {
+                                log_error("invalid SECLABEL operation");
                                 goto invalid;
                         }
 
@@ -1228,6 +1245,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                                 log_error("error parsing ENV attribute");
                                 goto invalid;
                         }
+                        if (op == OP_REMOVE) {
+                                log_error("invalid ENV operation");
+                                goto invalid;
+                        }
                         if (op < OP_MATCH_MAX) {
                                 if (rule_add_key(&rule_tmp, TK_M_ENV, op, value, attr) != 0)
                                         goto invalid;
@@ -1268,6 +1289,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                 }
 
                 if (streq(key, "PROGRAM")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid PROGRAM operation");
+                                goto invalid;
+                        }
                         rule_add_key(&rule_tmp, TK_M_PROGRAM, op, value, NULL);
                         continue;
                 }
@@ -1286,6 +1311,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                         if (attr == NULL) {
                                 log_error("IMPORT{} type missing, ignoring IMPORT %s:%u", filename, lineno);
                                 continue;
+                        }
+                        if (op == OP_REMOVE) {
+                                log_error("invalid IMPORT operation");
+                                goto invalid;
                         }
                         if (streq(attr, "program")) {
                                 /* find known built-in command */
@@ -1342,6 +1371,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                         attr = get_key_attribute(rules->udev, key + strlen("RUN"));
                         if (attr == NULL)
                                 attr = "program";
+                        if (op == OP_REMOVE) {
+                                log_error("invalid RUN operation");
+                                goto invalid;
+                        }
 
                         if (streq(attr, "builtin")) {
                                 enum udev_builtin_cmd cmd = udev_builtin_lookup(value);
@@ -1349,7 +1382,7 @@ static int add_rule(struct udev_rules *rules, char *line,
                                 if (cmd < UDEV_BUILTIN_MAX)
                                         rule_add_key(&rule_tmp, TK_A_RUN_BUILTIN, op, value, &cmd);
                                 else
-                                        log_error("IMPORT{builtin}: '%s' unknown %s:%u", value, filename, lineno);
+                                        log_error("RUN{builtin}: '%s' unknown %s:%u", value, filename, lineno);
                         } else if (streq(attr, "program")) {
                                 enum udev_builtin_cmd cmd = UDEV_BUILTIN_MAX;
 
@@ -1362,21 +1395,37 @@ static int add_rule(struct udev_rules *rules, char *line,
                 }
 
                 if (streq(key, "WAIT_FOR") || streq(key, "WAIT_FOR_SYSFS")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid WAIT_FOR/WAIT_FOR_SYSFS operation");
+                                goto invalid;
+                        }
                         rule_add_key(&rule_tmp, TK_M_WAITFOR, 0, value, NULL);
                         continue;
                 }
 
                 if (streq(key, "LABEL")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid LABEL operation");
+                                goto invalid;
+                        }
                         rule_tmp.rule.rule.label_off = rules_add_string(rules, value);
                         continue;
                 }
 
                 if (streq(key, "GOTO")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid GOTO operation");
+                                goto invalid;
+                        }
                         rule_add_key(&rule_tmp, TK_A_GOTO, 0, value, NULL);
                         continue;
                 }
 
                 if (startswith(key, "NAME")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid NAME operation");
+                                goto invalid;
+                        }
                         if (op < OP_MATCH_MAX) {
                                 rule_add_key(&rule_tmp, TK_M_NAME, op, value, NULL);
                         } else {
@@ -1397,6 +1446,10 @@ static int add_rule(struct udev_rules *rules, char *line,
                 }
 
                 if (streq(key, "SYMLINK")) {
+                        if (op == OP_REMOVE) {
+                                log_error("invalid SYMLINK operation");
+                                goto invalid;
+                        }
                         if (op < OP_MATCH_MAX)
                                 rule_add_key(&rule_tmp, TK_M_DEVLINK, op, value, NULL);
                         else
@@ -1408,6 +1461,11 @@ static int add_rule(struct udev_rules *rules, char *line,
                 if (streq(key, "OWNER")) {
                         uid_t uid;
                         char *endptr;
+
+                        if (op == OP_REMOVE) {
+                                log_error("invalid OWNER operation");
+                                goto invalid;
+                        }
 
                         uid = strtoul(value, &endptr, 10);
                         if (endptr[0] == '\0') {
@@ -1426,6 +1484,11 @@ static int add_rule(struct udev_rules *rules, char *line,
                         gid_t gid;
                         char *endptr;
 
+                        if (op == OP_REMOVE) {
+                                log_error("invalid GROUP operation");
+                                goto invalid;
+                        }
+
                         gid = strtoul(value, &endptr, 10);
                         if (endptr[0] == '\0') {
                                 rule_add_key(&rule_tmp, TK_A_GROUP_ID, op, NULL, &gid);
@@ -1443,6 +1506,11 @@ static int add_rule(struct udev_rules *rules, char *line,
                         mode_t mode;
                         char *endptr;
 
+                        if (op == OP_REMOVE) {
+                                log_error("invalid MODE operation");
+                                goto invalid;
+                        }
+
                         mode = strtol(value, &endptr, 8);
                         if (endptr[0] == '\0')
                                 rule_add_key(&rule_tmp, TK_A_MODE_ID, op, NULL, &mode);
@@ -1455,18 +1523,16 @@ static int add_rule(struct udev_rules *rules, char *line,
                 if (streq(key, "OPTIONS")) {
                         const char *pos;
 
+                        if (op == OP_REMOVE) {
+                                log_error("invalid OPTIONS operation");
+                                goto invalid;
+                        }
+
                         pos = strstr(value, "link_priority=");
                         if (pos != NULL) {
                                 int prio = atoi(&pos[strlen("link_priority=")]);
 
                                 rule_add_key(&rule_tmp, TK_A_DEVLINK_PRIO, op, NULL, &prio);
-                        }
-
-                        pos = strstr(value, "event_timeout=");
-                        if (pos != NULL) {
-                                int tout = atoi(&pos[strlen("event_timeout=")]);
-
-                                rule_add_key(&rule_tmp, TK_M_EVENT_TIMEOUT, op, NULL, &tout);
                         }
 
                         pos = strstr(value, "string_escape=");
@@ -1524,24 +1590,27 @@ invalid:
         return -1;
 }
 
-static int parse_file(struct udev_rules *rules, const char *filename)
-{
-        FILE *f;
+static int parse_file(struct udev_rules *rules, const char *filename) {
+        _cleanup_fclose_ FILE *f = NULL;
         unsigned int first_token;
         unsigned int filename_off;
         char line[UTIL_LINE_SIZE];
         int line_nr = 0;
         unsigned int i;
 
-        if (null_or_empty_path(filename)) {
-                log_debug("skip empty file: %s", filename);
-                return 0;
-        }
-        log_debug("read rules file: %s", filename);
-
         f = fopen(filename, "re");
-        if (f == NULL)
-                return -1;
+        if (!f) {
+                if (errno == ENOENT)
+                        return 0;
+                else
+                        return -errno;
+        }
+
+        if (null_or_empty_fd(fileno(f))) {
+                log_debug("Skipping empty file: %s", filename);
+                return 0;
+        } else
+                log_debug("Reading rules file: %s", filename);
 
         first_token = rules->token_cur;
         filename_off = rules_add_string(rules, filename);
@@ -1580,7 +1649,6 @@ static int parse_file(struct udev_rules *rules, const char *filename)
                 }
                 add_rule(rules, key, filename, filename_off, line_nr);
         }
-        fclose(f);
 
         /* link GOTOs to LABEL rules in this file to be able to fast-forward */
         for (i = first_token+1; i < rules->token_cur; i++) {
@@ -1605,8 +1673,7 @@ static int parse_file(struct udev_rules *rules, const char *filename)
         return 0;
 }
 
-struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names)
-{
+struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names) {
         struct udev_rules *rules;
         struct udev_list file_list;
         struct token end_token;
@@ -1634,7 +1701,7 @@ struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names)
 
         r = conf_files_list_strv(&files, ".rules", NULL, rules_dirs);
         if (r < 0) {
-                log_error("failed to enumerate rules files: %s", strerror(-r));
+                log_error_errno(r, "failed to enumerate rules files: %m");
                 return udev_rules_unref(rules);
         }
 
@@ -1676,8 +1743,7 @@ struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names)
         return rules;
 }
 
-struct udev_rules *udev_rules_unref(struct udev_rules *rules)
-{
+struct udev_rules *udev_rules_unref(struct udev_rules *rules) {
         if (rules == NULL)
                 return NULL;
         free(rules->tokens);
@@ -1688,16 +1754,14 @@ struct udev_rules *udev_rules_unref(struct udev_rules *rules)
         return NULL;
 }
 
-bool udev_rules_check_timestamp(struct udev_rules *rules)
-{
+bool udev_rules_check_timestamp(struct udev_rules *rules) {
         if (!rules)
                 return false;
 
         return paths_check_timestamp(rules_dirs, &rules->dirs_ts_usec, true);
 }
 
-static int match_key(struct udev_rules *rules, struct token *token, const char *val)
-{
+static int match_key(struct udev_rules *rules, struct token *token, const char *val) {
         char *key_value = rules_str(rules, token->key.value_off);
         char *pos;
         bool match = false;
@@ -1770,8 +1834,7 @@ static int match_key(struct udev_rules *rules, struct token *token, const char *
         return -1;
 }
 
-static int match_attr(struct udev_rules *rules, struct udev_device *dev, struct udev_event *event, struct token *cur)
-{
+static int match_attr(struct udev_rules *rules, struct udev_device *dev, struct udev_event *event, struct token *cur) {
         const char *name;
         char nbuf[UTIL_NAME_SIZE];
         const char *value;
@@ -1825,8 +1888,12 @@ enum escape_type {
         ESCAPE_REPLACE,
 };
 
-int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event, const sigset_t *sigmask)
-{
+int udev_rules_apply_to_event(struct udev_rules *rules,
+                              struct udev_event *event,
+                              usec_t timeout_usec,
+                              usec_t timeout_warn_usec,
+                              struct udev_list *properties_list,
+                              const sigset_t *sigmask) {
         struct token *cur;
         struct token *rule;
         enum escape_type esc = ESCAPE_UNSET;
@@ -1891,7 +1958,18 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         const char *value;
 
                         value = udev_device_get_property_value(event->dev, key_name);
-                        if (value == NULL)
+
+                        /* check global properties */
+                        if (!value && properties_list) {
+                                struct udev_list_entry *list_entry;
+
+                                list_entry = udev_list_get_entry(properties_list);
+                                list_entry = udev_list_entry_get_by_name(list_entry, key_name);
+                                if (list_entry != NULL)
+                                        value = udev_list_entry_get_value(list_entry);
+                        }
+
+                        if (!value)
                                 value = "";
                         if (match_key(rules, cur, value))
                                 goto nomatch;
@@ -1933,6 +2011,23 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         if (match_attr(rules, event->dev, event, cur) != 0)
                                 goto nomatch;
                         break;
+                case TK_M_SYSCTL: {
+                        char filename[UTIL_PATH_SIZE];
+                        _cleanup_free_ char *value = NULL;
+                        size_t len;
+
+                        udev_event_apply_format(event, rules_str(rules, cur->key.attr_off), filename, sizeof(filename));
+                        sysctl_normalize(filename);
+                        if (sysctl_read(filename, &value) < 0)
+                                goto nomatch;
+
+                        len = strlen(value);
+                        while (len > 0 && isspace(value[--len]))
+                                value[len] = '\0';
+                        if (match_key(rules, cur, value) != 0)
+                                goto nomatch;
+                        break;
+                }
                 case TK_M_KERNELS:
                 case TK_M_SUBSYSTEMS:
                 case TK_M_DRIVERS:
@@ -2020,10 +2115,6 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                 goto nomatch;
                         break;
                 }
-                case TK_M_EVENT_TIMEOUT:
-                        log_debug("OPTIONS event_timeout=%u", cur->key.event_timeout);
-                        event->timeout_usec = cur->key.event_timeout * 1000 * 1000;
-                        break;
                 case TK_M_PROGRAM: {
                         char program[UTIL_PATH_SIZE];
                         char **envp;
@@ -2038,7 +2129,7 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                   rules_str(rules, rule->rule.filename_off),
                                   rule->rule.filename_line);
 
-                        if (udev_event_spawn(event, program, envp, sigmask, result, sizeof(result)) < 0) {
+                        if (udev_event_spawn(event, timeout_usec, timeout_warn_usec, program, envp, sigmask, result, sizeof(result)) < 0) {
                                 if (cur->key.op != OP_NOMATCH)
                                         goto nomatch;
                         } else {
@@ -2074,7 +2165,7 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                   rules_str(rules, rule->rule.filename_off),
                                   rule->rule.filename_line);
 
-                        if (import_program_into_properties(event, import, sigmask) != 0)
+                        if (import_program_into_properties(event, timeout_usec, timeout_warn_usec, import, sigmask) != 0)
                                 if (cur->key.op != OP_NOMATCH)
                                         goto nomatch;
                         break;
@@ -2120,12 +2211,9 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         const char *value;
 
                         value = udev_device_get_property_value(event->dev_db, key);
-                        if (value != NULL) {
-                                struct udev_list_entry *entry;
-
-                                entry = udev_device_add_property(event->dev, key, value);
-                                udev_list_entry_set_num(entry, true);
-                        } else {
+                        if (value != NULL)
+                                udev_device_add_property(event->dev, key, value);
+                        else {
                                 if (cur->key.op != OP_NOMATCH)
                                         goto nomatch;
                         }
@@ -2145,13 +2233,10 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
 
                                         pos = strstr(cmdline, key);
                                         if (pos != NULL) {
-                                                struct udev_list_entry *entry;
-
                                                 pos += strlen(key);
                                                 if (pos[0] == '\0' || isspace(pos[0])) {
                                                         /* we import simple flags as 'FLAG=1' */
-                                                        entry = udev_device_add_property(event->dev, key, "1");
-                                                        udev_list_entry_set_num(entry, true);
+                                                        udev_device_add_property(event->dev, key, "1");
                                                         imported = true;
                                                 } else if (pos[0] == '=') {
                                                         const char *value;
@@ -2161,8 +2246,7 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                                         while (pos[0] != '\0' && !isspace(pos[0]))
                                                                 pos++;
                                                         pos[0] = '\0';
-                                                        entry = udev_device_add_property(event->dev, key, value);
-                                                        udev_list_entry_set_num(entry, true);
+                                                        udev_device_add_property(event->dev, key, value);
                                                         imported = true;
                                                 }
                                         }
@@ -2207,6 +2291,8 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         break;
                 case TK_A_OWNER: {
                         char owner[UTIL_NAME_SIZE];
+                        const char *ow = owner;
+                        int r;
 
                         if (event->owner_final)
                                 break;
@@ -2214,7 +2300,15 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                 event->owner_final = true;
                         udev_event_apply_format(event, rules_str(rules, cur->key.value_off), owner, sizeof(owner));
                         event->owner_set = true;
-                        event->uid = util_lookup_user(event->udev, owner);
+                        r = get_user_creds(&ow, &event->uid, NULL, NULL, NULL);
+                        if (r < 0) {
+                                if (r == -ENOENT || r == -ESRCH)
+                                        log_error("specified user '%s' unknown", owner);
+                                else
+                                        log_error_errno(r, "error resolving user '%s': %m", owner);
+
+                                event->uid = 0;
+                        }
                         log_debug("OWNER %u %s:%u",
                                   event->uid,
                                   rules_str(rules, rule->rule.filename_off),
@@ -2223,6 +2317,8 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                 }
                 case TK_A_GROUP: {
                         char group[UTIL_NAME_SIZE];
+                        const char *gr = group;
+                        int r;
 
                         if (event->group_final)
                                 break;
@@ -2230,7 +2326,15 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                 event->group_final = true;
                         udev_event_apply_format(event, rules_str(rules, cur->key.value_off), group, sizeof(group));
                         event->group_set = true;
-                        event->gid = util_lookup_group(event->udev, group);
+                        r = get_group_creds(&gr, &event->gid);
+                        if (r < 0) {
+                                if (r == -ENOENT || r == -ESRCH)
+                                        log_error("specified group '%s' unknown", group);
+                                else
+                                        log_error_errno(r, "error resolving group '%s': %m", group);
+
+                                event->gid = 0;
+                        }
                         log_debug("GROUP %u %s:%u",
                                   event->gid,
                                   rules_str(rules, rule->rule.filename_off),
@@ -2315,7 +2419,6 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         char *value = rules_str(rules, cur->key.value_off);
                         char value_new[UTIL_NAME_SIZE];
                         const char *value_old = NULL;
-                        struct udev_list_entry *entry;
 
                         if (value[0] == '\0') {
                                 if (cur->key.op == OP_ADD)
@@ -2335,10 +2438,7 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         } else
                                 udev_event_apply_format(event, value, value_new, sizeof(value_new));
 
-                        entry = udev_device_add_property(event->dev, name, value_new);
-                        /* store in db, skip private keys */
-                        if (name[0] != '.')
-                                udev_list_entry_set_num(entry, true);
+                        udev_device_add_property(event->dev, name, value_new);
                         break;
                 }
                 case TK_A_TAG: {
@@ -2357,7 +2457,10 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                                 log_error("ignoring invalid tag name '%s'", tag);
                                 break;
                         }
-                        udev_device_add_tag(event->dev, tag);
+                        if (cur->key.op == OP_REMOVE)
+                                udev_device_remove_tag(event->dev, tag);
+                        else
+                                udev_device_add_tag(event->dev, tag);
                         break;
                 }
                 case TK_A_NAME: {
@@ -2454,11 +2557,26 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
                         f = fopen(attr, "we");
                         if (f != NULL) {
                                 if (fprintf(f, "%s", value) <= 0)
-                                        log_error("error writing ATTR{%s}: %m", attr);
+                                        log_error_errno(errno, "error writing ATTR{%s}: %m", attr);
                                 fclose(f);
                         } else {
-                                log_error("error opening ATTR{%s} for writing: %m", attr);
+                                log_error_errno(errno, "error opening ATTR{%s} for writing: %m", attr);
                         }
+                        break;
+                }
+                case TK_A_SYSCTL: {
+                        char filename[UTIL_PATH_SIZE];
+                        char value[UTIL_NAME_SIZE];
+                        int r;
+
+                        udev_event_apply_format(event, rules_str(rules, cur->key.attr_off), filename, sizeof(filename));
+                        sysctl_normalize(filename);
+                        udev_event_apply_format(event, rules_str(rules, cur->key.value_off), value, sizeof(value));
+                        log_debug("SYSCTL '%s' writing '%s' %s:%u", filename, value,
+                                  rules_str(rules, rule->rule.filename_off), rule->rule.filename_line);
+                        r = sysctl_write(filename, value);
+                        if (r < 0)
+                                log_error("error writing SYSCTL{%s}='%s': %s", filename, value, strerror(-r));
                         break;
                 }
                 case TK_A_RUN_BUILTIN:
@@ -2499,8 +2617,7 @@ int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event
         }
 }
 
-int udev_rules_apply_static_dev_perms(struct udev_rules *rules)
-{
+int udev_rules_apply_static_dev_perms(struct udev_rules *rules) {
         struct token *cur;
         struct token *rule;
         uid_t uid = 0;
@@ -2572,19 +2689,17 @@ int udev_rules_apply_static_dev_perms(struct udev_rules *rules)
 
                                         strscpyl(tags_dir, sizeof(tags_dir), "/run/udev/static_node-tags/", *t, "/", NULL);
                                         r = mkdir_p(tags_dir, 0755);
-                                        if (r < 0) {
-                                                log_error("failed to create %s: %s", tags_dir, strerror(-r));
-                                                return r;
-                                        }
+                                        if (r < 0)
+                                                return log_error_errno(r, "failed to create %s: %m", tags_dir);
 
                                         unescaped_filename = xescape(rules_str(rules, cur->key.value_off), "/.");
 
                                         strscpyl(tag_symlink, sizeof(tag_symlink), tags_dir, unescaped_filename, NULL);
                                         r = symlink(device_node, tag_symlink);
-                                        if (r < 0 && errno != EEXIST) {
-                                                log_error("failed to create symlink %s -> %s: %m", tag_symlink, device_node);
-                                                return -errno;
-                                        } else
+                                        if (r < 0 && errno != EEXIST)
+                                                return log_error_errno(errno, "failed to create symlink %s -> %s: %m",
+                                                                       tag_symlink, device_node);
+                                        else
                                                 r = 0;
                                 }
                         }

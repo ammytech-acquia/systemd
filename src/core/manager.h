@@ -22,13 +22,15 @@
 ***/
 
 #include <stdbool.h>
-#include <inttypes.h>
 #include <stdio.h>
 
 #include "sd-bus.h"
 #include "sd-event.h"
 #include "fdset.h"
 #include "cgroup-util.h"
+#include "hashmap.h"
+#include "list.h"
+#include "ratelimit.h"
 
 /* Enforce upper limit how many names we allow */
 #define MANAGER_MAX_NAMES 131072 /* 128K */
@@ -36,6 +38,7 @@
 typedef struct Manager Manager;
 
 typedef enum ManagerState {
+        MANAGER_INITIALIZING,
         MANAGER_STARTING,
         MANAGER_RUNNING,
         MANAGER_DEGRADED,
@@ -59,15 +62,16 @@ typedef enum ManagerExitCode {
         _MANAGER_EXIT_CODE_INVALID = -1
 } ManagerExitCode;
 
-#include "unit.h"
+typedef enum StatusType {
+        STATUS_TYPE_EPHEMERAL,
+        STATUS_TYPE_NORMAL,
+        STATUS_TYPE_EMERGENCY,
+} StatusType;
+
 #include "job.h"
-#include "hashmap.h"
-#include "list.h"
-#include "set.h"
 #include "path-lookup.h"
 #include "execute.h"
 #include "unit-name.h"
-#include "exit-status.h"
 #include "show-status.h"
 
 struct Manager {
@@ -152,6 +156,7 @@ struct Manager {
         dual_timestamp initrd_timestamp;
         dual_timestamp userspace_timestamp;
         dual_timestamp finish_timestamp;
+
         dual_timestamp security_start_timestamp;
         dual_timestamp security_finish_timestamp;
         dual_timestamp generators_start_timestamp;
@@ -173,6 +178,8 @@ struct Manager {
         /* Data specific to the mount subsystem */
         FILE *proc_self_mountinfo;
         sd_event_source *mount_event_source;
+        int utab_inotify_fd;
+        sd_event_source *mount_utab_event_source;
 
         /* Data specific to the swap filesystem */
         FILE *proc_swaps;
@@ -192,11 +199,9 @@ struct Manager {
         sd_bus_track *subscribed;
         char **deserialized_subscribed;
 
-        sd_bus_message *queued_message; /* This is used during reloading:
-                                      * before the reload we queue the
-                                      * reply message here, and
-                                      * afterwards we send it */
-        sd_bus *queued_message_bus; /* The connection to send the queued message on */
+        /* This is used during reloading: before the reload we queue
+         * the reply message here, and afterwards we send it */
+        sd_bus_message *queued_message;
 
         Hashmap *watch_bus;  /* D-Bus names => Unit object n:1 */
 
@@ -221,13 +226,16 @@ struct Manager {
         int pin_cgroupfs_fd;
 
         /* Flags */
-        SystemdRunningAs running_as;
+        ManagerRunningAs running_as;
         ManagerExitCode exit_code:5;
 
         bool dispatching_load_queue:1;
         bool dispatching_dbus_queue:1;
 
         bool taint_usr:1;
+        bool first_boot:1;
+
+        bool test_run:1;
 
         ShowStatus show_status;
         bool confirm_spawn;
@@ -259,6 +267,11 @@ struct Manager {
         unsigned n_on_console;
         unsigned jobs_in_progress_iteration;
 
+        /* Do we have any outstanding password prompts? */
+        int have_ask_password;
+        int ask_password_inotify_fd;
+        sd_event_source *ask_password_event_source;
+
         /* Type=idle pipes */
         int idle_pipe[4];
         sd_event_source *idle_pipe_event_source;
@@ -273,10 +286,19 @@ struct Manager {
 
         /* Reference to the kdbus bus control fd */
         int kdbus_fd;
+
+        /* Used for processing polkit authorization responses */
+        Hashmap *polkit_registry;
+
+        /* When the user hits C-A-D more than 7 times per 2s, reboot immediately... */
+        RateLimit ctrl_alt_del_ratelimit;
+
+        const char *unit_log_field;
+        const char *unit_log_format_string;
 };
 
-int manager_new(SystemdRunningAs running_as, Manager **m);
-void manager_free(Manager *m);
+int manager_new(ManagerRunningAs running_as, bool test_run, Manager **m);
+Manager* manager_free(Manager *m);
 
 int manager_enumerate(Manager *m);
 int manager_startup(Manager *m, FILE *serialization, FDSet *fds);
@@ -327,13 +349,12 @@ bool manager_unit_inactive_or_pending(Manager *m, const char *name);
 
 void manager_check_finished(Manager *m);
 
-void manager_run_generators(Manager *m);
-void manager_undo_generators(Manager *m);
-
 void manager_recheck_journal(Manager *m);
 
 void manager_set_show_status(Manager *m, ShowStatus mode);
-void manager_status_printf(Manager *m, bool ephemeral, const char *status, const char *format, ...) _printf_(4,5);
+void manager_set_first_boot(Manager *m, bool b);
+
+void manager_status_printf(Manager *m, StatusType type, const char *status, const char *format, ...) _printf_(4,5);
 void manager_flip_auto_status(Manager *m, bool enable);
 
 Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
@@ -341,6 +362,8 @@ Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
 const char *manager_get_runtime_prefix(Manager *m);
 
 ManagerState manager_state(Manager *m);
+
+void manager_update_failed_units(Manager *m, Unit *u, bool failed);
 
 const char *manager_state_to_string(ManagerState m) _const_;
 ManagerState manager_state_from_string(const char *s) _pure_;

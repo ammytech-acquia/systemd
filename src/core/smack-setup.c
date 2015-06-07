@@ -24,21 +24,15 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
-#include <sys/vfs.h>
 #include <fcntl.h>
-#include <sys/types.h>
 #include <dirent.h>
-#include <sys/mount.h>
-#include <stdint.h>
 
 #include "macro.h"
 #include "smack-setup.h"
 #include "util.h"
 #include "fileio.h"
 #include "log.h"
-#include "label.h"
 
 #define SMACK_CONFIG "/etc/smack/accesses.d/"
 #define CIPSO_CONFIG "/etc/smack/cipso.d/"
@@ -56,7 +50,7 @@ static int write_rules(const char* dstpath, const char* srcdir) {
         dst = fopen(dstpath, "we");
         if (!dst)  {
                 if (errno != ENOENT)
-                        log_warning("Failed to open %s: %m", dstpath);
+                        log_warning_errno(errno, "Failed to open %s: %m", dstpath);
                 return -errno; /* negative error */
         }
 
@@ -64,7 +58,7 @@ static int write_rules(const char* dstpath, const char* srcdir) {
         dir = opendir(srcdir);
         if (!dir) {
                 if (errno != ENOENT)
-                        log_warning("Failed to opendir %s: %m", srcdir);
+                        log_warning_errno(errno, "Failed to opendir %s: %m", srcdir);
                 return errno; /* positive on purpose */
         }
 
@@ -79,7 +73,7 @@ static int write_rules(const char* dstpath, const char* srcdir) {
                 if (fd < 0) {
                         if (r == 0)
                                 r = -errno;
-                        log_warning("Failed to open %s: %m", entry->d_name);
+                        log_warning_errno(errno, "Failed to open %s: %m", entry->d_name);
                         continue;
                 }
 
@@ -88,13 +82,13 @@ static int write_rules(const char* dstpath, const char* srcdir) {
                         if (r == 0)
                                 r = -errno;
                         safe_close(fd);
-                        log_error("Failed to open %s: %m", entry->d_name);
+                        log_error_errno(errno, "Failed to open %s: %m", entry->d_name);
                         continue;
                 }
 
                 /* load2 write rules in the kernel require a line buffered stream */
                 FOREACH_LINE(buf, policy,
-                             log_error("Failed to read line from %s: %m",
+                             log_error_errno(errno, "Failed to read line from %s: %m",
                                        entry->d_name)) {
                         if (!fputs(buf, dst)) {
                                 if (r == 0)
@@ -105,7 +99,7 @@ static int write_rules(const char* dstpath, const char* srcdir) {
                         if (fflush(dst)) {
                                 if (r == 0)
                                         r = -errno;
-                                log_error("Failed to flush writes to %s: %m", dstpath);
+                                log_error_errno(errno, "Failed to flush writes to %s: %m", dstpath);
                                 break;
                         }
                 }
@@ -116,7 +110,7 @@ static int write_rules(const char* dstpath, const char* srcdir) {
 
 #endif
 
-int smack_setup(bool *loaded_policy) {
+int mac_smack_setup(bool *loaded_policy) {
 
 #ifdef HAVE_SMACK
 
@@ -158,7 +152,7 @@ int smack_setup(bool *loaded_policy) {
                 return 0;
         case 0:
                 log_info("Successfully loaded Smack/CIPSO policies.");
-                return 0;
+                break;
         default:
                 log_warning("Failed to load Smack/CIPSO access rules: %s, ignoring.",
                             strerror(abs(r)));

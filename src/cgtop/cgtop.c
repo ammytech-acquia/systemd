@@ -29,6 +29,7 @@
 #include <getopt.h>
 
 #include "path-util.h"
+#include "terminal-util.h"
 #include "util.h"
 #include "hashmap.h"
 #include "cgroup-util.h"
@@ -126,7 +127,9 @@ static int process(const char *controller, const char *path, Hashmap *a, Hashmap
                                 return r;
                         }
                 } else {
-                        assert_se(hashmap_move_one(a, b, path) == 0);
+                        r = hashmap_move_one(a, b, path);
+                        if (r < 0)
+                                return r;
                         g->cpu_valid = g->memory_valid = g->io_valid = g->n_tasks_valid = false;
                 }
         }
@@ -445,7 +448,7 @@ static int display(Hashmap *a) {
         Group *g;
         Group **array;
         signed path_columns;
-        unsigned rows, n = 0, j, maxtcpu = 0, maxtpath = 0;
+        unsigned rows, n = 0, j, maxtcpu = 0, maxtpath = 3; /* 3 for ellipsize() to work properly */
         char buffer[MAX3(21, FORMAT_BYTES_MAX, FORMAT_TIMESPAN_MAX)];
 
         assert(a);
@@ -548,8 +551,7 @@ static int display(Hashmap *a) {
         return 0;
 }
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Show top control groups by their resource usage.\n\n"
                "  -h --help           Show this help\n"
@@ -563,10 +565,8 @@ static int help(void) {
                "  -d --delay=DELAY    Delay between updates\n"
                "  -n --iterations=N   Run for N iterations before exiting\n"
                "  -b --batch          Run in batch mode, accepting no input\n"
-               "     --depth=DEPTH    Maximum traversal depth (default: %u)\n",
-               program_invocation_short_name, arg_depth);
-
-        return 0;
+               "     --depth=DEPTH    Maximum traversal depth (default: %u)\n"
+               , program_invocation_short_name, arg_depth);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -594,12 +594,13 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 1);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hptcmin:bd:", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hptcmin:bd:", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -674,7 +675,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         if (optind < argc) {
                 log_error("Too many arguments.");
@@ -698,8 +698,8 @@ int main(int argc, char *argv[]) {
         if (r <= 0)
                 goto finish;
 
-        a = hashmap_new(string_hash_func, string_compare_func);
-        b = hashmap_new(string_hash_func, string_compare_func);
+        a = hashmap_new(&string_hash_ops);
+        b = hashmap_new(&string_hash_ops);
         if (!a || !b) {
                 r = log_oom();
                 goto finish;
@@ -749,7 +749,7 @@ int main(int argc, char *argv[]) {
                         if (r == -ETIMEDOUT)
                                 continue;
                         if (r < 0) {
-                                log_error("Couldn't read key: %s", strerror(-r));
+                                log_error_errno(r, "Couldn't read key: %m");
                                 goto finish;
                         }
                 }
@@ -843,7 +843,7 @@ finish:
         group_hashmap_free(b);
 
         if (r < 0) {
-                log_error("Exiting with failure: %s", strerror(-r));
+                log_error_errno(r, "Exiting with failure: %m");
                 return EXIT_FAILURE;
         }
 

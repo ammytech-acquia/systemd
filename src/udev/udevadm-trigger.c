@@ -15,31 +15,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <errno.h>
-#include <dirent.h>
 #include <fcntl.h>
-#include <syslog.h>
-#include <fnmatch.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 
 #include "udev.h"
 #include "udev-util.h"
+#include "udevadm-util.h"
 #include "util.h"
 
 static int verbose;
 static int dry_run;
 
-static void exec_list(struct udev_enumerate *udev_enumerate, const char *action)
-{
+static void exec_list(struct udev_enumerate *udev_enumerate, const char *action) {
         struct udev_list_entry *entry;
 
         udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(udev_enumerate)) {
@@ -55,13 +47,12 @@ static void exec_list(struct udev_enumerate *udev_enumerate, const char *action)
                 if (fd < 0)
                         continue;
                 if (write(fd, action, strlen(action)) < 0)
-                        log_debug("error writing '%s' to '%s': %m", action, filename);
+                        log_debug_errno(errno, "error writing '%s' to '%s': %m", action, filename);
                 close(fd);
         }
 }
 
-static const char *keyval(const char *str, const char **val, char *buf, size_t size)
-{
+static const char *keyval(const char *str, const char **val, char *buf, size_t size) {
         char *pos;
 
         strscpy(buf, size,str);
@@ -75,40 +66,48 @@ static const char *keyval(const char *str, const char **val, char *buf, size_t s
 }
 
 static void help(void) {
-        printf("Usage: udevadm trigger OPTIONS\n"
-               "  -v,--verbose                       print the list of devices while running\n"
-               "  -n,--dry-run                       do not actually trigger the events\n"
-               "  -t,--type=                         type of events to trigger\n"
-               "          devices                       sys devices (default)\n"
-               "          subsystems                    sys subsystems and drivers\n"
-               "  -c,--action=<action>               event action value, default is \"change\"\n"
-               "  -s,--subsystem-match=<subsystem>   trigger devices from a matching subsystem\n"
-               "  -S,--subsystem-nomatch=<subsystem> exclude devices from a matching subsystem\n"
-               "  -a,--attr-match=<file[=<value>]>   trigger devices with a matching attribute\n"
-               "  -A,--attr-nomatch=<file[=<value>]> exclude devices with a matching attribute\n"
-               "  -p,--property-match=<key>=<value>  trigger devices with a matching property\n"
-               "  -g,--tag-match=<key>=<value>       trigger devices with a matching property\n"
-               "  -y,--sysname-match=<name>          trigger devices with a matching name\n"
-               "  -b,--parent-match=<name>           trigger devices with that parent device\n"
-               "  -h,--help\n\n");
+        printf("%s trigger OPTIONS\n\n"
+               "Request events from the kernel.\n\n"
+               "  -h --help                         Show this help\n"
+               "     --version                      Show package version\n"
+               "  -v --verbose                      Print the list of devices while running\n"
+               "  -n --dry-run                      Do not actually trigger the events\n"
+               "  -t --type=                        Type of events to trigger\n"
+               "          devices                     sysfs devices (default)\n"
+               "          subsystems                  sysfs subsystems and drivers\n"
+               "  -c --action=ACTION                Event action value, default is \"change\"\n"
+               "  -s --subsystem-match=SUBSYSTEM    Trigger devices from a matching subsystem\n"
+               "  -S --subsystem-nomatch=SUBSYSTEM  Exclude devices from a matching subsystem\n"
+               "  -a --attr-match=FILE[=VALUE]      Trigger devices with a matching attribute\n"
+               "  -A --attr-nomatch=FILE[=VALUE]    Exclude devices with a matching attribute\n"
+               "  -p --property-match=KEY=VALUE     Trigger devices with a matching property\n"
+               "  -g --tag-match=KEY=VALUE          Trigger devices with a matching property\n"
+               "  -y --sysname-match=NAME           Trigger devices with this /sys path\n"
+               "     --name-match=NAME              Trigger devices with this /dev name\n"
+               "  -b --parent-match=NAME            Trigger devices with that parent device\n"
+               , program_invocation_short_name);
 }
 
-static int adm_trigger(struct udev *udev, int argc, char *argv[])
-{
+static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
+        enum {
+                ARG_NAME = 0x100,
+        };
+
         static const struct option options[] = {
-                { "verbose",           no_argument,       NULL, 'v' },
-                { "dry-run",           no_argument,       NULL, 'n' },
-                { "type",              required_argument, NULL, 't' },
-                { "action",            required_argument, NULL, 'c' },
-                { "subsystem-match",   required_argument, NULL, 's' },
-                { "subsystem-nomatch", required_argument, NULL, 'S' },
-                { "attr-match",        required_argument, NULL, 'a' },
-                { "attr-nomatch",      required_argument, NULL, 'A' },
-                { "property-match",    required_argument, NULL, 'p' },
-                { "tag-match",         required_argument, NULL, 'g' },
-                { "sysname-match",     required_argument, NULL, 'y' },
-                { "parent-match",      required_argument, NULL, 'b' },
-                { "help",              no_argument,       NULL, 'h' },
+                { "verbose",           no_argument,       NULL, 'v'      },
+                { "dry-run",           no_argument,       NULL, 'n'      },
+                { "type",              required_argument, NULL, 't'      },
+                { "action",            required_argument, NULL, 'c'      },
+                { "subsystem-match",   required_argument, NULL, 's'      },
+                { "subsystem-nomatch", required_argument, NULL, 'S'      },
+                { "attr-match",        required_argument, NULL, 'a'      },
+                { "attr-nomatch",      required_argument, NULL, 'A'      },
+                { "property-match",    required_argument, NULL, 'p'      },
+                { "tag-match",         required_argument, NULL, 'g'      },
+                { "sysname-match",     required_argument, NULL, 'y'      },
+                { "name-match",        required_argument, NULL, ARG_NAME },
+                { "parent-match",      required_argument, NULL, 'b'      },
+                { "help",              no_argument,       NULL, 'h'      },
                 {}
         };
         enum {
@@ -178,25 +177,31 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[])
                         udev_enumerate_add_match_sysname(udev_enumerate, optarg);
                         break;
                 case 'b': {
-                        char path[UTIL_PATH_SIZE];
-                        struct udev_device *dev;
+                        _cleanup_udev_device_unref_ struct udev_device *dev;
 
-                        /* add sys dir if needed */
-                        if (!startswith(optarg, "/sys"))
-                                strscpyl(path, sizeof(path), "/sys", optarg, NULL);
-                        else
-                                strscpy(path, sizeof(path), optarg);
-                        util_remove_trailing_chars(path, '/');
-                        dev = udev_device_new_from_syspath(udev, path);
+                        dev = find_device(udev, optarg, "/sys");
                         if (dev == NULL) {
                                 log_error("unable to open the device '%s'", optarg);
                                 return 2;
                         }
+
                         udev_enumerate_add_match_parent(udev_enumerate, dev);
-                        /* drop reference immediately, enumerate pins the device as long as needed */
-                        udev_device_unref(dev);
                         break;
                 }
+
+                case ARG_NAME: {
+                        _cleanup_udev_device_unref_ struct udev_device *dev;
+
+                        dev = find_device(udev, optarg, "/dev/");
+                        if (dev == NULL) {
+                                log_error("unable to open the device '%s'", optarg);
+                                return 2;
+                        }
+
+                        udev_enumerate_add_match_parent(udev_enumerate, dev);
+                        break;
+                }
+
                 case 'h':
                         help();
                         return 0;
@@ -207,9 +212,16 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[])
                 }
         }
 
-        if (optind < argc) {
-                fprintf(stderr, "Extraneous argument: '%s'\n", argv[optind]);
-                return 1;
+        for (; optind < argc; optind++) {
+                _cleanup_udev_device_unref_ struct udev_device *dev;
+
+                dev = find_device(udev, argv[optind], NULL);
+                if (dev == NULL) {
+                        log_error("unable to open the device '%s'", argv[optind]);
+                        return 2;
+                }
+
+                udev_enumerate_add_match_parent(udev_enumerate, dev);
         }
 
         switch (device_type) {
@@ -229,5 +241,5 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[])
 const struct udevadm_cmd udevadm_trigger = {
         .name = "trigger",
         .cmd = adm_trigger,
-        .help = "request events from the kernel",
+        .help = "Request events from the kernel",
 };

@@ -20,20 +20,18 @@
 ***/
 
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <pwd.h>
-#include <unistd.h>
 #include <linux/vt.h>
 
 #include "strv.h"
 #include "cgroup-util.h"
-#include "audit.h"
 #include "bus-util.h"
 #include "bus-error.h"
 #include "udev-util.h"
 #include "logind.h"
+#include "terminal-util.h"
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **_device) {
         Device *d;
@@ -101,7 +99,7 @@ int manager_add_user(Manager *m, uid_t uid, gid_t gid, const char *name, User **
         assert(m);
         assert(name);
 
-        u = hashmap_get(m->users, ULONG_TO_PTR((unsigned long) uid));
+        u = hashmap_get(m->users, UID_TO_PTR(uid));
         if (!u) {
                 u = user_new(m, uid, gid, name);
                 if (!u)
@@ -536,4 +534,26 @@ int manager_count_displays(Manager *m) {
         }
 
         return n;
+}
+
+bool manager_is_docked_or_multiple_displays(Manager *m) {
+        int n;
+
+        /* If we are docked don't react to lid closing */
+        if (manager_is_docked(m)) {
+                log_debug("System is docked.");
+                return true;
+        }
+
+        /* If we have more than one display connected,
+         * assume that we are docked. */
+        n = manager_count_displays(m);
+        if (n < 0)
+                log_warning_errno(n, "Display counting failed: %m");
+        else if (n > 1) {
+                log_debug("Multiple (%i) displays connected.", n);
+                return true;
+        }
+
+        return false;
 }

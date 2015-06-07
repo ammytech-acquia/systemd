@@ -19,13 +19,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <sys/poll.h>
+#include <poll.h>
 #include <string.h>
 
-#include <systemd/sd-login.h>
+#include "systemd/sd-login.h"
 
 #include "util.h"
 #include "strv.h"
+#include "formats-util.h"
 
 static void test_login(void) {
         _cleanup_close_pair_ int pair[2] = { -1, -1 };

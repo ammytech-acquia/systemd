@@ -14,11 +14,11 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  1 file changed, 1 insertion(+), 9 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 536fd5e..d82d5d1 100644
+index b2005f5..98539e9 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -3218,15 +3218,7 @@ int unit_kill_context(
-                                 log_warning_unit(u->id, "Failed to kill control group: %s", strerror(-r));
+@@ -3546,15 +3546,7 @@ int unit_kill_context(
+                                 log_unit_warning_errno(u, r, "Failed to kill control group: %m");
                  } else if (r > 0) {
  
 -                        /* FIXME: For now, we will not wait for the
@@ -32,5 +32,5 @@ index 536fd5e..d82d5d1 100644
 -                        /* wait_for_exit = true; */
 +                        wait_for_exit = true;
  
-                         if (c->send_sighup && !sigkill) {
+                         if (c->send_sighup && k != KILL_KILL) {
                                  set_free(pid_set);

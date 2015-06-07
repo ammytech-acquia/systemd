@@ -46,16 +46,10 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdbool.h>
 #include <math.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <limits.h>
-#include <linux/limits.h>
 #include <linux/input.h>
 
 #include "libudev.h"
@@ -68,21 +62,6 @@
 #define BIT(x)  (1UL<<OFF(x))
 #define LONG(x) ((x)/BITS_PER_LONG)
 #define test_bit(bit, array)    ((array[LONG(bit)] >> OFF(bit)) & 1)
-
-static int debug = 0;
-
-_printf_(6,0)
-static void log_fn(struct udev *udev, int priority,
-                   const char *file, int line, const char *fn,
-                   const char *format, va_list args)
-{
-        if (debug) {
-                fprintf(stderr, "%s: ", fn);
-                vfprintf(stderr, format, args);
-        } else {
-                vsyslog(priority, format, args);
-        }
-}
 
 typedef enum {
         ORIENTATION_UNDEFINED,
@@ -180,7 +159,7 @@ get_prev_orientation(struct udev_device *dev)
         return string_to_orientation(value);
 }
 
-#define SET_AXIS(axis, code_) if (ev[i].code == code_) { if (got_##axis == 0) { axis = ev[i].value; got_##axis = true; } }
+#define READ_AXIS(axis, var) { memzero(&abs_info, sizeof(abs_info)); r = ioctl(fd, EVIOCGABS(axis), &abs_info); if (r < 0) return; var = abs_info.value; }
 
 /* accelerometers */
 static void test_orientation(struct udev *udev,
@@ -189,10 +168,9 @@ static void test_orientation(struct udev *udev,
 {
         OrientationUp old, new;
         _cleanup_close_ int fd = -1;
-        struct input_event ev[64];
-        bool got_syn = false;
-        bool got_x = false, got_y = false, got_z = false;
+        struct input_absinfo abs_info;
         int x = 0, y = 0, z = 0;
+        int r;
         char text[64];
 
         old = get_prev_orientation(dev);
@@ -201,41 +179,23 @@ static void test_orientation(struct udev *udev,
         if (fd < 0)
                 return;
 
-        while (1) {
-                int i, r;
+        READ_AXIS(ABS_X, x);
+        READ_AXIS(ABS_Y, y);
+        READ_AXIS(ABS_Z, z);
 
-                r = read(fd, ev, sizeof(struct input_event) * 64);
-
-                if (r < (int) sizeof(struct input_event))
-                        return;
-
-                for (i = 0; i < r / (int) sizeof(struct input_event); i++) {
-                        if (got_syn) {
-                                if (ev[i].type == EV_ABS) {
-                                        SET_AXIS(x, ABS_X);
-                                        SET_AXIS(y, ABS_Y);
-                                        SET_AXIS(z, ABS_Z);
-                                }
-                        }
-                        if (ev[i].type == EV_SYN && ev[i].code == SYN_REPORT)
-                                got_syn = true;
-                        if (got_x && got_y && got_z)
-                                goto read_dev;
-                }
-        }
-
-read_dev:
         new = orientation_calc(old, x, y, z);
         snprintf(text, sizeof(text),
                  "ID_INPUT_ACCELEROMETER_ORIENTATION=%s", orientation_to_string(new));
         puts(text);
 }
 
-static void help(void)
-{
-        printf("Usage: accelerometer [options] <device path>\n"
-               "  --debug         debug to stderr\n"
-               "  --help          print this help text\n\n");
+static void help(void) {
+
+        printf("%s [options] <device path>\n\n"
+               "Accelerometer device identification.\n\n"
+               "  -h --help  Print this message\n"
+               "  -d --debug Debug to stderr\n"
+               , program_invocation_short_name);
 }
 
 int main (int argc, char** argv)
@@ -254,26 +214,26 @@ int main (int argc, char** argv)
         struct udev_enumerate *enumerate;
         struct udev_list_entry *list_entry;
 
+        log_parse_environment();
+        log_open();
+
         udev = udev_new();
         if (udev == NULL)
                 return 1;
-
-        log_open();
-        udev_set_log_fn(udev, log_fn);
 
         /* CLI argument parsing */
         while (1) {
                 int option;
 
-                option = getopt_long(argc, argv, "dxh", options, NULL);
+                option = getopt_long(argc, argv, "dh", options, NULL);
                 if (option == -1)
                         break;
 
                 switch (option) {
                 case 'd':
-                        debug = 1;
+                        log_set_target(LOG_TARGET_CONSOLE);
                         log_set_max_level(LOG_DEBUG);
-                        udev_set_log_priority(udev, LOG_DEBUG);
+                        log_open();
                         break;
                 case 'h':
                         help();

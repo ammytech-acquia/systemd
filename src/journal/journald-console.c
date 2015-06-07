@@ -21,12 +21,14 @@
 
 #include <time.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/socket.h>
 
 #include "fileio.h"
 #include "journald-server.h"
 #include "journald-console.h"
+#include "formats-util.h"
+#include "process-util.h"
+#include "terminal-util.h"
 
 static bool prefix_timestamp(void) {
 
@@ -48,12 +50,12 @@ void server_forward_console(
                 int priority,
                 const char *identifier,
                 const char *message,
-                struct ucred *ucred) {
+                const struct ucred *ucred) {
 
         struct iovec iovec[5];
-        char header_pid[16];
         struct timespec ts;
-        char tbuf[4 + DECIMAL_STR_MAX(ts.tv_sec) + DECIMAL_STR_MAX(ts.tv_nsec)-3 + 1];
+        char tbuf[sizeof("[] ")-1 + DECIMAL_STR_MAX(ts.tv_sec) + DECIMAL_STR_MAX(ts.tv_nsec)-3 + 1];
+        char header_pid[sizeof("[]: ")-1 + DECIMAL_STR_MAX(pid_t)];
         int n = 0, fd;
         _cleanup_free_ char *ident_buf = NULL;
         const char *tty;
@@ -67,7 +69,7 @@ void server_forward_console(
         /* First: timestamp */
         if (prefix_timestamp()) {
                 assert_se(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
-                snprintf(tbuf, sizeof(tbuf), "[%5"PRI_TIME".%06ld] ",
+                xsprintf(tbuf, "[%5"PRI_TIME".%06ld] ",
                          ts.tv_sec,
                          ts.tv_nsec / 1000);
                 IOVEC_SET_STRING(iovec[n++], tbuf);
@@ -80,8 +82,7 @@ void server_forward_console(
                         identifier = ident_buf;
                 }
 
-                snprintf(header_pid, sizeof(header_pid), "["PID_FMT"]: ", ucred->pid);
-                char_array_0(header_pid);
+                xsprintf(header_pid, "["PID_FMT"]: ", ucred->pid);
 
                 if (identifier)
                         IOVEC_SET_STRING(iovec[n++], identifier);
@@ -100,12 +101,12 @@ void server_forward_console(
 
         fd = open_terminal(tty, O_WRONLY|O_NOCTTY|O_CLOEXEC);
         if (fd < 0) {
-                log_debug("Failed to open %s for logging: %m", tty);
+                log_debug_errno(errno, "Failed to open %s for logging: %m", tty);
                 return;
         }
 
         if (writev(fd, iovec, n) < 0)
-                log_debug("Failed to write to %s for logging: %m", tty);
+                log_debug_errno(errno, "Failed to write to %s for logging: %m", tty);
 
         safe_close(fd);
 }

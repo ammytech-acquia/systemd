@@ -32,7 +32,6 @@
 # systemd sets the hwclock internally
 # http://cgit.freedesktop.org/systemd/systemd/commit/?id=7948c4dfbea73ac21250b588089039aa17a90386
 /dev/null /lib/systemd/system/hwclock.service
-/dev/null /lib/systemd/system/hwclockfirst.service
 
 # We use native mount support so mask those services
 # TODO: check if any SysV init scripts depend on those facilities
@@ -78,6 +77,7 @@
 # Enable Debian specific units
 /lib/systemd/system/debian-fixup.service /lib/systemd/system/sysinit.target.wants/debian-fixup.service
 /lib/systemd/system/getty-static.service /lib/systemd/system/getty.target.wants/getty-static.service
+/lib/systemd/system/sigpwr-container-shutdown.service /lib/systemd/system/sigpwr.target.wants/sigpwr-container-shutdown.service
 
 # Compat symlink
 /lib/systemd/systemd /bin/systemd
