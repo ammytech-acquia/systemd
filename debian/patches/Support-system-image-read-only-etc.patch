@@ -15,7 +15,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 50 insertions(+), 12 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 7cd4a1d..7546f30 100644
+index 7ff3a4e..7dda624 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -76,6 +76,25 @@ static void context_free(Context *c) {
@@ -76,10 +76,10 @@ index 7cd4a1d..7546f30 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 972396f..fa23fa1 100644
+index 01f8845..187bbbe 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -157,13 +157,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
+@@ -155,13 +155,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
          return r;
  }
  
@@ -113,7 +113,7 @@ index 972396f..fa23fa1 100644
          if (r < 0) {
                  if (r == -EINVAL)
                          log_debug("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
-@@ -187,7 +206,7 @@ static int context_read_data(Context *c) {
+@@ -183,7 +202,7 @@ static int context_read_data(Context *c) {
                  }
          }
  
@@ -122,7 +122,7 @@ index 972396f..fa23fa1 100644
          if (r < 0) {
                  if (r != -ENOENT)
                          log_warning("Failed to read /etc/timezone: %s", strerror(-r));
-@@ -212,10 +231,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -207,10 +226,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -135,7 +135,7 @@ index 972396f..fa23fa1 100644
                          r = -errno;
  
                  return r;
-@@ -225,12 +244,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -220,12 +239,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -151,7 +151,7 @@ index 972396f..fa23fa1 100644
                  if (r < 0)
                          return r;
          }
-@@ -282,7 +301,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -277,7 +296,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

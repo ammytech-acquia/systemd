@@ -23,16 +23,16 @@ https://www.kernel.org/doc/Documentation/cgroups/cgroups.txt for details.
 https://launchpad.net/bugs/1346734
 ---
  src/core/cgroup.c        |  4 ++++
- src/core/scope.c         | 21 ++++++++++++++++++
+ src/core/scope.c         | 15 +++++++++++++
  src/shared/cgroup-util.c | 56 +++++++++++++++++++++++++++++++++++++++++++++++-
  src/shared/cgroup-util.h | 20 +++++++++++------
- 4 files changed, 94 insertions(+), 7 deletions(-)
+ 4 files changed, 88 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 069d857..488aafa 100644
+index c7533fe..fffd49b 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -956,6 +956,10 @@ int manager_setup_cgroup(Manager *m) {
+@@ -957,6 +957,10 @@ int manager_setup_cgroup(Manager *m) {
  
                  /* 6.  Always enable hierarchical support if it exists... */
                  cg_set_attribute("memory", "/", "memory.use_hierarchy", "1");
@@ -44,42 +44,36 @@ index 069d857..488aafa 100644
  
          /* 7. Figure out which controllers are supported */
 diff --git a/src/core/scope.c b/src/core/scope.c
-index ae6614f..9e3137c 100644
+index ab1769b..e239207 100644
 --- a/src/core/scope.c
 +++ b/src/core/scope.c
-@@ -288,6 +288,27 @@ static int scope_start(Unit *u) {
-         if (!u->transient && UNIT(s)->manager->n_reloading <= 0)
-                 return -ENOENT;
+@@ -295,6 +295,21 @@ static int scope_start(Unit *u) {
+         (void) unit_realize_cgroup(u);
+         (void) unit_reset_cpu_usage(u);
  
 +        /* put logind sessions into all controllers, for LXC user containers */
 +        if (UNIT_ISSET(u->slice) && startswith(UNIT_DEREF(u->slice)->id, "user-")) {
 +                long uid = atol(UNIT_DEREF(u->slice)->id + 5); /* FIXME: Eww! Is there a better way to get the UID? */
 +                if (uid > 0) {
-+                        r = unit_realize_cgroup(u);
-+                        if (r < 0) {
-+                                log_unit_warning(u->id, "Cannot realize cgroup for %s: %s", u->id, strerror(-r));
-+                                return r;
-+                        }
 +                        assert(u->cgroup_path);
-+
 +                        r = cg_create_everywhere_uid(u->manager->cgroup_supported,
 +                                                     u->manager->cgroup_supported,
 +                                                     u->cgroup_path, (uid_t) uid);
 +                        if (r < 0)
-+                                log_unit_warning(u->id, "Cannot create cgroup controllers for %s: %s", u->id, strerror(-r));
++                                log_unit_warning(u, "Cannot create cgroup controllers for %s: %s", UNIT_DEREF(u->slice)->id, strerror(-r));
 +                } else {
-+                        log_unit_warning(u->id, "Cannot determine UID from slice %s", UNIT_DEREF(u->slice)->id);
++                        log_unit_warning(u, "Cannot determine UID from slice %s", UNIT_DEREF(u->slice)->id);
 +                }
 +        }
 +
          r = unit_attach_pids_to_cgroup(u);
-         if (r < 0)
-                 return r;
+         if (r < 0) {
+                 log_unit_warning_errno(UNIT(s), r, "Failed to add PIDs to scope's control group: %m");
 diff --git a/src/shared/cgroup-util.c b/src/shared/cgroup-util.c
-index eae4d59..db9b697 100644
+index 0ba9dd5..f974b46 100644
 --- a/src/shared/cgroup-util.c
 +++ b/src/shared/cgroup-util.c
-@@ -611,6 +611,27 @@ int cg_create(const char *controller, const char *path) {
+@@ -614,6 +614,27 @@ int cg_create(const char *controller, const char *path) {
          return 1;
  }
  
@@ -107,7 +101,7 @@ index eae4d59..db9b697 100644
  int cg_create_and_attach(const char *controller, const char *path, pid_t pid) {
          int r, q;
  
-@@ -1606,7 +1627,13 @@ static const char mask_names[] =
+@@ -1731,7 +1752,13 @@ static const char mask_names[] =
          "cpuacct\0"
          "blkio\0"
          "memory\0"
@@ -122,7 +116,7 @@ index eae4d59..db9b697 100644
  
  int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask mask, const char *path) {
          CGroupControllerMask bit = 1;
-@@ -1633,6 +1660,33 @@ int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask ma
+@@ -1758,6 +1785,33 @@ int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask ma
          return 0;
  }
  
@@ -157,7 +151,7 @@ index eae4d59..db9b697 100644
          CGroupControllerMask bit = 1;
          const char *n;
 diff --git a/src/shared/cgroup-util.h b/src/shared/cgroup-util.h
-index 96a3d3b..b6aa199 100644
+index cbf7201..2a705f9 100644
 --- a/src/shared/cgroup-util.h
 +++ b/src/shared/cgroup-util.h
 @@ -30,12 +30,18 @@
@@ -193,7 +187,7 @@ index 96a3d3b..b6aa199 100644
  int cg_attach(const char *controller, const char *path, pid_t pid);
  int cg_attach_fallback(const char *controller, const char *path, pid_t pid);
  int cg_create_and_attach(const char *controller, const char *path, pid_t pid);
-@@ -127,6 +134,7 @@ int cg_slice_to_path(const char *unit, char **ret);
+@@ -129,6 +136,7 @@ int cg_slice_to_path(const char *unit, char **ret);
  typedef const char* (*cg_migrate_callback_t)(CGroupControllerMask mask, void *userdata);
  
  int cg_create_everywhere(CGroupControllerMask supported, CGroupControllerMask mask, const char *path);
