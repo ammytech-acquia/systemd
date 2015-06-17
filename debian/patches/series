@@ -19,6 +19,7 @@ path-util-Fix-path_is_mount_point-for-files.patch
 udev-input_id-refactor-device-detection.patch
 udev-input_id-use-direct-property-and-mt-axis-for-to.patch
 udev-input_id-use-ABS_MT_SLOT-1-to-exclude-non-touch.patch
+rules-restore-block-watch-after-CHANGE-events.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
@@ -33,7 +34,6 @@ Fix-up-tmpfiles.d-permissions-properly.patch
 Revert-udev-network-device-renaming-immediately-give.patch
 Use-different-default-paths-for-various-binaries.patch
 Order-remote-fs.target-after-local-fs.target.patch
-Skip-99-systemd.rules-when-not-running-systemd-as-in.patch
 insserv.conf-generator.patch
 Add-targets-for-compatibility-with-Debian-insserv-sy.patch
 Adjust-systemd-user-pam-config-file-for-Debian.patch
