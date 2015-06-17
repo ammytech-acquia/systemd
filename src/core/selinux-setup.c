@@ -22,8 +22,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
-#include <string.h>
-#include <stdlib.h>
 
 #ifdef HAVE_SELINUX
 #include <selinux/selinux.h>
@@ -31,8 +29,6 @@
 
 #include "selinux-setup.h"
 #include "selinux-util.h"
-#include "label.h"
-#include "mount-setup.h"
 #include "macro.h"
 #include "util.h"
 #include "log.h"
@@ -43,7 +39,7 @@ static int null_log(int type, const char *fmt, ...) {
 }
 #endif
 
-int selinux_setup(bool *loaded_policy) {
+int mac_selinux_setup(bool *loaded_policy) {
 
 #ifdef HAVE_SELINUX
         int enforce = 0;
@@ -84,10 +80,10 @@ int selinux_setup(bool *loaded_policy) {
                 char timespan[FORMAT_TIMESPAN_MAX];
                 char *label;
 
-                retest_selinux();
+                mac_selinux_retest();
 
                 /* Transition to the new context */
-                r = label_get_create_label_from_exe(SYSTEMD_BINARY_PATH, &label);
+                r = mac_selinux_get_create_label_from_exe(SYSTEMD_BINARY_PATH, &label);
                 if (r < 0 || label == NULL) {
                         log_open();
                         log_error("Failed to compute init label, ignoring.");
@@ -98,7 +94,7 @@ int selinux_setup(bool *loaded_policy) {
                         if (r < 0)
                                 log_error("Failed to transition into init label '%s', ignoring.", label);
 
-                        label_free(label);
+                        mac_selinux_free(label);
                 }
 
                 after_load = now(CLOCK_MONOTONIC);
@@ -113,7 +109,7 @@ int selinux_setup(bool *loaded_policy) {
 
                 if (enforce > 0) {
                         if (!initialized) {
-                                log_error("Failed to load SELinux policy. Freezing.");
+                                log_emergency("Failed to load SELinux policy.");
                                 return -EIO;
                         }
 

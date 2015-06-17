@@ -41,15 +41,17 @@ typedef enum ProtectSystem {
         _PROTECT_SYSTEM_INVALID = -1
 } ProtectSystem;
 
-int setup_namespace(char **read_write_dirs,
+int setup_namespace(const char *chroot,
+                    char **read_write_dirs,
                     char **read_only_dirs,
                     char **inaccessible_dirs,
-                    char *tmp_dir,
-                    char *var_tmp_dir,
+                    const char *tmp_dir,
+                    const char *var_tmp_dir,
+                    const char *endpoint_path,
                     bool private_dev,
                     ProtectHome protect_home,
                     ProtectSystem protect_system,
-                    unsigned mount_flags);
+                    unsigned long mount_flags);
 
 int setup_tmp_dirs(const char *id,
                   char **tmp_dir,

@@ -2,23 +2,57 @@ From: Jon Severinsson <jon@severinsson.net>
 Date: Sun, 20 Jul 2014 20:00:00 +0200
 Subject: Add support for rcS.d init scripts to the sysv-generator
 
+As we unconditionally add After=local-fs.target now, this requires some
+adjustments to the test suite.
 ---
- src/sysv-generator/sysv-generator.c | 24 ++++++++++++++++++++++--
- 1 file changed, 22 insertions(+), 2 deletions(-)
+ man/systemd.special.xml                   |  5 +++++
+ src/insserv-generator/insserv-generator.c |  2 +-
+ src/sysv-generator/sysv-generator.c       | 31 +++++++++++++++++++++++++++----
+ test/sysv-generator-test.py               | 10 +++++-----
+ 4 files changed, 38 insertions(+), 10 deletions(-)
 
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 8db3050..6198680 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
+@@ -304,6 +304,11 @@
+           target unit for those mounts listed in
+           <filename>/etc/fstab</filename> that have the
+           <option>auto</option> mount option set.</para>
++
++          <para>systemd automatically adds dependencies of type
++          <varname>After=</varname> for this target unit to all SysV
++          init script service units with an LSB header referring to the
++          <literal>$local_fs</literal> facility.</para>
+         </listitem>
+       </varlistentry>
+       <varlistentry>
+diff --git a/src/insserv-generator/insserv-generator.c b/src/insserv-generator/insserv-generator.c
+index 109f731..969bb6a 100644
+--- a/src/insserv-generator/insserv-generator.c
++++ b/src/insserv-generator/insserv-generator.c
+@@ -62,7 +62,7 @@ static int sysv_translate_facility(const char *name, const char *filename, char
+ 
+         static const char * const table[] = {
+                 /* LSB defined facilities */
+-                "local_fs",             NULL,
++                "local_fs",             SPECIAL_LOCAL_FS_TARGET,
+                 "network",              SPECIAL_NETWORK_TARGET,
+                 "named",                SPECIAL_NSS_LOOKUP_TARGET,
+                 "portmap",              SPECIAL_RPCBIND_TARGET,
 diff --git a/src/sysv-generator/sysv-generator.c b/src/sysv-generator/sysv-generator.c
-index 5206279..78f8730 100644
+index 8022ebd..b2f8b46 100644
 --- a/src/sysv-generator/sysv-generator.c
 +++ b/src/sysv-generator/sysv-generator.c
-@@ -42,6 +42,7 @@
- #include "hashmap.h"
+@@ -38,6 +38,7 @@
+ #include "install.h"
  
  typedef enum RunlevelType {
 +        RUNLEVEL_SYSINIT,
          RUNLEVEL_UP,
          RUNLEVEL_DOWN
  } RunlevelType;
-@@ -51,6 +52,9 @@ static const struct {
+@@ -47,6 +48,9 @@ static const struct {
          const char *target;
          const RunlevelType type;
  } rcnd_table[] = {
@@ -26,16 +60,9 @@ index 5206279..78f8730 100644
 +        { "rcS.d",  SPECIAL_SYSINIT_TARGET,   RUNLEVEL_SYSINIT },
 +
          /* Standard SysV runlevels for start-up */
-         { "rc1.d",  SPECIAL_RESCUE_TARGET,    RUNLEVEL_UP },
-         { "rc2.d",  SPECIAL_RUNLEVEL2_TARGET, RUNLEVEL_UP },
-@@ -69,10 +73,14 @@ static const struct {
-            UP must be read before DOWN */
- };
- 
-+/* Sysinit services uses DefaultDependencies=no, so explicitly order after a safe subset. */
-+#define SYSINIT_AFTER "local-fs.target"
-+
- typedef struct SysvStub {
+         { "rc1.d",  SPECIAL_RESCUE_TARGET,     RUNLEVEL_UP },
+         { "rc2.d",  SPECIAL_MULTI_USER_TARGET, RUNLEVEL_UP },
+@@ -71,6 +75,7 @@ typedef struct SysvStub {
          char *name;
          char *path;
          char *description;
@@ -43,16 +70,16 @@ index 5206279..78f8730 100644
          int sysv_start_priority;
          char *pid_file;
          char **before;
-@@ -156,6 +164,8 @@ static int generate_unit_file(SysvStub *s) {
+@@ -190,6 +195,8 @@ static int generate_unit_file(SysvStub *s) {
                  "Description=%s\n",
                  s->path, s->description);
  
 +        if (s->sysinit)
-+                fprintf(f, "DefaultDependencies=no\nAfter=" SYSINIT_AFTER "\n");
++                fprintf(f, "DefaultDependencies=no\n");
          if (!isempty(before))
                  fprintf(f, "Before=%s\n", before);
          if (!isempty(after))
-@@ -169,11 +179,12 @@ static int generate_unit_file(SysvStub *s) {
+@@ -203,11 +210,12 @@ static int generate_unit_file(SysvStub *s) {
                  "\n[Service]\n"
                  "Type=forking\n"
                  "Restart=no\n"
@@ -65,8 +92,33 @@ index 5206279..78f8730 100644
 +                s->sysinit ? "0" : "5min",
                  yes_no(!s->pid_file));
  
-         if (s->sysv_start_priority > 0)
-@@ -656,6 +667,11 @@ static int fix_order(SysvStub *s, Hashmap *all_services) {
+         if (s->pid_file)
+@@ -266,16 +274,22 @@ static int sysv_translate_facility(const char *name, const char *filename, char
+ 
+         static const char * const table[] = {
+                 /* LSB defined facilities */
+-                "local_fs",             NULL,
++                "local_fs",             SPECIAL_LOCAL_FS_TARGET,
+                 "network",              SPECIAL_NETWORK_ONLINE_TARGET,
+                 "named",                SPECIAL_NSS_LOOKUP_TARGET,
+                 "portmap",              SPECIAL_RPCBIND_TARGET,
+                 "remote_fs",            SPECIAL_REMOTE_FS_TARGET,
+-                "syslog",               NULL,
++                "syslog",               "systemd-journald-dev-log.socket",
+                 "time",                 SPECIAL_TIME_SYNC_TARGET,
+                 /* Debian defined facilities */
+                 "x-display-manager",    "display-manager.service",
+                 "mail-transport-agent", "mail-transport-agent.target",
++                /* special rcS init scripts */
++                "cryptdisks",           "cryptsetup.target",
++                "mountall",             SPECIAL_LOCAL_FS_TARGET,
++                "mountnfs",             SPECIAL_REMOTE_FS_TARGET,
++                "checkroot",            "systemd-remount-fs.service",
++                "dbus",                 "dbus.socket",
+         };
+ 
+         char *filename_no_sh, *e, *r;
+@@ -694,6 +708,11 @@ static int fix_order(SysvStub *s, Hashmap *all_services) {
                  if (s->has_lsb && other->has_lsb)
                          continue;
  
@@ -78,7 +130,7 @@ index 5206279..78f8730 100644
                  if (other->sysv_start_priority < s->sysv_start_priority) {
                          r = strv_extend(&s->after, other->name);
                          if (r < 0)
-@@ -804,8 +820,12 @@ static int set_dependencies_from_rcnd(LookupPaths lp, Hashmap *all_services) {
+@@ -855,8 +874,12 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
                                  }
  
                                  if (de->d_name[0] == 'S')  {
@@ -92,3 +144,38 @@ index 5206279..78f8730 100644
                                                  service->sysv_start_priority =
                                                          MAX(a*10 + b, service->sysv_start_priority);
                                          }
+diff --git a/test/sysv-generator-test.py b/test/sysv-generator-test.py
+index e74f853..0e0df7b 100644
+--- a/test/sysv-generator-test.py
++++ b/test/sysv-generator-test.py
+@@ -169,7 +169,7 @@ class SysvGeneratorTest(unittest.TestCase):
+         # $local_fs does not need translation, don't expect any dependency
+         # fields here
+         self.assertEqual(set(s.options('Unit')),
+-                         set(['Documentation', 'SourcePath', 'Description']))
++                         set(['Documentation', 'SourcePath', 'Description', 'After']))
+ 
+         self.assertEqual(s.get('Service', 'Type'), 'forking')
+         init_script = os.path.join(self.init_d_dir, 'foo')
+@@ -236,9 +236,9 @@ class SysvGeneratorTest(unittest.TestCase):
+                          ['may1.service', 'must1.service', 'must2.service', 'ne_may2.service'])
+ 
+         # other services should not depend on each other
+-        self.assertFalse(results['must1.service'].has_option('Unit', 'After'))
+-        self.assertFalse(results['must2.service'].has_option('Unit', 'After'))
+-        self.assertFalse(results['may1.service'].has_option('Unit', 'After'))
++        self.assertEqual(results['must1.service'].get('Unit', 'After'), 'local-fs.target')
++        self.assertEqual(results['must2.service'].get('Unit', 'After'), 'local-fs.target')
++        self.assertEqual(results['may1.service'].get('Unit', 'After'), 'local-fs.target')
+ 
+     def test_symlink_prio_deps(self):
+         '''script without LSB headers use rcN.d priority'''
+@@ -268,7 +268,7 @@ class SysvGeneratorTest(unittest.TestCase):
+         err, results = self.run_generator()
+         self.assertEqual(list(results), ['foo.service'])
+         self.assertEqual(set(results['foo.service'].options('Unit')),
+-                         set(['Documentation', 'SourcePath', 'Description']))
++                         set(['Documentation', 'SourcePath', 'Description', 'After']))
+         # should create symlinks for the alternative names
+         for f in ['bar.service', 'baz.service']:
+             self.assertEqual(os.readlink(os.path.join(self.out_dir, f)),

@@ -48,19 +48,10 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
                 {}
         };
 
-        int r;
-        _cleanup_fclose_ FILE *f;
-
-        f = fopen(PKGSYSCONFDIR "/sleep.conf", "re");
-        if (!f)
-                log_full(errno == ENOENT ? LOG_DEBUG: LOG_WARNING,
-                         "Failed to open configuration file " PKGSYSCONFDIR "/sleep.conf: %m");
-        else {
-                r = config_parse(NULL, PKGSYSCONFDIR "/sleep.conf", f, "Sleep\0",
-                                 config_item_table_lookup, (void*) items, false, false, NULL);
-                if (r < 0)
-                        log_warning("Failed to parse configuration file: %s", strerror(-r));
-        }
+        config_parse_many(PKGSYSCONFDIR "/sleep.conf",
+                          CONF_DIRS_NULSTR("systemd/sleep.conf"),
+                          "Sleep\0", config_item_table_lookup, items,
+                          false, NULL);
 
         if (streq(verb, "suspend")) {
                 /* empty by default */
@@ -108,7 +99,7 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
 }
 
 int can_sleep_state(char **types) {
-        char *w, *state, **type;
+        char **type;
         int r;
         _cleanup_free_ char *p = NULL;
 
@@ -124,11 +115,12 @@ int can_sleep_state(char **types) {
                 return false;
 
         STRV_FOREACH(type, types) {
+                const char *word, *state;
                 size_t l, k;
 
                 k = strlen(*type);
-                FOREACH_WORD_SEPARATOR(w, l, p, WHITESPACE, state)
-                        if (l == k && memcmp(w, *type, l) == 0)
+                FOREACH_WORD_SEPARATOR(word, l, p, WHITESPACE, state)
+                        if (l == k && memcmp(word, *type, l) == 0)
                                 return true;
         }
 
@@ -136,7 +128,7 @@ int can_sleep_state(char **types) {
 }
 
 int can_sleep_disk(char **types) {
-        char *w, *state, **type;
+        char **type;
         int r;
         _cleanup_free_ char *p = NULL;
 
@@ -152,14 +144,18 @@ int can_sleep_disk(char **types) {
                 return false;
 
         STRV_FOREACH(type, types) {
+                const char *word, *state;
                 size_t l, k;
 
                 k = strlen(*type);
-                FOREACH_WORD_SEPARATOR(w, l, p, WHITESPACE, state) {
-                        if (l == k && memcmp(w, *type, l) == 0)
+                FOREACH_WORD_SEPARATOR(word, l, p, WHITESPACE, state) {
+                        if (l == k && memcmp(word, *type, l) == 0)
                                 return true;
 
-                        if (l == k + 2 && w[0] == '[' && memcmp(w + 1, *type, l - 2) == 0 && w[l-1] == ']')
+                        if (l == k + 2 &&
+                            word[0] == '[' &&
+                            memcmp(word + 1, *type, l - 2) == 0 &&
+                            word[l-1] == ']')
                                 return true;
                 }
         }
@@ -171,7 +167,7 @@ int can_sleep_disk(char **types) {
 
 static int hibernation_partition_size(size_t *size, size_t *used) {
         _cleanup_fclose_ FILE *f;
-        int i;
+        unsigned i;
 
         assert(size);
         assert(used);
@@ -194,8 +190,8 @@ static int hibernation_partition_size(size_t *size, size_t *used) {
                 k = fscanf(f,
                            "%ms "   /* device/file */
                            "%ms "   /* type of swap */
-                           "%zd "   /* swap size */
-                           "%zd "   /* used */
+                           "%zu "   /* swap size */
+                           "%zu "   /* used */
                            "%*i\n", /* priority */
                            &dev, &type, &size_field, &used_field);
                 if (k != 4) {
@@ -232,14 +228,14 @@ static bool enough_memory_for_hibernation(void) {
 
         r = get_status_field("/proc/meminfo", "\nActive(anon):", &active);
         if (r < 0) {
-                log_error("Failed to retrieve Active(anon) from /proc/meminfo: %s", strerror(-r));
+                log_error_errno(r, "Failed to retrieve Active(anon) from /proc/meminfo: %m");
                 return false;
         }
 
         r = safe_atollu(active, &act);
         if (r < 0) {
-                log_error("Failed to parse Active(anon) from /proc/meminfo: %s: %s",
-                          active, strerror(-r));
+                log_error_errno(r, "Failed to parse Active(anon) from /proc/meminfo: %s: %m",
+                                active);
                 return false;
         }
 

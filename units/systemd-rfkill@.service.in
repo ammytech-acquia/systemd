@@ -9,9 +9,10 @@
 Description=Load/Save RF Kill Switch Status of %I
 Documentation=man:systemd-rfkill@.service(8)
 DefaultDependencies=no
+BindsTo=sys-subsystem-rfkill-devices-%i.device
 RequiresMountsFor=/var/lib/systemd/rfkill
 Conflicts=shutdown.target
-After=systemd-readahead-collect.service systemd-readahead-replay.service systemd-remount-fs.service
+After=systemd-remount-fs.service
 Before=sysinit.target shutdown.target
 
 [Service]
@@ -19,3 +20,4 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=@rootlibexecdir@/systemd-rfkill load %I
 ExecStop=@rootlibexecdir@/systemd-rfkill save %I
+TimeoutSec=30s

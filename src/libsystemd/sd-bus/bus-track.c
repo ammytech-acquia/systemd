@@ -20,7 +20,6 @@
 ***/
 
 #include "sd-bus.h"
-#include "set.h"
 #include "bus-util.h"
 #include "bus-internal.h"
 #include "bus-track.h"
@@ -91,6 +90,9 @@ _public_ int sd_bus_track_new(
         assert_return(bus, -EINVAL);
         assert_return(track, -EINVAL);
 
+        if (!bus->bus_client)
+                return -EINVAL;
+
         t = new0(sd_bus_track, 1);
         if (!t)
                 return -ENOMEM;
@@ -140,12 +142,11 @@ _public_ sd_bus_track* sd_bus_track_unref(sd_bus_track *track) {
         return NULL;
 }
 
-static int on_name_owner_changed(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int on_name_owner_changed(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         sd_bus_track *track = userdata;
         const char *name, *old, *new;
         int r;
 
-        assert(bus);
         assert(message);
         assert(track);
 
@@ -166,7 +167,7 @@ _public_ int sd_bus_track_add_name(sd_bus_track *track, const char *name) {
         assert_return(track, -EINVAL);
         assert_return(service_name_is_valid(name), -EINVAL);
 
-        r = hashmap_ensure_allocated(&track->names, string_hash_func, string_compare_func);
+        r = hashmap_ensure_allocated(&track->names, &string_hash_ops);
         if (r < 0)
                 return r;
 
@@ -188,7 +189,7 @@ _public_ int sd_bus_track_add_name(sd_bus_track *track, const char *name) {
 
         /* Second, check if it is currently existing, or maybe
          * doesn't, or maybe disappeared already. */
-        r = sd_bus_get_owner(track->bus, n, 0, NULL);
+        r = sd_bus_get_name_creds(track->bus, n, 0, NULL);
         if (r < 0) {
                 hashmap_remove(track->names, n);
                 return r;
@@ -245,7 +246,7 @@ _public_ const char* sd_bus_track_first(sd_bus_track *track) {
                 return NULL;
 
         track->modified = false;
-        track->iterator = NULL;
+        track->iterator = ITERATOR_FIRST;
 
         hashmap_iterate(track->names, &track->iterator, (const void**) &n);
         return n;
@@ -309,7 +310,7 @@ void bus_track_dispatch(sd_bus_track *track) {
 
         r = track->handler(track, track->userdata);
         if (r < 0)
-                log_debug("Failed to process track handler: %s", strerror(-r));
+                log_debug_errno(r, "Failed to process track handler: %m");
         else if (r == 0)
                 bus_track_add_to_queue(track);
 

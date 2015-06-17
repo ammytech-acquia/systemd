@@ -21,12 +21,11 @@
 
 #include <errno.h>
 #include <string.h>
-#include <sys/capability.h>
 
 #include "util.h"
 #include "strv.h"
 #include "bus-util.h"
-#include "bus-errors.h"
+#include "bus-common-errors.h"
 #include "bus-label.h"
 
 #include "logind.h"
@@ -181,13 +180,25 @@ static int property_get_idle_since_hint(
         return sd_bus_message_append(reply, "t", u);
 }
 
-static int method_terminate(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+int bus_session_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_KILL,
+                        "org.freedesktop.login1.manage",
+                        false,
+                        s->user->uid,
+                        &s->manager->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
 
         r = session_stop(s, true);
         if (r < 0)
@@ -196,11 +207,10 @@ static int method_terminate(sd_bus *bus, sd_bus_message *message, void *userdata
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_activate(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+int bus_session_method_activate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -211,28 +221,39 @@ static int method_activate(sd_bus *bus, sd_bus_message *message, void *userdata,
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_lock(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+int bus_session_method_lock(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
-        r = session_send_lock(s, streq(sd_bus_message_get_member(message), "Lock"));
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_SYS_ADMIN,
+                        "org.freedesktop.login1.lock-sessions",
+                        false,
+                        s->user->uid,
+                        &s->manager->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        r = session_send_lock(s, strstr(sd_bus_message_get_member(message), "Lock"));
         if (r < 0)
                 return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_set_idle_hint(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_set_idle_hint(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
         Session *s = userdata;
         uid_t uid;
         int r, b;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -240,30 +261,29 @@ static int method_set_idle_hint(sd_bus *bus, sd_bus_message *message, void *user
         if (r < 0)
                 return r;
 
-        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_UID, &creds);
+        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_EUID, &creds);
         if (r < 0)
                 return r;
 
-        r = sd_bus_creds_get_uid(creds, &uid);
+        r = sd_bus_creds_get_euid(creds, &uid);
         if (r < 0)
                 return r;
 
         if (uid != 0 && uid != s->user->uid)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Only owner of session my set idle hint");
+                return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Only owner of session may set idle hint");
 
         session_set_idle_hint(s, b);
 
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_kill(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+int bus_session_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         const char *swho;
         int32_t signo;
         KillWho who;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -282,6 +302,19 @@ static int method_kill(sd_bus *bus, sd_bus_message *message, void *userdata, sd_
         if (signo <= 0 || signo >= _NSIG)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid signal %i", signo);
 
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_KILL,
+                        "org.freedesktop.login1.manage",
+                        false,
+                        s->user->uid,
+                        &s->manager->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
         r = session_kill(s, who, signo);
         if (r < 0)
                 return r;
@@ -289,13 +322,12 @@ static int method_kill(sd_bus *bus, sd_bus_message *message, void *userdata, sd_
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_take_control(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_take_control(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
         Session *s = userdata;
         int r, force;
         uid_t uid;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -303,11 +335,11 @@ static int method_take_control(sd_bus *bus, sd_bus_message *message, void *userd
         if (r < 0)
                 return r;
 
-        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_UID, &creds);
+        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_EUID, &creds);
         if (r < 0)
                 return r;
 
-        r = sd_bus_creds_get_uid(creds, &uid);
+        r = sd_bus_creds_get_euid(creds, &uid);
         if (r < 0)
                 return r;
 
@@ -321,10 +353,9 @@ static int method_take_control(sd_bus *bus, sd_bus_message *message, void *userd
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_release_control(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_release_control(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -336,14 +367,13 @@ static int method_release_control(sd_bus *bus, sd_bus_message *message, void *us
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_take_device(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_take_device(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         uint32_t major, minor;
         SessionDevice *sd;
         dev_t dev;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -375,14 +405,13 @@ static int method_take_device(sd_bus *bus, sd_bus_message *message, void *userda
         return r;
 }
 
-static int method_release_device(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_release_device(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         uint32_t major, minor;
         SessionDevice *sd;
         dev_t dev;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -402,14 +431,13 @@ static int method_release_device(sd_bus *bus, sd_bus_message *message, void *use
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_pause_device_complete(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_pause_device_complete(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Session *s = userdata;
         uint32_t major, minor;
         SessionDevice *sd;
         dev_t dev;
         int r;
 
-        assert(bus);
         assert(message);
         assert(s);
 
@@ -457,12 +485,12 @@ const sd_bus_vtable session_vtable[] = {
         SD_BUS_PROPERTY("IdleSinceHint", "t", property_get_idle_since_hint, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("IdleSinceHintMonotonic", "t", property_get_idle_since_hint, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
 
-        SD_BUS_METHOD("Terminate", NULL, NULL, method_terminate, SD_BUS_VTABLE_CAPABILITY(CAP_KILL)),
-        SD_BUS_METHOD("Activate", NULL, NULL, method_activate, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Lock", NULL, NULL, method_lock, 0),
-        SD_BUS_METHOD("Unlock", NULL, NULL, method_lock, 0),
+        SD_BUS_METHOD("Terminate", NULL, NULL, bus_session_method_terminate, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Activate", NULL, NULL, bus_session_method_activate, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Lock", NULL, NULL, bus_session_method_lock, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Unlock", NULL, NULL, bus_session_method_lock, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetIdleHint", "b", NULL, method_set_idle_hint, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Kill", "si", NULL, method_kill, SD_BUS_VTABLE_CAPABILITY(CAP_KILL)),
+        SD_BUS_METHOD("Kill", "si", NULL, bus_session_method_kill, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("TakeControl", "b", NULL, method_take_control, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ReleaseControl", NULL, NULL, method_release_control, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("TakeDevice", "uu", "hb", method_take_device, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -491,23 +519,21 @@ int session_object_find(sd_bus *bus, const char *path, const char *interface, vo
         if (streq(path, "/org/freedesktop/login1/session/self")) {
                 _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
                 sd_bus_message *message;
-                pid_t pid;
+                const char *name;
 
                 message = sd_bus_get_current_message(bus);
                 if (!message)
                         return 0;
 
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_PID, &creds);
+                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
                 if (r < 0)
                         return r;
 
-                r = sd_bus_creds_get_pid(creds, &pid);
+                r = sd_bus_creds_get_session(creds, &name);
                 if (r < 0)
                         return r;
 
-                r = manager_get_session_by_pid(m, pid, &session);
-                if (r <= 0)
-                        return 0;
+                session = hashmap_get(m->sessions, name);
         } else {
                 _cleanup_free_ char *e = NULL;
                 const char *p;
@@ -521,9 +547,10 @@ int session_object_find(sd_bus *bus, const char *path, const char *interface, vo
                         return -ENOMEM;
 
                 session = hashmap_get(m->sessions, e);
-                if (!session)
-                        return 0;
         }
+
+        if (!session)
+                return 0;
 
         *found = session;
         return 1;
@@ -543,6 +570,7 @@ char *session_bus_path(Session *s) {
 
 int session_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error) {
         _cleanup_strv_free_ char **l = NULL;
+        sd_bus_message *message;
         Manager *m = userdata;
         Session *session;
         Iterator i;
@@ -562,6 +590,25 @@ int session_node_enumerator(sd_bus *bus, const char *path, void *userdata, char 
                 r = strv_consume(&l, p);
                 if (r < 0)
                         return r;
+        }
+
+        message = sd_bus_get_current_message(bus);
+        if (message) {
+                _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
+                const char *name;
+
+                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
+                if (r >= 0) {
+                        r = sd_bus_creds_get_session(creds, &name);
+                        if (r >= 0) {
+                                session = hashmap_get(m->sessions, name);
+                                if (session) {
+                                        r = strv_extend(&l, "/org/freedesktop/login1/session/self");
+                                        if (r < 0)
+                                                return r;
+                                }
+                        }
+                }
         }
 
         *nodes = l;

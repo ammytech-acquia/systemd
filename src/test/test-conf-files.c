@@ -26,7 +26,7 @@
 #include "macro.h"
 #include "strv.h"
 #include "util.h"
-
+#include "rm-rf.h"
 
 static void setup_test_dir(char *tmp_dir, const char *files, ...) {
         va_list ap;
@@ -36,7 +36,7 @@ static void setup_test_dir(char *tmp_dir, const char *files, ...) {
         va_start(ap, files);
         while (files != NULL) {
                 _cleanup_free_ char *path = strappend(tmp_dir, files);
-                assert_se(touch_file(path, true, (usec_t) -1, (uid_t) -1, (gid_t) -1, 0) == 0);
+                assert_se(touch_file(path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, 0) == 0);
                 files = va_arg(ap, const char *);
         }
         va_end(ap);
@@ -59,12 +59,12 @@ static void test_conf_files_list(bool use_root) {
                 search_2 = "/dir2";
         } else {
                 root_dir = NULL;
-                search_1 = strappenda(tmp_dir, "/dir1");
-                search_2 = strappenda(tmp_dir, "/dir2");
+                search_1 = strjoina(tmp_dir, "/dir1");
+                search_2 = strjoina(tmp_dir, "/dir2");
         }
 
-        expect_a = strappenda(tmp_dir, "/dir1/a.conf");
-        expect_b = strappenda(tmp_dir, "/dir2/b.conf");
+        expect_a = strjoina(tmp_dir, "/dir1/a.conf");
+        expect_b = strjoina(tmp_dir, "/dir2/b.conf");
 
         assert_se(conf_files_list(&found_files, ".conf", root_dir, search_1, search_2, NULL) == 0);
         strv_print(found_files);
@@ -74,7 +74,7 @@ static void test_conf_files_list(bool use_root) {
         assert_se(streq_ptr(found_files[1], expect_b));
         assert_se(found_files[2] == NULL);
 
-        assert_se(rm_rf_dangerous(tmp_dir, false, true, false) == 0);
+        assert_se(rm_rf(tmp_dir, REMOVE_ROOT|REMOVE_PHYSICAL) == 0);
 }
 
 int main(int argc, char **argv) {

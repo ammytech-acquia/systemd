@@ -26,9 +26,9 @@
 
 #include "util.h"
 #include "mkdir.h"
-#include "path-util.h"
 #include "logind-inhibit.h"
 #include "fileio.h"
+#include "formats-util.h"
 
 Inhibitor* inhibitor_new(Manager *m, const char* id) {
         Inhibitor *i;
@@ -138,7 +138,7 @@ int inhibitor_save(Inhibitor *i) {
 
 finish:
         if (r < 0)
-                log_error("Failed to save inhibit data %s: %s", i->state_file, strerror(-r));
+                log_error_errno(r, "Failed to save inhibit data %s: %m", i->state_file);
 
         return r;
 }
@@ -232,18 +232,18 @@ int inhibitor_load(Inhibitor *i) {
         }
 
         if (who) {
-                cc = cunescape(who);
-                if (!cc)
-                        return -ENOMEM;
+                r = cunescape(who, 0, &cc);
+                if (r < 0)
+                        return r;
 
                 free(i->who);
                 i->who = cc;
         }
 
         if (why) {
-                cc = cunescape(why);
-                if (!cc)
-                        return -ENOMEM;
+                r = cunescape(why, 0, &cc);
+                if (r < 0)
+                        return r;
 
                 free(i->why);
                 i->why = cc;
@@ -439,23 +439,23 @@ const char *inhibit_what_to_string(InhibitWhat w) {
 
 InhibitWhat inhibit_what_from_string(const char *s) {
         InhibitWhat what = 0;
-        char *w, *state;
+        const char *word, *state;
         size_t l;
 
-        FOREACH_WORD_SEPARATOR(w, l, s, ":", state) {
-                if (l == 8 && strneq(w, "shutdown", l))
+        FOREACH_WORD_SEPARATOR(word, l, s, ":", state) {
+                if (l == 8 && strneq(word, "shutdown", l))
                         what |= INHIBIT_SHUTDOWN;
-                else if (l == 5 && strneq(w, "sleep", l))
+                else if (l == 5 && strneq(word, "sleep", l))
                         what |= INHIBIT_SLEEP;
-                else if (l == 4 && strneq(w, "idle", l))
+                else if (l == 4 && strneq(word, "idle", l))
                         what |= INHIBIT_IDLE;
-                else if (l == 16 && strneq(w, "handle-power-key", l))
+                else if (l == 16 && strneq(word, "handle-power-key", l))
                         what |= INHIBIT_HANDLE_POWER_KEY;
-                else if (l == 18 && strneq(w, "handle-suspend-key", l))
+                else if (l == 18 && strneq(word, "handle-suspend-key", l))
                         what |= INHIBIT_HANDLE_SUSPEND_KEY;
-                else if (l == 20 && strneq(w, "handle-hibernate-key", l))
+                else if (l == 20 && strneq(word, "handle-hibernate-key", l))
                         what |= INHIBIT_HANDLE_HIBERNATE_KEY;
-                else if (l == 17 && strneq(w, "handle-lid-switch", l))
+                else if (l == 17 && strneq(word, "handle-lid-switch", l))
                         what |= INHIBIT_HANDLE_LID_SWITCH;
                 else
                         return _INHIBIT_WHAT_INVALID;

@@ -20,34 +20,20 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
-#include <string.h>
 #include <unistd.h>
-#include <errno.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 #include "label.h"
-#include "util.h"
-#include "path-util.h"
 #include "mkdir.h"
 
-int mkdir_label(const char *path, mode_t mode) {
-        return label_mkdir(path, mode);
-}
-
 int mkdir_safe_label(const char *path, mode_t mode, uid_t uid, gid_t gid) {
-        return mkdir_safe_internal(path, mode, uid, gid, label_mkdir);
+        return mkdir_safe_internal(path, mode, uid, gid, mkdir_label);
 }
 
 int mkdir_parents_label(const char *path, mode_t mode) {
-        return mkdir_parents_internal(NULL, path, mode, label_mkdir);
-}
-
-int mkdir_parents_prefix_label(const char *prefix, const char *path, mode_t mode) {
-        return mkdir_parents_internal(prefix, path, mode, label_mkdir);
+        return mkdir_parents_internal(NULL, path, mode, mkdir_label);
 }
 
 int mkdir_p_label(const char *path, mode_t mode) {
-        return mkdir_p_internal(NULL, path, mode, label_mkdir);
+        return mkdir_p_internal(NULL, path, mode, mkdir_label);
 }

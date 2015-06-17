@@ -33,17 +33,23 @@
 #include <linux/input.h>
 #include <linux/if_link.h>
 #include <linux/loop.h>
-#include <linux/if_link.h>
+#include <linux/audit.h>
+#include <linux/capability.h>
+#include <linux/neighbour.h>
 
 #ifdef HAVE_AUDIT
 #include <libaudit.h>
 #endif
 
-#include "macro.h"
-
 #ifdef ARCH_MIPS
 #include <asm/sgidefs.h>
 #endif
+
+#ifdef HAVE_LINUX_BTRFS_H
+#include <linux/btrfs.h>
+#endif
+
+#include "macro.h"
 
 #ifndef RLIMIT_RTTIME
 #define RLIMIT_RTTIME 15
@@ -62,6 +68,30 @@
 
 #ifndef F_GETPIPE_SZ
 #define F_GETPIPE_SZ (F_LINUX_SPECIFIC_BASE + 8)
+#endif
+
+#ifndef F_ADD_SEALS
+#define F_ADD_SEALS (F_LINUX_SPECIFIC_BASE + 9)
+#define F_GET_SEALS (F_LINUX_SPECIFIC_BASE + 10)
+
+#define F_SEAL_SEAL     0x0001  /* prevent further seals from being set */
+#define F_SEAL_SHRINK   0x0002  /* prevent file from shrinking */
+#define F_SEAL_GROW     0x0004  /* prevent file from growing */
+#define F_SEAL_WRITE    0x0008  /* prevent writes */
+#endif
+
+#ifndef F_OFD_GETLK
+#define F_OFD_GETLK     36
+#define F_OFD_SETLK     37
+#define F_OFD_SETLKW    38
+#endif
+
+#ifndef MFD_ALLOW_SEALING
+#define MFD_ALLOW_SEALING 0x0002U
+#endif
+
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U
 #endif
 
 #ifndef IP_FREEBIND
@@ -102,68 +132,82 @@ static inline int pivot_root(const char *new_root, const char *put_old) {
 }
 #endif
 
-#ifdef __x86_64__
-#  ifndef __NR_fanotify_init
-#    define __NR_fanotify_init 300
-#  endif
-#  ifndef __NR_fanotify_mark
-#    define __NR_fanotify_mark 301
-#  endif
-#elif defined _MIPS_SIM
-#  if _MIPS_SIM == _MIPS_SIM_ABI32
-#    ifndef __NR_fanotify_init
-#      define __NR_fanotify_init 4336
+#ifndef __NR_memfd_create
+#  if defined __x86_64__
+#    define __NR_memfd_create 319
+#  elif defined __arm__
+#    define __NR_memfd_create 385
+#  elif defined __aarch64__
+#    define __NR_memfd_create 279
+#  elif defined _MIPS_SIM
+#    if _MIPS_SIM == _MIPS_SIM_ABI32
+#      define __NR_memfd_create 4354
 #    endif
-#    ifndef __NR_fanotify_mark
-#      define __NR_fanotify_mark 4337
+#    if _MIPS_SIM == _MIPS_SIM_NABI32
+#      define __NR_memfd_create 6318
 #    endif
-#  elif _MIPS_SIM == _MIPS_SIM_NABI32
-#    ifndef __NR_fanotify_init
-#      define __NR_fanotify_init 6300
+#    if _MIPS_SIM == _MIPS_SIM_ABI64
+#      define __NR_memfd_create 5314
 #    endif
-#    ifndef __NR_fanotify_mark
-#      define __NR_fanotify_mark 6301
-#    endif
-#  elif _MIPS_SIM == _MIPS_SIM_ABI64
-#    ifndef __NR_fanotify_init
-#      define __NR_fanotify_init 5295
-#    endif
-#    ifndef __NR_fanotify_mark
-#      define __NR_fanotify_mark 5296
-#    endif
-#  endif
-#else
-#  ifndef __NR_fanotify_init
-#    define __NR_fanotify_init 338
-#  endif
-#  ifndef __NR_fanotify_mark
-#    define __NR_fanotify_mark 339
+#  elif defined __i386__
+#    define __NR_memfd_create 356
+#  else
+#    warning "__NR_memfd_create unknown for your architecture"
+#    define __NR_memfd_create 0xffffffff
 #  endif
 #endif
 
-#ifndef HAVE_FANOTIFY_INIT
-static inline int fanotify_init(unsigned int flags, unsigned int event_f_flags) {
-        return syscall(__NR_fanotify_init, flags, event_f_flags);
+#ifndef HAVE_MEMFD_CREATE
+static inline int memfd_create(const char *name, unsigned int flags) {
+        return syscall(__NR_memfd_create, name, flags);
 }
 #endif
 
-#ifndef HAVE_FANOTIFY_MARK
-static inline int fanotify_mark(int fanotify_fd, unsigned int flags, uint64_t mask,
-                                int dfd, const char *pathname) {
-#if defined _MIPS_SIM && _MIPS_SIM == _MIPS_SIM_ABI32 || defined __powerpc__ && !defined __powerpc64__ \
-    || defined __arm__ && !defined __aarch64__
-        union {
-                uint64_t _64;
-                uint32_t _32[2];
-        } _mask;
-        _mask._64 = mask;
-
-        return syscall(__NR_fanotify_mark, fanotify_fd, flags,
-                       _mask._32[0], _mask._32[1], dfd, pathname);
-#else
-        return syscall(__NR_fanotify_mark, fanotify_fd, flags, mask, dfd, pathname);
+#ifndef __NR_getrandom
+#  if defined __x86_64__
+#    define __NR_getrandom 318
+#  elif defined(__i386__)
+#    define __NR_getrandom 355
+#  elif defined(__arm__)
+#    define __NR_getrandom 384
+# elif defined(__aarch64__)
+#    define __NR_getrandom 278
+#  elif defined(__ia64__)
+#    define __NR_getrandom 1339
+#  elif defined(__m68k__)
+#    define __NR_getrandom 352
+#  elif defined(__s390x__)
+#    define __NR_getrandom 349
+#  elif defined(__powerpc__)
+#    define __NR_getrandom 359
+#  elif defined _MIPS_SIM
+#    if _MIPS_SIM == _MIPS_SIM_ABI32
+#      define __NR_getrandom 4353
+#    endif
+#    if _MIPS_SIM == _MIPS_SIM_NABI32
+#      define __NR_getrandom 6317
+#    endif
+#    if _MIPS_SIM == _MIPS_SIM_ABI64
+#      define __NR_getrandom 5313
+#    endif
+#  else
+#    warning "__NR_getrandom unknown for your architecture"
+#    define __NR_getrandom 0xffffffff
+#  endif
 #endif
+
+#if !HAVE_DECL_GETRANDOM
+static inline int getrandom(void *buffer, size_t count, unsigned flags) {
+        return syscall(__NR_getrandom, buffer, count, flags);
 }
+#endif
+
+#ifndef GRND_NONBLOCK
+#define GRND_NONBLOCK 0x0001
+#endif
+
+#ifndef GRND_RANDOM
+#define GRND_RANDOM 0x0002
 #endif
 
 #ifndef BTRFS_IOCTL_MAGIC
@@ -186,10 +230,57 @@ static inline int fanotify_mark(int fanotify_fd, unsigned int flags, uint64_t ma
 #define BTRFS_UUID_SIZE 16
 #endif
 
+#ifndef BTRFS_SUBVOL_RDONLY
+#define BTRFS_SUBVOL_RDONLY (1ULL << 1)
+#endif
+
+#ifndef BTRFS_SUBVOL_NAME_MAX
+#define BTRFS_SUBVOL_NAME_MAX 4039
+#endif
+
+#ifndef BTRFS_INO_LOOKUP_PATH_MAX
+#define BTRFS_INO_LOOKUP_PATH_MAX 4080
+#endif
+
+#ifndef BTRFS_SEARCH_ARGS_BUFSIZE
+#define BTRFS_SEARCH_ARGS_BUFSIZE (4096 - sizeof(struct btrfs_ioctl_search_key))
+#endif
+
 #ifndef HAVE_LINUX_BTRFS_H
 struct btrfs_ioctl_vol_args {
         int64_t fd;
         char name[BTRFS_PATH_NAME_MAX + 1];
+};
+
+struct btrfs_qgroup_limit {
+        __u64 flags;
+        __u64 max_rfer;
+        __u64 max_excl;
+        __u64 rsv_rfer;
+        __u64 rsv_excl;
+};
+
+struct btrfs_qgroup_inherit {
+        __u64 flags;
+        __u64 num_qgroups;
+        __u64 num_ref_copies;
+        __u64 num_excl_copies;
+        struct btrfs_qgroup_limit lim;
+        __u64 qgroups[0];
+};
+
+struct btrfs_ioctl_vol_args_v2 {
+        __s64 fd;
+        __u64 transid;
+        __u64 flags;
+        union {
+                struct {
+                        __u64 size;
+                        struct btrfs_qgroup_inherit *qgroup_inherit;
+                };
+                __u64 unused[4];
+        };
+        char name[BTRFS_SUBVOL_NAME_MAX + 1];
 };
 
 struct btrfs_ioctl_dev_info_args {
@@ -207,10 +298,115 @@ struct btrfs_ioctl_fs_info_args {
         uint8_t fsid[BTRFS_FSID_SIZE];          /* out */
         uint64_t reserved[124];                 /* pad to 1k */
 };
+
+struct btrfs_ioctl_ino_lookup_args {
+        __u64 treeid;
+        __u64 objectid;
+        char name[BTRFS_INO_LOOKUP_PATH_MAX];
+};
+
+struct btrfs_ioctl_search_key {
+        /* which root are we searching.  0 is the tree of tree roots */
+        __u64 tree_id;
+
+        /* keys returned will be >= min and <= max */
+        __u64 min_objectid;
+        __u64 max_objectid;
+
+        /* keys returned will be >= min and <= max */
+        __u64 min_offset;
+        __u64 max_offset;
+
+        /* max and min transids to search for */
+        __u64 min_transid;
+        __u64 max_transid;
+
+        /* keys returned will be >= min and <= max */
+        __u32 min_type;
+        __u32 max_type;
+
+        /*
+         * how many items did userland ask for, and how many are we
+         * returning
+         */
+        __u32 nr_items;
+
+        /* align to 64 bits */
+        __u32 unused;
+
+        /* some extra for later */
+        __u64 unused1;
+        __u64 unused2;
+        __u64 unused3;
+        __u64 unused4;
+};
+
+struct btrfs_ioctl_search_header {
+        __u64 transid;
+        __u64 objectid;
+        __u64 offset;
+        __u32 type;
+        __u32 len;
+};
+
+
+struct btrfs_ioctl_search_args {
+        struct btrfs_ioctl_search_key key;
+        char buf[BTRFS_SEARCH_ARGS_BUFSIZE];
+};
+
+struct btrfs_ioctl_clone_range_args {
+        __s64 src_fd;
+        __u64 src_offset, src_length;
+        __u64 dest_offset;
+};
 #endif
 
 #ifndef BTRFS_IOC_DEFRAG
-#define BTRFS_IOC_DEFRAG _IOW(BTRFS_IOCTL_MAGIC, 2, struct btrfs_ioctl_vol_args)
+#define BTRFS_IOC_DEFRAG _IOW(BTRFS_IOCTL_MAGIC, 2, \
+                                 struct btrfs_ioctl_vol_args)
+#endif
+
+#ifndef BTRFS_IOC_CLONE
+#define BTRFS_IOC_CLONE _IOW(BTRFS_IOCTL_MAGIC, 9, int)
+#endif
+
+#ifndef BTRFS_IOC_CLONE_RANGE
+#define BTRFS_IOC_CLONE_RANGE _IOW(BTRFS_IOCTL_MAGIC, 13, \
+                                 struct btrfs_ioctl_clone_range_args)
+#endif
+
+#ifndef BTRFS_IOC_SUBVOL_CREATE
+#define BTRFS_IOC_SUBVOL_CREATE _IOW(BTRFS_IOCTL_MAGIC, 14, \
+                                 struct btrfs_ioctl_vol_args)
+#endif
+
+#ifndef BTRFS_IOC_SNAP_DESTROY
+#define BTRFS_IOC_SNAP_DESTROY _IOW(BTRFS_IOCTL_MAGIC, 15, \
+                                 struct btrfs_ioctl_vol_args)
+#endif
+
+#ifndef BTRFS_IOC_TREE_SEARCH
+#define BTRFS_IOC_TREE_SEARCH _IOWR(BTRFS_IOCTL_MAGIC, 17, \
+                                 struct btrfs_ioctl_search_args)
+#endif
+
+#ifndef BTRFS_IOC_INO_LOOKUP
+#define BTRFS_IOC_INO_LOOKUP _IOWR(BTRFS_IOCTL_MAGIC, 18, \
+                                 struct btrfs_ioctl_ino_lookup_args)
+#endif
+
+#ifndef BTRFS_IOC_SNAP_CREATE_V2
+#define BTRFS_IOC_SNAP_CREATE_V2 _IOW(BTRFS_IOCTL_MAGIC, 23, \
+                                 struct btrfs_ioctl_vol_args_v2)
+#endif
+
+#ifndef BTRFS_IOC_SUBVOL_GETFLAGS
+#define BTRFS_IOC_SUBVOL_GETFLAGS _IOR(BTRFS_IOCTL_MAGIC, 25, __u64)
+#endif
+
+#ifndef BTRFS_IOC_SUBVOL_SETFLAGS
+#define BTRFS_IOC_SUBVOL_SETFLAGS _IOW(BTRFS_IOCTL_MAGIC, 26, __u64)
 #endif
 
 #ifndef BTRFS_IOC_DEV_INFO
@@ -220,7 +416,48 @@ struct btrfs_ioctl_fs_info_args {
 
 #ifndef BTRFS_IOC_FS_INFO
 #define BTRFS_IOC_FS_INFO _IOR(BTRFS_IOCTL_MAGIC, 31, \
-                               struct btrfs_ioctl_fs_info_args)
+                                 struct btrfs_ioctl_fs_info_args)
+#endif
+
+#ifndef BTRFS_IOC_DEVICES_READY
+#define BTRFS_IOC_DEVICES_READY _IOR(BTRFS_IOCTL_MAGIC, 39, \
+                                 struct btrfs_ioctl_vol_args)
+#endif
+
+#ifndef BTRFS_FIRST_FREE_OBJECTID
+#define BTRFS_FIRST_FREE_OBJECTID 256
+#endif
+
+#ifndef BTRFS_LAST_FREE_OBJECTID
+#define BTRFS_LAST_FREE_OBJECTID -256ULL
+#endif
+
+#ifndef BTRFS_ROOT_TREE_OBJECTID
+#define BTRFS_ROOT_TREE_OBJECTID 1
+#endif
+
+#ifndef BTRFS_QUOTA_TREE_OBJECTID
+#define BTRFS_QUOTA_TREE_OBJECTID 8ULL
+#endif
+
+#ifndef BTRFS_ROOT_ITEM_KEY
+#define BTRFS_ROOT_ITEM_KEY 132
+#endif
+
+#ifndef BTRFS_QGROUP_STATUS_KEY
+#define BTRFS_QGROUP_STATUS_KEY 240
+#endif
+
+#ifndef BTRFS_QGROUP_INFO_KEY
+#define BTRFS_QGROUP_INFO_KEY 242
+#endif
+
+#ifndef BTRFS_QGROUP_LIMIT_KEY
+#define BTRFS_QGROUP_LIMIT_KEY 244
+#endif
+
+#ifndef BTRFS_ROOT_BACKREF_KEY
+#define BTRFS_ROOT_BACKREF_KEY 144
 #endif
 
 #ifndef BTRFS_SUPER_MAGIC
@@ -371,6 +608,57 @@ static inline int setns(int fd, int nstype) {
 #define LOOP_CTL_GET_FREE 0x4C82
 #endif
 
+#if !HAVE_DECL_IFLA_INET6_ADDR_GEN_MODE
+#define IFLA_INET6_UNSPEC 0
+#define IFLA_INET6_FLAGS 1
+#define IFLA_INET6_CONF 2
+#define IFLA_INET6_STATS 3
+#define IFLA_INET6_MCAST 4
+#define IFLA_INET6_CACHEINFO 5
+#define IFLA_INET6_ICMP6STATS 6
+#define IFLA_INET6_TOKEN 7
+#define IFLA_INET6_ADDR_GEN_MODE 8
+#define __IFLA_INET6_MAX 9
+
+#define IFLA_INET6_MAX	(__IFLA_INET6_MAX - 1)
+
+#define IN6_ADDR_GEN_MODE_EUI64 0
+#define IN6_ADDR_GEN_MODE_NONE 1
+#endif
+
+#if !HAVE_DECL_IFLA_MACVLAN_FLAGS
+#define IFLA_MACVLAN_UNSPEC 0
+#define IFLA_MACVLAN_MODE 1
+#define IFLA_MACVLAN_FLAGS 2
+#define __IFLA_MACVLAN_MAX 3
+
+#define IFLA_MACVLAN_MAX (__IFLA_MACVLAN_MAX - 1)
+#endif
+
+#if !HAVE_DECL_IFLA_IPVLAN_MODE
+#define IFLA_IPVLAN_UNSPEC 0
+#define IFLA_IPVLAN_MODE 1
+#define __IFLA_IPVLAN_MAX 2
+
+#define IFLA_IPVLAN_MAX (__IFLA_IPVLAN_MAX - 1)
+
+#define IPVLAN_MODE_L2 0
+#define IPVLAN_MODE_L3 1
+#define IPVLAN_MAX 2
+#endif
+
+#if !HAVE_DECL_IFLA_VTI_REMOTE
+#define IFLA_VTI_UNSPEC 0
+#define IFLA_VTI_LINK 1
+#define IFLA_VTI_IKEY 2
+#define IFLA_VTI_OKEY 3
+#define IFLA_VTI_LOCAL 4
+#define IFLA_VTI_REMOTE 5
+#define __IFLA_VTI_MAX 6
+
+#define IFLA_VTI_MAX (__IFLA_VTI_MAX - 1)
+#endif
+
 #if !HAVE_DECL_IFLA_PHYS_PORT_ID
 #undef IFLA_PROMISCUITY
 #define IFLA_PROMISCUITY 30
@@ -410,7 +698,7 @@ static inline int setns(int fd, int nstype) {
 #define IFLA_BOND_AD_INFO 23
 #define __IFLA_BOND_MAX 24
 
-#define IFLA_BOND_MAX	(__IFLA_BOND_MAX - 1)
+#define IFLA_BOND_MAX   (__IFLA_BOND_MAX - 1)
 #endif
 
 #if !HAVE_DECL_IFLA_VLAN_PROTOCOL
@@ -477,4 +765,202 @@ static inline int setns(int fd, int nstype) {
 #define __IFLA_BRIDGE_MAX 3
 
 #define IFLA_BRIDGE_MAX (__IFLA_BRIDGE_MAX - 1)
+#endif
+
+#if !HAVE_DECL_IFLA_BRPORT_UNICAST_FLOOD
+#define IFLA_BRPORT_UNSPEC 0
+#define IFLA_BRPORT_STATE 1
+#define IFLA_BRPORT_PRIORITY 2
+#define IFLA_BRPORT_COST 3
+#define IFLA_BRPORT_MODE 4
+#define IFLA_BRPORT_GUARD 5
+#define IFLA_BRPORT_PROTECT 6
+#define IFLA_BRPORT_FAST_LEAVE 7
+#define IFLA_BRPORT_LEARNING 8
+#define IFLA_BRPORT_UNICAST_FLOOD 9
+#define __IFLA_BRPORT_MAX 10
+
+#define IFLA_BRPORT_MAX (__IFLA_BRPORT_MAX - 1)
+#endif
+
+#if !HAVE_DECL_NDA_IFINDEX
+#define NDA_UNSPEC 0
+#define NDA_DST 1
+#define NDA_LLADDR 2
+#define NDA_CACHEINFO 3
+#define NDA_PROBES 4
+#define NDA_VLAN 5
+#define NDA_PORT 6
+#define NDA_VNI 7
+#define NDA_IFINDEX 8
+#define __NDA_MAX 9
+
+#define NDA_MAX (__NDA_MAX - 1)
+#endif
+
+#ifndef IPV6_UNICAST_IF
+#define IPV6_UNICAST_IF 76
+#endif
+
+#ifndef IFF_MULTI_QUEUE
+#define IFF_MULTI_QUEUE 0x100
+#endif
+
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP 0x10000
+#endif
+
+#ifndef IFF_DORMANT
+#define IFF_DORMANT 0x20000
+#endif
+
+#ifndef BOND_XMIT_POLICY_ENCAP23
+#define BOND_XMIT_POLICY_ENCAP23 3
+#endif
+
+#ifndef BOND_XMIT_POLICY_ENCAP34
+#define BOND_XMIT_POLICY_ENCAP34 4
+#endif
+
+#ifndef NET_ADDR_RANDOM
+#  define NET_ADDR_RANDOM 1
+#endif
+
+#ifndef NET_NAME_UNKNOWN
+#  define NET_NAME_UNKNOWN 0
+#endif
+
+#ifndef NET_NAME_ENUM
+#  define NET_NAME_ENUM 1
+#endif
+
+#ifndef NET_NAME_PREDICTABLE
+#  define NET_NAME_PREDICTABLE 2
+#endif
+
+#ifndef NET_NAME_USER
+#  define NET_NAME_USER 3
+#endif
+
+#ifndef NET_NAME_RENAMED
+#  define NET_NAME_RENAMED 4
+#endif
+
+#ifndef BPF_XOR
+#  define BPF_XOR 0xa0
+#endif
+
+/* Note that LOOPBACK_IFINDEX is currently not exported by the
+ * kernel/glibc, but hardcoded internally by the kernel.  However, as
+ * it is exported to userspace indirectly via rtnetlink and the
+ * ioctls, and made use of widely we define it here too, in a way that
+ * is compatible with the kernel's internal definition. */
+#ifndef LOOPBACK_IFINDEX
+#define LOOPBACK_IFINDEX 1
+#endif
+
+#if !HAVE_DECL_IFA_FLAGS
+#define IFA_FLAGS 8
+#endif
+
+#ifndef IFA_F_NOPREFIXROUTE
+#define IFA_F_NOPREFIXROUTE 0x200
+#endif
+
+#ifndef MAX_AUDIT_MESSAGE_LENGTH
+#define MAX_AUDIT_MESSAGE_LENGTH 8970
+#endif
+
+#ifndef AUDIT_NLGRP_MAX
+#define AUDIT_NLGRP_READLOG 1
+#endif
+
+#ifndef CAP_MAC_OVERRIDE
+#define CAP_MAC_OVERRIDE 32
+#endif
+
+#ifndef CAP_MAC_ADMIN
+#define CAP_MAC_ADMIN 33
+#endif
+
+#ifndef CAP_SYSLOG
+#define CAP_SYSLOG 34
+#endif
+
+#ifndef CAP_WAKE_ALARM
+#define CAP_WAKE_ALARM 35
+#endif
+
+#ifndef CAP_BLOCK_SUSPEND
+#define CAP_BLOCK_SUSPEND 36
+#endif
+
+#ifndef CAP_AUDIT_READ
+#define CAP_AUDIT_READ 37
+#endif
+
+static inline int raw_clone(unsigned long flags, void *child_stack) {
+#if defined(__s390__) || defined(__CRIS__)
+        /* On s390 and cris the order of the first and second arguments
+         * of the raw clone() system call is reversed. */
+        return (int) syscall(__NR_clone, child_stack, flags);
+#else
+        return (int) syscall(__NR_clone, flags, child_stack);
+#endif
+}
+
+static inline pid_t raw_getpid(void) {
+        return (pid_t) syscall(__NR_getpid);
+}
+
+#if !HAVE_DECL_RENAMEAT2
+
+#ifndef __NR_renameat2
+#  if defined __x86_64__
+#    define __NR_renameat2 316
+#  elif defined __arm__
+#    define __NR_renameat2 382
+#  elif defined _MIPS_SIM
+#    if _MIPS_SIM == _MIPS_SIM_ABI32
+#      define __NR_renameat2 4351
+#    endif
+#    if _MIPS_SIM == _MIPS_SIM_NABI32
+#      define __NR_renameat2 6315
+#    endif
+#    if _MIPS_SIM == _MIPS_SIM_ABI64
+#      define __NR_renameat2 5311
+#    endif
+#  elif defined __i386__
+#    define __NR_renameat2 353
+#  else
+#    warning "__NR_renameat2 unknown for your architecture"
+#    define __NR_renameat2 0xffffffff
+#  endif
+#endif
+
+static inline int renameat2(int oldfd, const char *oldname, int newfd, const char *newname, unsigned flags) {
+        return syscall(__NR_renameat2, oldfd, oldname, newfd, newname, flags);
+}
+#endif
+
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE (1 << 0)
+#endif
+
+#if !HAVE_DECL_KCMP
+static inline int kcmp(pid_t pid1, pid_t pid2, int type, unsigned long idx1, unsigned long idx2) {
+        return syscall(__NR_kcmp, pid1, pid2, type, idx1, idx2);
+}
+#endif
+
+#ifndef KCMP_FILE
+#define KCMP_FILE 0
+#endif
+
+#ifndef INPUT_PROP_POINTING_STICK
+#define INPUT_PROP_POINTING_STICK 0x05
+#endif
+
+#ifndef INPUT_PROP_ACCELEROMETER
+#define INPUT_PROP_ACCELEROMETER  0x06
 #endif

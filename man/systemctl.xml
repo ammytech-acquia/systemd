@@ -1,24 +1,24 @@
-<?xml version='1.0'?> <!--*-nxml-*-->
+<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-This file is part of systemd.
+  This file is part of systemd.
 
-Copyright 2010 Lennart Poettering
+  Copyright 2010 Lennart Poettering
 
-systemd is free software; you can redistribute it and/or modify it
-under the terms of the GNU Lesser General Public License as published by
-the Free Software Foundation; either version 2.1 of the License, or
-(at your option) any later version.
+  systemd is free software; you can redistribute it and/or modify it
+  under the terms of the GNU Lesser General Public License as published by
+  the Free Software Foundation; either version 2.1 of the License, or
+  (at your option) any later version.
 
-systemd is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
+  systemd is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+  Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public License
-along with systemd; If not, see <http://www.gnu.org/licenses/>.
+  You should have received a copy of the GNU Lesser General Public License
+  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemctl"
@@ -60,10 +60,12 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
   <refsect1>
     <title>Description</title>
 
-    <para><command>systemctl</command> may be used to
-    introspect and control the state of the
+    <para><command>systemctl</command> may be used to introspect and
+    control the state of the <literal>systemd</literal> system and
+    service manager. Please refer to
     <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-    system and service manager.</para>
+    for an introduction into the basic concepts and functionality this
+    tool manages.</para>
   </refsect1>
 
   <refsect1>
@@ -96,9 +98,10 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
         <term><option>--state=</option></term>
 
         <listitem>
-        <para>The argument should be a comma-separated list of unit LOAD,
-        SUB, or ACTIVE states. When listing units, show only those
-        in specified states.</para>
+        <para>The argument should be a comma-separated list of unit
+        LOAD, SUB, or ACTIVE states. When listing units, show only
+        those in specified states. Use <option>--state=failed</option>
+        to show only failed units.</para>
         </listitem>
       </varlistentry>
 
@@ -148,9 +151,12 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
         <listitem>
           <para>Show reverse dependencies between units with
-          <command>list-dependencies</command>, i.e. units with
-          dependencies of type <varname>Wants=</varname> or
-          <varname>Requires=</varname> on the given unit.
+          <command>list-dependencies</command>, i.e. follow
+          dependencies of type <varname>WantedBy=</varname>,
+          <varname>RequiredBy=</varname>,
+          <varname>RequiredByOverridable=</varname>,
+          <varname>PartOf=</varname>, <varname>BoundBy=</varname>,
+          instead of <varname>Wants=</varname> and similar.
           </para>
         </listitem>
       </varlistentry>
@@ -161,10 +167,20 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
         <listitem>
           <para>With <command>list-dependencies</command>, show the
           units that are ordered before the specified unit. In other
-          words, list the units that are in the <varname>After=</varname>
-          directive of the specified unit, have the specified unit in
-          their <varname>Before=</varname> directive, or are otherwise
-          implicit dependencies of the specified unit.</para>
+          words, recursively list units following the
+          <varname>After=</varname> dependency.</para>
+
+          <para>Note that any <varname>After=</varname> dependency is
+          automatically mirrored to create a
+          <varname>Before=</varname> dependency. Temporal dependencies
+          may be specified explicitly, but are also created implicitly
+          for units which are <varname>WantedBy=</varname> targets
+          (see
+          <citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry>),
+          and as a result of other directives (for example
+          <varname>RequiresMountsFor=</varname>). Both explicitly
+          and implicitly introduced dependencies are shown with
+          <command>list-dependencies</command>.</para>
         </listitem>
       </varlistentry>
 
@@ -174,10 +190,8 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
         <listitem>
           <para>With <command>list-dependencies</command>, show the
           units that are ordered after the specified unit. In other
-          words, list the units that are in the <varname>Before=</varname>
-          directive of the specified unit, have the specified unit in
-          their <varname>After=</varname> directive, or otherwise depend
-          on the specified unit.</para>
+          words, recursively list units following the
+          <varname>Before=</varname> dependency.</para>
         </listitem>
       </varlistentry>
 
@@ -302,22 +316,18 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
           <para>Do not synchronously wait for the requested operation
           to finish. If this is not specified, the job will be
           verified, enqueued and <command>systemctl</command> will
-          wait until it is completed. By passing this argument, it is
-          only verified and enqueued.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><option>--no-legend</option></term>
-
-        <listitem>
-          <para>Do not print the legend, i.e. the column headers and
-          the footer with hints.</para>
+          wait until the unit's start-up is completed. By passing this
+          argument, it is only verified and enqueued.</para>
         </listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="user" />
       <xi:include href="user-system-options.xml" xpointer="system" />
+
+      <!-- we do not document -failed here, as it has been made
+           redundant by -state=failed, which it predates. To keep
+           things simple we only document the new switch, while
+           keeping the old one around for compatibility only. -->
 
       <varlistentry>
         <term><option>--no-wall</option></term>
@@ -367,7 +377,6 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
           querying the user for authentication for privileged
           operations.</para>
         </listitem>
-
       </varlistentry>
 
       <varlistentry>
@@ -447,6 +456,18 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
       </varlistentry>
 
       <varlistentry>
+        <term><option>--now</option></term>
+
+        <listitem>
+          <para>When used with <command>enable</command>, the units
+          will also be started. When used with <command>disable</command> or
+          <command>mask</command>, the units will also be stopped. The start
+          or stop operation is only carried out when the respective enable or
+          disable operation has been successful.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--root=</option></term>
 
         <listitem>
@@ -463,7 +484,7 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
         <listitem>
           <para>When used with <command>enable</command>,
-          <command>disable</command>,
+          <command>disable</command>, <command>edit</command>,
           (and related commands), make changes only temporarily, so
           that they are lost on the next reboot. This will have the
           effect that changes are not made in subdirectories of
@@ -518,6 +539,18 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
       </varlistentry>
 
       <varlistentry>
+        <term><option>--firmware-setup</option></term>
+
+        <listitem>
+          <para>When used with the <command>reboot</command> command,
+          indicate to the system's firmware to boot into setup
+          mode. Note that this is currently only supported on some EFI
+          systems and only if the system was booted in EFI
+          mode.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--plain</option></term>
 
         <listitem>
@@ -529,9 +562,10 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
       <xi:include href="user-system-options.xml" xpointer="host" />
       <xi:include href="user-system-options.xml" xpointer="machine" />
 
+      <xi:include href="standard-options.xml" xpointer="no-pager" />
+      <xi:include href="standard-options.xml" xpointer="no-legend" />
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
-      <xi:include href="standard-options.xml" xpointer="no-pager" />
     </variablelist>
   </refsect1>
 
@@ -578,7 +612,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             </para>
 
             <para>See also the options <option>--show-types</option>,
-            <option>--all</option>, and <option>--failed</option>.</para>
+            <option>--all</option>, and <option>--state=</option>.</para>
           </listitem>
         </varlistentry>
 
@@ -592,7 +626,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             </para>
 
             <para>See also the options <option>--all</option> and
-            <option>--failed</option>.</para>
+            <option>--state=</option>.</para>
           </listitem>
         </varlistentry>
 
@@ -637,8 +671,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             file.</para>
 
             <para>This command should not be confused with the
-            <command>daemon-reload</command> or <command>load</command>
-            commands.</para>
+            <command>daemon-reload</command> command.</para>
           </listitem>
 
         </varlistentry>
@@ -687,7 +720,9 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
 
           <listitem>
             <para>Start the unit specified on the command line and its
-            dependencies and stop all others.</para>
+            dependencies and stop all others. If a unit name with no
+            extension is given, an extension of
+            <literal>.target</literal> will be assumed.</para>
 
             <para>This is similar to changing the runlevel in a
             traditional init system. The <command>isolate</command>
@@ -841,15 +876,30 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
         </varlistentry>
 
         <varlistentry>
-          <term><command>list-dependencies <replaceable>NAME</replaceable></command></term>
+          <term>
+            <command>list-dependencies</command>
+            <optional><replaceable>NAME</replaceable></optional>
+          </term>
 
           <listitem>
-            <para>Shows required and wanted units of the specified
-            unit. If no unit is specified,
-            <filename>default.target</filename> is implied. Target units
-            are recursively expanded.  When <option>--all</option> is
-            passed, all other units are recursively expanded as
-            well.</para>
+            <para>Shows units required and wanted by the specified
+            unit. This recursively lists units following the
+            <varname>Requires=</varname>,
+            <varname>RequiresOverridable=</varname>,
+            <varname>Requisite=</varname>,
+            <varname>RequisiteOverridable=</varname>,
+            <varname>Wants=</varname>, <varname>BindsTo=</varname>
+            dependencies. If no unit is specified,
+            <filename>default.target</filename> is implied.</para>
+
+            <para>By default, only target units are recursively
+            expanded. When <option>--all</option> is passed, all other
+            units are recursively expanded as well.</para>
+
+            <para>Options <option>--reverse</option>,
+            <option>--after</option>, <option>--before</option>
+            may be used to change what types of dependencies
+            are shown.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -883,11 +933,12 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             the changes are taken into account immediately. Note that
             this does <emphasis>not</emphasis> have the effect of also
             starting any of the units being enabled. If this
-            is desired, a separate <command>start</command> command must
-            be invoked for the unit. Also note that in case of instance
-            enablement, symlinks named the same as instances are created in
-            the install location, however they all point to the same
-            template unit file.</para>
+            is desired, either <option>--now</option> should be used
+            together with this command, or an additional <command>start</command>
+            command must be invoked for the unit. Also note that in case of
+            instance enablement, symlinks named the same as instances
+            are created in the install location, however they all point to the
+            same template unit file.</para>
 
             <para>This command will print the actions executed. This
             output may be suppressed by passing <option>--quiet</option>.
@@ -923,6 +974,9 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             the system, or for all future logins of all users, or only this
             boot.  Note that in the last case, no systemd daemon
             configuration is reloaded.</para>
+
+            <para>Using <command>enable</command> on masked units
+            results in an error.</para>
           </listitem>
         </varlistentry>
 
@@ -939,9 +993,10 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <command>enable</command>. This call implicitly reloads the
             systemd daemon configuration after completing the disabling
             of the units. Note that this command does not implicitly
-            stop the units that are being disabled. If this is desired,
-            an additional <command>stop</command> command should be
-            executed afterwards.</para>
+            stop the units that are being disabled. If this is desired, either
+            <option>--now</option> should be used together with this command, or
+            an additional <command>stop</command> command should be executed
+            afterwards.</para>
 
             <para>This command will print the actions executed. This
             output may be suppressed by passing <option>--quiet</option>.
@@ -951,72 +1006,6 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <option>--user</option>, <option>--runtime</option> and
             <option>--global</option> in a similar way as
             <command>enable</command>.</para>
-          </listitem>
-        </varlistentry>
-
-        <varlistentry>
-          <term><command>is-enabled <replaceable>NAME</replaceable>...</command></term>
-
-          <listitem>
-            <para>Checks whether any of the specified unit files are
-            enabled (as with <command>enable</command>). Returns an
-            exit code of 0 if at least one is enabled, non-zero
-            otherwise. Prints the current enable status (see table).
-            To suppress this output, use <option>--quiet</option>.
-            </para>
-
-            <table>
-              <title>
-                <command>is-enabled</command> output
-              </title>
-
-              <tgroup cols='3'>
-                <thead>
-                  <row>
-                    <entry>Printed string</entry>
-                    <entry>Meaning</entry>
-                    <entry>Return value</entry>
-                  </row>
-                </thead>
-                <tbody>
-                  <row>
-                    <entry><literal>enabled</literal></entry>
-                    <entry morerows='1'>Enabled through a symlink in <filename>.wants</filename> directory (permanently or just in <filename>/run</filename>)</entry>
-                    <entry morerows='1'>0</entry>
-                  </row>
-                  <row>
-                    <entry><literal>enabled-runtime</literal></entry>
-                  </row>
-                  <row>
-                    <entry><literal>linked</literal></entry>
-                    <entry morerows='1'>Made available through a symlink to the unit file (permanently or just in <filename>/run</filename>)</entry>
-                    <entry morerows='1'>1</entry>
-                  </row>
-                  <row>
-                    <entry><literal>linked-runtime</literal></entry>
-                  </row>
-                  <row>
-                    <entry><literal>masked</literal></entry>
-                    <entry morerows='1'>Disabled entirely (permanently or just in <filename>/run</filename>)</entry>
-                    <entry morerows='1'>1</entry>
-                  </row>
-                  <row>
-                    <entry><literal>masked-runtime</literal></entry>
-                  </row>
-                  <row>
-                    <entry><literal>static</literal></entry>
-                    <entry>Unit is not enabled, but has no provisions for enabling in [Install] section</entry>
-                    <entry>0</entry>
-                  </row>
-                  <row>
-                    <entry><literal>disabled</literal></entry>
-                    <entry>Unit is not enabled</entry>
-                    <entry>1</entry>
-                  </row>
-                </tbody>
-              </tgroup>
-            </table>
-
           </listitem>
         </varlistentry>
 
@@ -1071,6 +1060,77 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
         </varlistentry>
 
         <varlistentry>
+          <term><command>is-enabled <replaceable>NAME</replaceable>...</command></term>
+
+          <listitem>
+            <para>Checks whether any of the specified unit files are
+            enabled (as with <command>enable</command>). Returns an
+            exit code of 0 if at least one is enabled, non-zero
+            otherwise. Prints the current enable status (see table).
+            To suppress this output, use <option>--quiet</option>.
+            </para>
+
+            <table>
+              <title>
+                <command>is-enabled</command> output
+              </title>
+
+              <tgroup cols='3'>
+                <thead>
+                  <row>
+                    <entry>Printed string</entry>
+                    <entry>Meaning</entry>
+                    <entry>Return value</entry>
+                  </row>
+                </thead>
+                <tbody>
+                  <row>
+                    <entry><literal>enabled</literal></entry>
+                    <entry morerows='1'>Enabled through a symlink in <filename>.wants</filename> directory (permanently or just in <filename>/run</filename>).</entry>
+                    <entry morerows='1'>0</entry>
+                  </row>
+                  <row>
+                    <entry><literal>enabled-runtime</literal></entry>
+                  </row>
+                  <row>
+                    <entry><literal>linked</literal></entry>
+                    <entry morerows='1'>Made available through a symlink to the unit file (permanently or just in <filename>/run</filename>).</entry>
+                    <entry morerows='1'>1</entry>
+                  </row>
+                  <row>
+                    <entry><literal>linked-runtime</literal></entry>
+                  </row>
+                  <row>
+                    <entry><literal>masked</literal></entry>
+                    <entry morerows='1'>Disabled entirely (permanently or just in <filename>/run</filename>).</entry>
+                    <entry morerows='1'>1</entry>
+                  </row>
+                  <row>
+                    <entry><literal>masked-runtime</literal></entry>
+                  </row>
+                  <row>
+                    <entry><literal>static</literal></entry>
+                    <entry>Unit file is not enabled, and has no provisions for enabling in the <literal>[Install]</literal> section.</entry>
+                    <entry>0</entry>
+                  </row>
+                  <row>
+                    <entry><literal>indirect</literal></entry>
+                    <entry>Unit file itself is not enabled, but it has a non-empty <varname>Also=</varname> setting in the <literal>[Install]</literal> section, listing other unit files that might be enabled.</entry>
+                    <entry>0</entry>
+                  </row>
+                  <row>
+                    <entry><literal>disabled</literal></entry>
+                    <entry>Unit file is not enabled.</entry>
+                    <entry>1</entry>
+                  </row>
+                </tbody>
+              </tgroup>
+            </table>
+
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><command>mask <replaceable>NAME</replaceable>...</command></term>
 
           <listitem>
@@ -1079,10 +1139,11 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <filename>/dev/null</filename>, making it impossible to
             start them. This is a stronger version of
             <command>disable</command>, since it prohibits all kinds of
-            activation of the unit, including manual activation. Use
-            this option with care. This honors the
+            activation of the unit, including enablement and manual
+            activation. Use this option with care. This honors the
             <option>--runtime</option> option to only mask temporarily
-            until the next reboot of the system.</para>
+            until the next reboot of the system. The <option>--now</option>
+            option can be used to ensure that the units are also stopped.</para>
           </listitem>
         </varlistentry>
 
@@ -1111,11 +1172,68 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
         </varlistentry>
 
         <varlistentry>
+          <term><command>add-wants <replaceable>TARGET</replaceable>
+          <replaceable>NAME</replaceable>...</command></term>
+          <term><command>add-requires <replaceable>TARGET</replaceable>
+          <replaceable>NAME</replaceable>...</command></term>
+
+          <listitem>
+            <para>Adds <literal>Wants=</literal> resp. <literal>Requires=</literal>
+            dependency to the specified <replaceable>TARGET</replaceable> for
+            one or more units. </para>
+
+            <para>This command honors <option>--system</option>,
+            <option>--user</option>, <option>--runtime</option> and
+            <option>--global</option> in a similar way as
+            <command>enable</command>.</para>
+
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><command>edit <replaceable>NAME</replaceable>...</command></term>
+
+          <listitem>
+            <para>Edit a drop-in snippet or a whole replacement file if
+            <option>--full</option> is specified, to extend or override the
+            specified unit.</para>
+
+            <para>Depending on whether <option>--system</option> (the default),
+            <option>--user</option>, or <option>--global</option> is specified,
+            this creates a drop-in file for each unit either for the system,
+            for the calling user or for all futures logins of all users. Then,
+            the editor (see the "Environment" section below) is invoked on
+            temporary files which will be written to the real location if the
+            editor exits successfully.</para>
+
+            <para>If <option>--full</option> is specified, this will copy the
+            original units instead of creating drop-in files.</para>
+
+            <para>If <option>--runtime</option> is specified, the changes will
+            be made temporarily in <filename>/run</filename> and they will be
+            lost on the next reboot.</para>
+
+            <para>If the temporary file is empty upon exit the modification of
+            the related unit is canceled</para>
+
+            <para>After the units have been edited, systemd configuration is
+            reloaded (in a way that is equivalent to <command>daemon-reload</command>).
+            </para>
+
+            <para>Note that this command cannot be used to remotely edit units
+            and that you cannot temporarily edit units which are in
+            <filename>/etc</filename> since they take precedence over
+            <filename>/run</filename>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><command>get-default</command></term>
 
           <listitem>
-            <para>Get the default target specified
-            via <filename>default.target</filename> link.</para>
+            <para>Return the default target to boot into. This returns
+            the target unit name <filename>default.target</filename>
+            is aliased (symlinked) to.</para>
           </listitem>
         </varlistentry>
 
@@ -1123,10 +1241,12 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <term><command>set-default <replaceable>NAME</replaceable></command></term>
 
           <listitem>
-            <para>Set the default target to boot into. Command links
-            <filename>default.target</filename> to the given unit.</para>
+            <para>Set the default target to boot into. This sets
+            (symlinks) the <filename>default.target</filename> alias
+            to the given target unit.</para>
           </listitem>
         </varlistentry>
+
       </variablelist>
     </refsect2>
 
@@ -1248,7 +1368,10 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           </listitem>
         </varlistentry>
         <varlistentry>
-          <term><command>import-environment <replaceable>VARIABLE</replaceable>...</command></term>
+          <term>
+            <command>import-environment</command>
+            <optional><replaceable>VARIABLE...</replaceable></optional>
+          </term>
 
           <listitem>
             <para>Import all, one or more environment variables set on
@@ -1271,13 +1394,16 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <term><command>daemon-reload</command></term>
 
           <listitem>
-            <para>Reload systemd manager configuration. This will reload
-            all unit files and recreate the entire dependency
-            tree. While the daemon is being reloaded, all sockets systemd
-            listens on on behalf of user configuration will stay
-            accessible.</para> <para>This command should not be confused
-            with the <command>load</command> or
-            <command>reload</command> commands.</para>
+            <para>Reload systemd manager configuration. This will
+            rerun all generators (see
+            <citerefentry><refentrytitle>systemd.generator</refentrytitle><manvolnum>7</manvolnum></citerefentry>),
+            reload all unit files, and recreate the entire dependency
+            tree. While the daemon is being reloaded, all sockets
+            systemd listens on behalf of user configuration will stay
+            accessible.</para>
+
+            <para>This command should not be confused with the
+            <command>reload</command> command.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1305,13 +1431,62 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <term><command>is-system-running</command></term>
 
           <listitem>
-            <para>Checks whether the system is running. This returns
-            success when the system is fully up and running, meaning
-            not in startup, shutdown or maintainance mode. Failure is
-            returned otherwise. In addition, the current state is
-            printed in a short string to standard output. Use
-            <option>--quiet</option> to suppress output of this state
-            string.</para>
+            <para>Checks whether the system is operational. This
+            returns success when the system is fully up and running,
+            meaning not in startup, shutdown or maintenance
+            mode. Failure is returned otherwise. In addition, the
+            current state is printed in a short string to standard
+            output, see table below. Use <option>--quiet</option> to
+            suppress this output.</para>
+
+            <table>
+              <title>Manager Operational States</title>
+              <tgroup cols='2'>
+                <colspec colname='name' />
+                <colspec colname='description' />
+                <thead>
+                  <row>
+                    <entry>Name</entry>
+                    <entry>Description</entry>
+                  </row>
+                </thead>
+                <tbody>
+                  <row>
+                    <entry><varname>initializing</varname></entry>
+                    <entry><para>Early bootup, before
+                    <filename>basic.target</filename> is reached
+                    or the <varname>maintenance</varname> state entered.
+                    </para></entry>
+                  </row>
+                  <row>
+                    <entry><varname>starting</varname></entry>
+                    <entry><para>Late bootup, before the job queue
+                    becomes idle for the first time, or one of the
+                    rescue targets are reached.</para></entry>
+                  </row>
+                  <row>
+                    <entry><varname>running</varname></entry>
+                    <entry><para>The system is fully
+                    operational.</para></entry>
+                  </row>
+                  <row>
+                    <entry><varname>degraded</varname></entry>
+                    <entry><para>The system is operational but one or more
+                    units failed.</para></entry>
+                  </row>
+                  <row>
+                    <entry><varname>maintenance</varname></entry>
+                    <entry><para>The rescue or emergency target is
+                    active.</para></entry>
+                  </row>
+                  <row>
+                    <entry><varname>stopping</varname></entry>
+                    <entry><para>The manager is shutting
+                    down.</para></entry>
+                  </row>
+                </tbody>
+              </tgroup>
+            </table>
           </listitem>
         </varlistentry>
 
@@ -1347,7 +1522,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
 
           <listitem>
             <para>Shut down and halt the system. This is mostly equivalent to
-            <command>start halt.target --irreversible</command>, but also
+            <command>start halt.target --job-mode=replace-irreversibly</command>, but also
             prints a wall message to all users.  If combined with
             <option>--force</option>, shutdown of all running services is
             skipped, however all processes are killed and all file
@@ -1363,7 +1538,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
 
           <listitem>
             <para>Shut down and power-off the system. This is mostly
-            equivalent to <command>start poweroff.target --irreversible</command>,
+            equivalent to <command>start poweroff.target --job-mode=replace-irreversibly</command>,
             but also prints a wall message to all users. If combined with
             <option>--force</option>, shutdown of all running services is
             skipped, however all processes are killed and all file
@@ -1379,7 +1554,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
 
           <listitem>
             <para>Shut down and reboot the system. This is mostly
-            equivalent to <command>start reboot.target --irreversible</command>,
+            equivalent to <command>start reboot.target --job-mode=replace-irreversibly</command>,
             but also prints a wall message to all users. If combined with
             <option>--force</option>, shutdown of all running services is
             skipped, however all processes are killed and all file
@@ -1400,12 +1575,13 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <quote>firmware over the air</quote> update.</para>
           </listitem>
         </varlistentry>
+
         <varlistentry>
           <term><command>kexec</command></term>
 
           <listitem>
             <para>Shut down and reboot the system via kexec. This is
-            mostly equivalent to <command>start kexec.target --irreversible</command>,
+            mostly equivalent to <command>start kexec.target --job-mode=replace-irreversibly</command>,
             but also prints a wall message to all users. If combined
             with <option>--force</option>, shutdown of all running
             services is skipped, however all processes are killed and
@@ -1413,6 +1589,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             immediately followed by the reboot.</para>
           </listitem>
         </varlistentry>
+
         <varlistentry>
           <term><command>exit</command></term>
 
@@ -1422,35 +1599,8 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             with the <option>--user</option> option) and will fail
             otherwise.</para>
           </listitem>
-
         </varlistentry>
-        <varlistentry>
-          <term><command>suspend</command></term>
 
-          <listitem>
-            <para>Suspend the system. This will trigger activation of
-            the special <filename>suspend.target</filename> target.
-            </para>
-          </listitem>
-        </varlistentry>
-        <varlistentry>
-          <term><command>hibernate</command></term>
-
-          <listitem>
-            <para>Hibernate the system. This will trigger activation of
-            the special <filename>hibernate.target</filename> target.
-            </para>
-          </listitem>
-        </varlistentry>
-        <varlistentry>
-          <term><command>hybrid-sleep</command></term>
-
-          <listitem>
-            <para>Hibernate and suspend the system. This will trigger
-            activation of the special
-            <filename>hybrid-sleep.target</filename> target.</para>
-          </listitem>
-        </varlistentry>
         <varlistentry>
           <term><command>switch-root <replaceable>ROOT</replaceable> <optional><replaceable>INIT</replaceable></optional></command></term>
 
@@ -1471,6 +1621,36 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             involved in the initrd boot.</para>
           </listitem>
         </varlistentry>
+
+        <varlistentry>
+          <term><command>suspend</command></term>
+
+          <listitem>
+            <para>Suspend the system. This will trigger activation of
+            the special <filename>suspend.target</filename> target.
+            </para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><command>hibernate</command></term>
+
+          <listitem>
+            <para>Hibernate the system. This will trigger activation of
+            the special <filename>hibernate.target</filename> target.
+            </para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><command>hybrid-sleep</command></term>
+
+          <listitem>
+            <para>Hibernate and suspend the system. This will trigger
+            activation of the special
+            <filename>hybrid-sleep.target</filename> target.</para>
+          </listitem>
+        </varlistentry>
       </variablelist>
     </refsect2>
 
@@ -1489,9 +1669,9 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
       <programlisting># systemctl start sshd</programlisting> and
       <programlisting># systemctl start sshd.service</programlisting>
       are equivalent, as are
-      <programlisting># systemctl isolate snapshot-11</programlisting>
+      <programlisting># systemctl isolate default</programlisting>
       and
-      <programlisting># systemctl isolate snapshot-11.snapshot</programlisting>
+      <programlisting># systemctl isolate default.target</programlisting>
       Note that (absolute) paths to device nodes are automatically
       converted to device unit names, and other (absolute) paths to
       mount unit names.
@@ -1507,11 +1687,11 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
       may match zero units and this is not considered an error.</para>
 
       <para>Glob patterns use
-      <citerefentry><refentrytitle>fnmatch</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+      <citerefentry project='man-pages'><refentrytitle>fnmatch</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       so normal shell-style globbing rules are used, and
       <literal>*</literal>, <literal>?</literal>,
       <literal>[]</literal> may be used. See
-      <citerefentry><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+      <citerefentry project='man-pages'><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>
       for more details. The patterns are matched against the names of
       currently loaded units, and patterns which do not match anything
       are silently skipped. For example:
@@ -1537,21 +1717,43 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
     code otherwise.</para>
   </refsect1>
 
-  <xi:include href="less-variables.xml" />
+  <refsect1>
+    <title>Environment</title>
+
+    <variablelist class='environment-variables'>
+      <varlistentry>
+        <term><varname>$SYSTEMD_EDITOR</varname></term>
+
+        <listitem><para>Editor to use when editing units; overrides
+        <varname>$EDITOR</varname> and <varname>$VISUAL</varname>. If neither
+        <varname>$SYSTEMD_EDITOR</varname> nor <varname>$EDITOR</varname> nor
+        <varname>$VISUAL</varname> are present or if it is set to an empty
+        string or if their execution failed, systemctl will try to execute well
+        known editors in this order:
+        <citerefentry project='die-net'><refentrytitle>nano</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+        <citerefentry project='die-net'><refentrytitle>vim</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+        <citerefentry project='die-net'><refentrytitle>vi</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
+        </para></listitem>
+      </varlistentry>
+    </variablelist>
+    <xi:include href="less-variables.xml" xpointer="pager"/>
+    <xi:include href="less-variables.xml" xpointer="less"/>
+  </refsect1>
 
   <refsect1>
     <title>See Also</title>
     <para>
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemadm</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>loginctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>machinectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.resource-management</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.special</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>wall</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.preset</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-      <citerefentry><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+      <citerefentry project='man-pages'><refentrytitle>wall</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd.preset</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd.generator</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+      <citerefentry project='man-pages'><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>
     </para>
   </refsect1>
 

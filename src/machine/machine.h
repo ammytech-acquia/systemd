@@ -22,10 +22,10 @@
 ***/
 
 typedef struct Machine Machine;
+typedef struct MachineOperation MachineOperation;
 typedef enum KillWho KillWho;
 
 #include "list.h"
-#include "util.h"
 #include "machined.h"
 
 typedef enum MachineState {
@@ -50,6 +50,17 @@ enum KillWho {
         _KILL_WHO_INVALID = -1
 };
 
+#define MACHINE_OPERATIONS_MAX 64
+
+struct MachineOperation {
+        Machine *machine;
+        pid_t pid;
+        sd_bus_message *message;
+        int errno_fd;
+        sd_event_source *event_source;
+        LIST_FIELDS(MachineOperation, operations);
+};
+
 struct Machine {
         Manager *manager;
 
@@ -72,11 +83,16 @@ struct Machine {
 
         bool in_gc_queue:1;
         bool started:1;
-        bool registered:1;
 
         sd_bus_message *create_message;
 
+        int *netif;
+        unsigned n_netif;
+
         LIST_FIELDS(Machine, gc_queue);
+
+        MachineOperation *operations;
+        unsigned n_operations;
 };
 
 Machine* machine_new(Manager *manager, const char *name);
@@ -89,21 +105,11 @@ int machine_save(Machine *m);
 int machine_load(Machine *m);
 int machine_kill(Machine *m, KillWho who, int signo);
 
+void machine_release_unit(Machine *m);
+
 MachineState machine_get_state(Machine *u);
 
-extern const sd_bus_vtable machine_vtable[];
-
-char *machine_bus_path(Machine *s);
-int machine_object_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error);
-int machine_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error);
-
-int bus_machine_method_terminate(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error);
-int bus_machine_method_kill(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error);
-int bus_machine_method_get_addresses(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error);
-int bus_machine_method_get_os_release(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error);
-
-int machine_send_signal(Machine *m, bool new_machine);
-int machine_send_create_reply(Machine *m, sd_bus_error *error);
+MachineOperation *machine_operation_unref(MachineOperation *o);
 
 const char* machine_class_to_string(MachineClass t) _const_;
 MachineClass machine_class_from_string(const char *s) _pure_;

@@ -25,9 +25,10 @@
 
 #include "util.h"
 #include "log.h"
+#include "rm-rf.h"
 #include "journal-file.h"
 #include "journal-verify.h"
-#include "journal-authenticate.h"
+#include "terminal-util.h"
 
 #define N_ENTRIES 6000
 #define RANDOM_RANGE 77
@@ -38,15 +39,15 @@ static void bit_toggle(const char *fn, uint64_t p) {
         int fd;
 
         fd = open(fn, O_RDWR|O_CLOEXEC);
-        assert(fd >= 0);
+        assert_se(fd >= 0);
 
         r = pread(fd, &b, 1, p/8);
-        assert(r == 1);
+        assert_se(r == 1);
 
         b ^= 1 << (p % 8);
 
         r = pwrite(fd, &b, 1, p/8);
-        assert(r == 1);
+        assert_se(r == 1);
 
         safe_close(fd);
 }
@@ -145,7 +146,7 @@ int main(int argc, char *argv[]) {
 
         log_info("Exiting...");
 
-        assert_se(rm_rf_dangerous(t, false, true, false) >= 0);
+        assert_se(rm_rf(t, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
 
         return 0;
 }

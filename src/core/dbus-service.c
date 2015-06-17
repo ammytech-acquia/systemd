@@ -23,7 +23,6 @@
 #include "path-util.h"
 #include "unit.h"
 #include "service.h"
-#include "dbus-unit.h"
 #include "dbus-execute.h"
 #include "dbus-kill.h"
 #include "dbus-cgroup.h"
@@ -59,7 +58,9 @@ const sd_bus_vtable bus_service_vtable[] = {
         SD_BUS_PROPERTY("MainPID", "u", bus_property_get_pid, offsetof(Service, main_pid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("ControlPID", "u", bus_property_get_pid, offsetof(Service, control_pid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("BusName", "s", NULL, offsetof(Service, bus_name), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("FileDescriptorStoreMax", "u", NULL, offsetof(Service, n_fd_store_max), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("StatusText", "s", NULL, offsetof(Service, status_text), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("StatusErrno", "i", NULL, offsetof(Service, status_errno), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Result", "s", property_get_result, offsetof(Service, result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_STATUS_VTABLE("ExecMain", offsetof(Service, main_exec_status), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPre", offsetof(Service, exec_command[SERVICE_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
@@ -186,10 +187,8 @@ static int bus_service_set_transient_property(
                         ExecCommand *c;
                         size_t size = 0;
 
-                        if (n == 0) {
-                                exec_command_free_list(s->exec_command[SERVICE_EXEC_START]);
-                                s->exec_command[SERVICE_EXEC_START] = NULL;
-                        }
+                        if (n == 0)
+                                s->exec_command[SERVICE_EXEC_START] = exec_command_free_list(s->exec_command[SERVICE_EXEC_START]);
 
                         f = open_memstream(&buf, &size);
                         if (!f)

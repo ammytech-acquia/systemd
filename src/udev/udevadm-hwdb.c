@@ -18,7 +18,6 @@
 ***/
 
 #include <stdlib.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <string.h>
 #include <ctype.h>
@@ -28,7 +27,8 @@
 #include "conf-files.h"
 
 #include "udev.h"
-#include "libudev-hwdb-def.h"
+#include "hwdb-internal.h"
+#include "hwdb-util.h"
 
 /*
  * Generic udev properties, key/value database based on modalias strings.
@@ -365,7 +365,12 @@ static int trie_store(struct trie *trie, const char *filename) {
         fchmod(fileno(t.f), 0444);
 
         /* write nodes */
-        fseeko(t.f, sizeof(struct trie_header_f), SEEK_SET);
+        err = fseeko(t.f, sizeof(struct trie_header_f), SEEK_SET);
+        if (err < 0) {
+                fclose(t.f);
+                unlink_noerrno(filename_tmp);
+                return -errno;
+        }
         root_off = trie_store_nodes(&t, trie->root);
         h.nodes_root_off = htole64(root_off);
         pos = ftello(t.f);
@@ -378,7 +383,12 @@ static int trie_store(struct trie *trie, const char *filename) {
         /* write header */
         size = ftello(t.f);
         h.file_size = htole64(size);
-        fseeko(t.f, 0, SEEK_SET);
+        err = fseeko(t.f, 0, SEEK_SET);
+        if (err < 0) {
+                fclose(t.f);
+                unlink_noerrno(filename_tmp);
+                return -errno;
+        }
         fwrite(&h, sizeof(struct trie_header_f), 1, t.f);
         err = ferror(t.f);
         if (err)
@@ -390,7 +400,7 @@ static int trie_store(struct trie *trie, const char *filename) {
         }
 
         log_debug("=== trie on-disk ===");
-        log_debug("size:             %8"PRIu64" bytes", size);
+        log_debug("size:             %8"PRIi64" bytes", size);
         log_debug("header:           %8zu bytes", sizeof(struct trie_header_f));
         log_debug("nodes:            %8"PRIu64" bytes (%8"PRIu64")",
                   t.nodes_count * sizeof(struct trie_node_f), t.nodes_count);
@@ -417,6 +427,10 @@ static int insert_data(struct trie *trie, struct udev_list *match_list,
 
         value[0] = '\0';
         value++;
+
+        /* libudev requires properties to start with a space */
+        while (isblank(line[0]) && isblank(line[1]))
+                line++;
 
         if (line[0] == '\0' || value[0] == '\0') {
                 log_error("Error, empty key or value '%s' in '%s':", line, filename);
@@ -526,14 +540,20 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
 static void help(void) {
         printf("Usage: udevadm hwdb OPTIONS\n"
                "  -u,--update          update the hardware database\n"
+               "  --usr                generate in " UDEVLIBEXECDIR " instead of /etc/udev\n"
                "  -t,--test=MODALIAS   query database and print result\n"
                "  -r,--root=PATH       alternative root path in the filesystem\n"
                "  -h,--help\n\n");
 }
 
 static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
+        enum {
+                ARG_USR = 0x100,
+        };
+
         static const struct option options[] = {
                 { "update", no_argument,       NULL, 'u' },
+                { "usr",    no_argument,       NULL, ARG_USR },
                 { "test",   required_argument, NULL, 't' },
                 { "root",   required_argument, NULL, 'r' },
                 { "help",   no_argument,       NULL, 'h' },
@@ -541,6 +561,7 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
         };
         const char *test = NULL;
         const char *root = "";
+        const char *hwdb_bin_dir = "/etc/udev";
         bool update = false;
         struct trie *trie = NULL;
         int err, c;
@@ -550,6 +571,9 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
                 switch(c) {
                 case 'u':
                         update = true;
+                        break;
+                case ARG_USR:
+                        hwdb_bin_dir = UDEVLIBEXECDIR;
                         break;
                 case 't':
                         test = optarg;
@@ -598,7 +622,7 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
 
                 err = conf_files_list_strv(&files, ".hwdb", root, conf_file_dirs);
                 if (err < 0) {
-                        log_error("failed to enumerate hwdb files: %s", strerror(-err));
+                        log_error_errno(err, "failed to enumerate hwdb files: %m");
                         rc = EXIT_FAILURE;
                         goto out;
                 }
@@ -624,27 +648,29 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
                 log_debug("strings dedup'ed: %8zu bytes (%8zu)",
                           trie->strings->dedup_len, trie->strings->dedup_count);
 
-                if (asprintf(&hwdb_bin, "%s/etc/udev/hwdb.bin", root) < 0) {
+                hwdb_bin = strjoin(root, "/", hwdb_bin_dir, "/hwdb.bin", NULL);
+                if (!hwdb_bin) {
                         rc = EXIT_FAILURE;
                         goto out;
                 }
                 mkdir_parents(hwdb_bin, 0755);
                 err = trie_store(trie, hwdb_bin);
                 if (err < 0) {
-                        log_error("Failure writing database %s: %s", hwdb_bin, strerror(-err));
+                        log_error_errno(err, "Failure writing database %s: %m", hwdb_bin);
                         rc = EXIT_FAILURE;
                 }
         }
 
         if (test) {
-                struct udev_hwdb *hwdb = udev_hwdb_new(udev);
+                _cleanup_hwdb_unref_ sd_hwdb *hwdb = NULL;
+                int r;
 
-                if (hwdb) {
-                        struct udev_list_entry *entry;
+                r = sd_hwdb_new(&hwdb);
+                if (r >= 0) {
+                        const char *key, *value;
 
-                        udev_list_entry_foreach(entry, udev_hwdb_get_properties_list_entry(hwdb, test, 0))
-                                printf("%s=%s\n", udev_list_entry_get_name(entry), udev_list_entry_get_value(entry));
-                        udev_hwdb_unref(hwdb);
+                        SD_HWDB_FOREACH_PROPERTY(hwdb, test, key, value)
+                                printf("%s=%s\n", key, value);
                 }
         }
 out:
@@ -660,5 +686,4 @@ out:
 const struct udevadm_cmd udevadm_hwdb = {
         .name = "hwdb",
         .cmd = adm_hwdb,
-        .help = "maintain the hardware database index",
 };

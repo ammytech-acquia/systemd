@@ -17,7 +17,11 @@
  * Boston, MA  02110-1301  USA
  */
 
+#pragma once
+
 #include <mtd/mtd-user.h>
+
+#include "macro.h"
 
 /* Full oob structure as written on the flash */
 struct sm_oob {
@@ -28,8 +32,7 @@ struct sm_oob {
         uint8_t ecc2[3];
         uint8_t lba_copy2[2];
         uint8_t ecc1[3];
-} __attribute__((packed));
-
+} _packed_;
 
 /* one sector is always 512 bytes, but it can consist of two nand pages */
 #define SM_SECTOR_SIZE                512
@@ -44,6 +47,5 @@ struct sm_oob {
 /* support for small page nand */
 #define SM_SMALL_PAGE                 256
 #define SM_SMALL_OOB_SIZE        8
-
 
 void probe_smart_media(int mtd_fd, mtd_info_t *info);

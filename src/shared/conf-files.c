@@ -19,13 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/stat.h>
 #include <dirent.h>
 
 #include "macro.h"
@@ -39,12 +36,13 @@
 
 static int files_add(Hashmap *h, const char *root, const char *path, const char *suffix) {
         _cleanup_closedir_ DIR *dir = NULL;
-        char *dirpath;
+        const char *dirpath;
+        int r;
 
         assert(path);
         assert(suffix);
 
-        dirpath = strappenda(root ? root : "", path);
+        dirpath = prefix_roota(root, path);
 
         dir = opendir(dirpath);
         if (!dir) {
@@ -56,7 +54,6 @@ static int files_add(Hashmap *h, const char *root, const char *path, const char 
         for (;;) {
                 struct dirent *de;
                 char *p;
-                int r;
 
                 errno = 0;
                 de = readdir(dir);
@@ -109,7 +106,7 @@ static int conf_files_list_strv_internal(char ***strv, const char *suffix, const
         if (!path_strv_resolve_uniq(dirs, root))
                 return -ENOMEM;
 
-        fh = hashmap_new(string_hash_func, string_compare_func);
+        fh = hashmap_new(&string_hash_ops);
         if (!fh)
                 return -ENOMEM;
 
@@ -118,8 +115,8 @@ static int conf_files_list_strv_internal(char ***strv, const char *suffix, const
                 if (r == -ENOMEM) {
                         return r;
                 } else if (r < 0)
-                        log_debug("Failed to search for files in %s: %s",
-                                  *p, strerror(-r));
+                        log_debug_errno(r, "Failed to search for files in %s: %m",
+                                        *p);
         }
 
         files = hashmap_get_strv(fh);
