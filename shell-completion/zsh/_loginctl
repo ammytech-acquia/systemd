@@ -37,12 +37,7 @@ for fun in session-status show-session activate lock-session unlock-session term
       _sys_all_sessions_descr[(i)$_ignore:*]=()
     done
 
-    if zstyle -T ":completion:${curcontext}:systemd-sessions" verbose; then
-      _describe -t systemd-sessions session _sys_all_sessions_descr _sys_all_sessions "$@"
-    else
-      local expl
-      _wanted systemd-sessions expl session compadd "$@" -a _sys_all_sessions
-    fi
+    _describe -t systemd-sessions session _sys_all_sessions_descr _sys_all_sessions "$@"
   }
 done
 
@@ -61,14 +56,8 @@ for fun in user-status show-user enable-linger disable-linger terminate-user kil
       _sys_all_users[(i)$_ignore]=()
       _sys_all_users_descr[(i)$_ignore:*]=()
     done
-
     # using the common tag `users' here, not rolling our own `systemd-users' tag
-    if zstyle -T ":completion:${curcontext}:users" verbose; then
-      _describe -t users user ${_sys_all_users_descr:+_sys_all_users_descr} _sys_all_users "$@"
-    else
-      local expl
-      _wanted users expl user compadd "$@" -a _sys_all_users
-    fi
+    _describe -t users user ${_sys_all_users_descr:+_sys_all_users_descr} _sys_all_users "$@"
   }
 done
 
@@ -83,12 +72,7 @@ done
     _sys_all_seats_descr[(i)$_ignore:*]=()
   done
 
-  if zstyle -T ":completion:${curcontext}:systemd-seats" verbose; then
-    _describe -t systemd-seats seat _sys_all_seats_descr _sys_all_seats "$@"
-  else
-    local expl
-    _wanted systemd-seats expl seat compadd "$@" -a _sys_all_seats
-  fi
+  _describe -t systemd-seats seat _sys_all_seats_descr _sys_all_seats "$@"
 }
 for fun in seat-status show-seat terminate-seat ; do
   (( $+functions[_loginctl_$fun] )) || _loginctl_$fun()

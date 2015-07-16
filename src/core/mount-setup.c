@@ -27,7 +27,6 @@
 
 #include "mount-setup.h"
 #include "dev-setup.h"
-#include "bus-util.h"
 #include "log.h"
 #include "macro.h"
 #include "util.h"
@@ -106,7 +105,7 @@ static const MountPoint mount_table[] = {
           is_efi_boot,   MNT_NONE                   },
 #endif
         { "kdbusfs",    "/sys/fs/kdbus",             "kdbusfs",    NULL, MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          is_kdbus_wanted,       MNT_IN_CONTAINER },
+          NULL,       MNT_IN_CONTAINER },
 };
 
 /* These are API file systems that might be mounted by other software,

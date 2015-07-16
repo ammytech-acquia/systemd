@@ -42,9 +42,9 @@ LIBUDEV_CURRENT=7
 LIBUDEV_REVISION=4
 LIBUDEV_AGE=6
 
-LIBSYSTEMD_CURRENT=9
+LIBSYSTEMD_CURRENT=8
 LIBSYSTEMD_REVISION=0
-LIBSYSTEMD_AGE=9
+LIBSYSTEMD_AGE=8
 
 # The following four libraries only exist for compatibility reasons,
 # their version info should not be bumped anymore
@@ -137,6 +137,7 @@ dist_udevrules_DATA =
 nodist_udevrules_DATA =
 dist_pkgsysconf_DATA =
 nodist_pkgsysconf_DATA =
+dist_pkgdata_DATA =
 dist_dbuspolicy_DATA =
 dist_dbussystemservice_DATA =
 dist_systemunit_DATA_busnames =
@@ -433,7 +434,6 @@ nodist_bashcompletion_DATA = \
 	shell-completion/bash/systemctl
 
 dist_zshcompletion_DATA = \
-	shell-completion/zsh/_busctl \
 	shell-completion/zsh/_journalctl \
 	shell-completion/zsh/_udevadm \
 	shell-completion/zsh/_kernel-install \
@@ -639,21 +639,13 @@ UNINSTALL_DATA_HOOKS += units-uninstall-hook
 
 dist_doc_DATA = \
 	README \
-	README.md \
 	NEWS \
-	CODING_STYLE \
 	LICENSE.LGPL2.1 \
 	LICENSE.GPL2 \
 	DISTRO_PORTING \
 	src/libsystemd/sd-bus/PORTING-DBUS1 \
 	src/libsystemd/sd-bus/DIFFERENCES \
-	src/libsystemd/sd-bus/GVARIANT-SERIALIZATION \
-	autogen.sh \
-	.dir-locals.el \
-	.vimrc \
-	.ycm_extra_conf.py \
-	.travis.yml \
-	.mailmap
+	src/libsystemd/sd-bus/GVARIANT-SERIALIZATION
 
 @INTLTOOL_POLICY_RULE@
 
@@ -708,14 +700,10 @@ noinst_DATA += \
 CLEANFILES += \
 	man/index.html
 
-XML_GLOB = $(wildcard $(top_srcdir)/man/*.xml)
 NON_INDEX_XML_FILES = $(filter-out man/systemd.index.xml,$(XML_FILES))
 SOURCE_XML_FILES = ${patsubst %,$(top_srcdir)/%,$(filter-out man/systemd.directives.xml,$(NON_INDEX_XML_FILES))}
 
-# This target should only be run manually. It recreates Makefile-man.am
-# file in the source directory based on all man/*.xml files. Run it after
-# adding, removing, or changing the conditional in a man page.
-update-man-list: $(top_srcdir)/tools/make-man-rules.py $(XML_GLOB)
+update-man-list: $(top_srcdir)/tools/make-man-rules.py $(SOURCE_XML_FILES)
 	$(AM_V_GEN)$(PYTHON) $^ > $(top_srcdir)/Makefile-man.tmp
 	$(AM_V_at)mv $(top_srcdir)/Makefile-man.tmp $(top_srcdir)/Makefile-man.am
 	@echo "Makefile-man.am has been regenerated"
@@ -732,19 +720,22 @@ CLEANFILES += \
 	man/systemd.index.xml \
 	man/systemd.directives.xml
 
-EXTRA_DIST += \
-	tools/make-man-rules.py
-
 endif
 
 endif
 
 EXTRA_DIST += \
-	$(filter-out man/systemd.directives.xml man/systemd.index.xml,$(XML_FILES)) \
+	$(filter-out man/systemd.directives.xml,$(XML_FILES)) \
+	$(HTML_FILES) \
+	$(HTML_ALIAS) \
+	$(man_MANS) \
 	tools/make-man-index.py \
 	tools/make-directive-index.py \
 	tools/xml_helper.py \
-	man/glib-event-glue.c
+	man/systemd.index.xml \
+	man/index.html \
+	man/glib-event-glue.c \
+	$(NULL)
 
 # ------------------------------------------------------------------------------
 noinst_LTLIBRARIES += \
@@ -2192,8 +2183,7 @@ dist_tmpfiles_DATA = \
 	tmpfiles.d/x11.conf \
 	tmpfiles.d/var.conf \
 	tmpfiles.d/home.conf \
-	tmpfiles.d/systemd-nspawn.conf \
-	tmpfiles.d/journal-nocow.conf
+	tmpfiles.d/systemd-nspawn.conf
 
 if HAVE_SYSV_COMPAT
 dist_tmpfiles_DATA += \
@@ -2570,10 +2560,7 @@ stub_sources = \
 	src/boot/efi/linux.c \
 	src/boot/efi/stub.c
 
-EXTRA_DIST += \
-	$(stub_sources) \
-	$(stub_headers) \
-	test/splash.bmp
+EXTRA_DIST += $(stub_sources) $(stub_headers)
 
 if ENABLE_EFI
 if HAVE_GNUEFI
@@ -3302,8 +3289,8 @@ noinst_PROGRAMS += \
 	systemd-modeset \
 	systemd-subterm
 
-pkgdata_DATA = \
-	src/libsystemd-terminal/unifont-glyph-array.bin
+dist_pkgdata_DATA += \
+       src/libsystemd-terminal/unifont-glyph-array.bin
 
 nodist_userunit_DATA += \
 	units/user/systemd-consoled.service
@@ -3490,6 +3477,7 @@ dist_network_DATA = \
 	network/80-container-ve.network
 
 dist_udevrules_DATA += \
+	rules/42-usb-hid-pm.rules \
 	rules/50-udev-default.rules \
 	rules/60-block.rules \
 	rules/60-drm.rules \
@@ -3501,6 +3489,7 @@ dist_udevrules_DATA += \
 	rules/60-serial.rules \
 	rules/64-btrfs.rules \
 	rules/70-mouse.rules \
+	rules/70-touchpad.rules \
 	rules/75-net-description.rules \
 	rules/78-sound-card.rules \
 	rules/80-net-setup-link.rules
@@ -3669,7 +3658,8 @@ dist_udevhwdb_DATA = \
 	hwdb/60-evdev.hwdb \
 	hwdb/60-keyboard.hwdb \
 	hwdb/70-mouse.hwdb \
-	hwdb/70-pointingstick.hwdb
+	hwdb/70-pointingstick.hwdb \
+	hwdb/70-touchpad.hwdb
 
 SYSINIT_TARGET_WANTS += \
 	systemd-hwdb-update.service
@@ -3693,15 +3683,18 @@ EXTRA_DIST += \
 
 # ------------------------------------------------------------------------------
 TESTS += \
-	test/udev-test.pl
+	test/udev-test.pl \
+	$(NULL)
 
 if HAVE_PYTHON
 TESTS += \
-	test/rule-syntax-check.py
+	test/rule-syntax-check.py \
+	$(NULL)
 
 if HAVE_SYSV_COMPAT
 TESTS += \
-	test/sysv-generator-test.py
+	test/sysv-generator-test.py \
+	$(NULL)
 endif
 endif
 
@@ -3740,7 +3733,9 @@ EXTRA_DIST += \
 	test/udev-test.pl \
 	test/rule-syntax-check.py \
 	test/sysv-generator-test.py \
-	test/mocks/fsck
+	test/mocks/fsck \
+	$(NULL)
+
 
 # ------------------------------------------------------------------------------
 ata_id_SOURCES = \
@@ -3803,6 +3798,19 @@ udevlibexec_PROGRAMS += \
 
 dist_udevrules_DATA += \
 	rules/60-persistent-v4l.rules
+
+# ------------------------------------------------------------------------------
+accelerometer_SOURCES = \
+	src/udev/accelerometer/accelerometer.c
+
+accelerometer_LDADD = \
+	libshared.la
+
+udevlibexec_PROGRAMS += \
+	accelerometer
+
+dist_udevrules_DATA += \
+	rules/61-accelerometer.rules
 
 # ------------------------------------------------------------------------------
 mtd_probe_SOURCES =  \
@@ -3905,6 +3913,7 @@ journal-remote-install-hook: journal-install-hook
 	-chmod 755 $(DESTDIR)/var/log/journal/remote
 
 INSTALL_EXEC_HOOKS += journal-remote-install-hook
+
 endif
 
 nodist_pkgsysconf_DATA += \
@@ -3912,8 +3921,8 @@ nodist_pkgsysconf_DATA += \
 
 EXTRA_DIST += \
 	units/systemd-journal-remote.service.in \
-	src/journal-remote/journal-remote.conf.in \
-	src/journal-remote/log-generator.py
+	src/journal-remote/journal-remote.conf.in
+
 endif
 
 if HAVE_LIBCURL
@@ -3938,6 +3947,7 @@ nodist_systemunit_DATA += \
 
 nodist_pkgsysconf_DATA += \
 	src/journal-remote/journal-upload.conf
+
 endif
 
 EXTRA_DIST += \
@@ -4671,7 +4681,7 @@ SYSTEM_UNIT_ALIASES += \
 BUSNAMES_TARGET_WANTS += \
 	org.freedesktop.locale1.busname
 
-dist_pkgdata_DATA = \
+dist_pkgdata_DATA += \
 	src/locale/kbd-model-map \
 	src/locale/language-fallback-map
 
@@ -5597,30 +5607,7 @@ EXTRA_DIST += \
 	units/systemd-user-sessions.service.in
 
 # ------------------------------------------------------------------------------
-EXTRA_DIST += \
-	test/Makefile \
-	test/README.testsuite \
-	test/TEST-01-BASIC \
-	test/TEST-01-BASIC/Makefile \
-	test/TEST-01-BASIC/test.sh \
-	test/TEST-02-CRYPTSETUP \
-	test/TEST-02-CRYPTSETUP/Makefile \
-	test/TEST-02-CRYPTSETUP/test.sh \
-	test/TEST-03-JOBS \
-	test/TEST-03-JOBS/Makefile \
-	test/TEST-03-JOBS/test-jobs.sh \
-	test/TEST-03-JOBS/test.sh \
-	test/test-functions
 
-EXTRA_DIST += \
-	test/loopy2.service \
-	test/loopy3.service \
-	test/loopy4.service \
-	test/loopy.service \
-	test/loopy.service.d \
-	test/loopy.service.d/compat.conf
-
-# ------------------------------------------------------------------------------
 if HAVE_PYTHON_DEVEL
 pkgpyexec_LTLIBRARIES = \
 	_journal.la \
@@ -5790,10 +5777,8 @@ BUILT_SOURCES += \
 	libsystemd-id128.c \
 	libsystemd-daemon.c
 
-nodist_libsystemd_journal_la_SOURCES = \
-	libsystemd-journal.c
-
 libsystemd_journal_la_SOURCES = \
+	libsystemd-journal.c \
 	src/compat-libs/libsystemd-journal.sym
 
 libsystemd_journal_la_CPPFLAGS = \
@@ -5809,10 +5794,8 @@ libsystemd_journal_la_LIBADD = \
 	libsystemd-journal-internal.la \
 	libsystemd-internal.la
 
-nodist_libsystemd_login_la_SOURCES = \
-	libsystemd-login.c
-
 libsystemd_login_la_SOURCES = \
+	libsystemd-login.c \
 	src/compat-libs/libsystemd-login.sym
 
 libsystemd_login_la_CPPFLAGS = \
@@ -5827,10 +5810,8 @@ libsystemd_login_la_LDFLAGS = \
 libsystemd_login_la_LIBADD = \
 	libsystemd-internal.la
 
-nodist_libsystemd_id128_la_SOURCES = \
-	libsystemd-id128.c
-
 libsystemd_id128_la_SOURCES = \
+	libsystemd-id128.c \
 	src/compat-libs/libsystemd-id128.sym
 
 libsystemd_id128_la_CPPFLAGS = \
@@ -5845,10 +5826,8 @@ libsystemd_id128_la_LDFLAGS = \
 libsystemd_id128_la_LIBADD = \
 	libsystemd-internal.la
 
-nodist_libsystemd_daemon_la_SOURCES = \
-	libsystemd-daemon.c
-
 libsystemd_daemon_la_SOURCES = \
+	libsystemd-daemon.c \
 	src/compat-libs/libsystemd-daemon.sym
 
 libsystemd_daemon_la_CPPFLAGS = \
@@ -6303,11 +6282,10 @@ hwdb-update:
 git-tag:
 	git tag -s "v$(VERSION)" -m "systemd $(VERSION)"
 
-.PHONY: git-tar
-git-tar:
-	git archive --format=tar --prefix=systemd-$(VERSION)/ HEAD | xz > systemd-$(VERSION).tar.xz
-
 www_target = www.freedesktop.org:/srv/www.freedesktop.org/www/software/systemd
+.PHONY: upload
+upload: all check dist
+	scp systemd-$(VERSION).tar.xz $(www_target)
 
 .PHONY: doc-sync
 doc-sync: all destdir-sphinx
@@ -6344,7 +6322,7 @@ exported-%: %
 	$(AM_V_GEN)$(NM) -g --defined-only $(builddir)/.libs/$(<:.la=.so) 2>&1 /dev/null | grep " T " | cut -d" " -f3 > $@
 
 exported: $(addprefix exported-, $(lib_LTLIBRARIES))
-	$(AM_V_GEN)sort -u $^ > $@
+	$(AM_V_GEN)cat $^ > $@
 
 .PHONY: check-api-docs
 check-api-docs: exported man
@@ -6409,12 +6387,12 @@ test-libudev-sym.c: \
 		src/udev/udev.h
 	$(generate-sym-test)
 
-nodist_test_libsystemd_sym_SOURCES = \
+test_libsystemd_sym_SOURCES = \
 	test-libsystemd-sym.c
 test_libsystemd_sym_LDADD = \
 	libsystemd.la
 
-nodist_test_libudev_sym_SOURCES = \
+test_libudev_sym_SOURCES = \
 	test-libudev-sym.c
 test_libudev_sym_CFLAGS = \
 	$(AM_CFLAGS) \
@@ -6423,12 +6401,8 @@ test_libudev_sym_LDADD = \
 	libudev.la
 
 BUILT_SOURCES += \
-	test-libsystemd-sym.c \
-	test-libudev-sym.c
-
-CLEANFILES += \
-	test-libsystemd-sym.c \
-	test-libudev-sym.c
+	$(test_libsystemd_sym_SOURCES) \
+	$(test_libudev_sym_SOURCES)
 
 tests += \
 	test-libsystemd-sym \

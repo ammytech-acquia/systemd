@@ -3627,7 +3627,7 @@ bool string_is_safe(const char *p) {
                 if (*t > 0 && *t < ' ')
                         return false;
 
-                if (strchr("\\\"\'\x7f", *t))
+                if (strchr("\\\"\'\0x7f", *t))
                         return false;
         }
 
@@ -5925,9 +5925,10 @@ int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char
         if (ret >= 0)
                 return 0;
 
-        /* renameat2() exists since Linux 3.15, btrfs added support for it later.
-         * If it is not implemented, fallback to another method. */
-        if (!IN_SET(errno, EINVAL, ENOSYS))
+        /* Even though renameat2() exists since Linux 3.15, btrfs added
+         * support for it later. If it is not implemented, fallback to another
+         * method. */
+        if (errno != EINVAL)
                 return -errno;
 
         /* The link()/unlink() fallback does not work on directories. But

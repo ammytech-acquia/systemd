@@ -25,6 +25,7 @@
 
 #include "conf-parser.h"
 #include "sd-netlink.h"
+#include "netlink-types.h"
 #include "networkd-netdev-bond.h"
 #include "missing.h"
 
@@ -371,10 +372,10 @@ int config_parse_arp_ip_target_address(const char *unit,
                 b->n_arp_ip_targets ++;
 
                 buffer = NULL;
-        }
 
-        if (b->n_arp_ip_targets > NETDEV_BOND_ARP_TARGETS_MAX)
-                log_syntax(unit, LOG_WARNING, filename, line, EINVAL, "More than the maximum number of kernel-supported ARP ip targets specified: %d > %d", b->n_arp_ip_targets, NETDEV_BOND_ARP_TARGETS_MAX);
+                if (b->n_arp_ip_targets > BOND_ARP_TARGETS_MAX)
+                        break;
+        }
 
         return 0;
 }

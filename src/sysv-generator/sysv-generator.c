@@ -240,21 +240,20 @@ static bool usage_contains_reload(const char *line) {
 }
 
 static char *sysv_translate_name(const char *name) {
-        _cleanup_free_ char *c = NULL;
-        char *res;
+        char *r;
 
-        c = strdup(name);
-        if (!c)
+        r = new(char, strlen(name) + strlen(".service") + 1);
+        if (!r)
                 return NULL;
 
-        res = endswith(c, ".sh");
-        if (res)
-                *res = 0;
+        if (endswith(name, ".sh"))
+                /* Drop .sh suffix */
+                strcpy(stpcpy(r, name) - 3, ".service");
+        else
+                /* Normal init script name */
+                strcpy(stpcpy(r, name), ".service");
 
-        if (unit_name_mangle(c, UNIT_NAME_NOGLOB, &res) < 0)
-                return NULL;
-
-        return res;
+        return r;
 }
 
 static int sysv_translate_facility(const char *name, const char *filename, char **_r) {
@@ -341,7 +340,6 @@ static int handle_provides(SysvStub *s, unsigned line, const char *full_text, co
 
         FOREACH_WORD_QUOTED(word, z, text, state_) {
                 _cleanup_free_ char *n = NULL, *m = NULL;
-                UnitType t;
 
                 n = strndup(word, z);
                 if (!n)
@@ -353,13 +351,12 @@ static int handle_provides(SysvStub *s, unsigned line, const char *full_text, co
                 if (r == 0)
                         continue;
 
-                t = unit_name_to_type(m);
-                if (t == UNIT_SERVICE) {
+                if (unit_name_to_type(m) == UNIT_SERVICE) {
                         log_debug("Adding Provides: alias '%s' for '%s'", m, s->name);
                         r = add_alias(s->name, m);
                         if (r < 0)
                                 log_warning_errno(r, "[%s:%u] Failed to add LSB Provides name %s, ignoring: %m", s->path, line, m);
-                } else if (t == UNIT_TARGET) {
+                } else {
                         /* NB: SysV targets which are provided by a
                          * service are pulled in by the services, as
                          * an indication that the generic service is
@@ -376,10 +373,7 @@ static int handle_provides(SysvStub *s, unsigned line, const char *full_text, co
                                 if (r < 0)
                                         return log_oom();
                         }
-                } else if (t == _UNIT_TYPE_INVALID)
-                        log_warning("Unit name '%s' is invalid", m);
-                else
-                        log_warning("Unknown unit type for unit '%s'", m);
+                }
         }
         if (!isempty(state_))
                 log_error("[%s:%u] Trailing garbage in Provides, ignoring.", s->path, line);

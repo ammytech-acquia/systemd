@@ -133,6 +133,8 @@ static int lldp_receive_frame(sd_lldp *lldp, tlv_packet *tlv) {
 
         lldp->statistics.stats_frames_in_total ++;
 
+        return 0;
+
  out:
         if (r < 0)
                 log_lldp("Receive frame failed: %s", strerror(-r));

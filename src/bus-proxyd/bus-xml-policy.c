@@ -301,7 +301,7 @@ static int file_load(Policy *p, const char *path) {
                                         ic = POLICY_ITEM_USER;
                                 else if (streq(name, "group"))
                                         ic = POLICY_ITEM_GROUP;
-                                else if (STR_IN_SET(name, "eavesdrop", "log")) {
+                                else if (streq(name, "eavesdrop")) {
                                         log_debug("Unsupported attribute %s= at %s:%u, ignoring.", name, path, line);
                                         state = STATE_ALLOW_DENY_OTHER_ATTRIBUTE;
                                         break;

@@ -1385,16 +1385,15 @@ int bus_kernel_read_message(sd_bus *bus, bool hint_priority, int64_t priority) {
                         r = 0;
                 }
 
-                if (r <= 0)
-                        close_kdbus_msg(bus, k);
-        } else if (k->payload_type == KDBUS_PAYLOAD_KERNEL) {
+        } else if (k->payload_type == KDBUS_PAYLOAD_KERNEL)
                 r = bus_kernel_translate_message(bus, k);
-                close_kdbus_msg(bus, k);
-        } else {
+        else {
                 log_debug("Ignoring message with unknown payload type %llu.", (unsigned long long) k->payload_type);
                 r = 0;
-                close_kdbus_msg(bus, k);
         }
+
+        if (r <= 0)
+                close_kdbus_msg(bus, k);
 
         return r < 0 ? r : 1;
 }
