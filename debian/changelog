@@ -1,31 +1,10 @@
-systemd (222-1ubuntu4) wily; urgency=medium
-
-  * debian/extra/initramfs-tools/hooks/udev: Fix for 70-persistent-net.rules.
-
- -- Adam Conrad <adconrad@ubuntu.com>  Mon, 13 Jul 2015 00:40:17 -0600
-
-systemd (222-1ubuntu3) wily; urgency=medium
-
-  * debian/udev-udeb.install: Fix the FTBFS created by the previous upload.
-
- -- Adam Conrad <adconrad@ubuntu.com>  Fri, 10 Jul 2015 16:40:19 -0600
-
-systemd (222-1ubuntu2) wily; urgency=medium
-
-  * debian/udev-udeb.install: Install new bits for net.ifnames (LP: #1473542)
-  * debian/extra/initramfs-tools/hooks/udev: Do the same for initramfs-tools.
-
- -- Adam Conrad <adconrad@ubuntu.com>  Fri, 10 Jul 2015 15:24:13 -0600
-
-systemd (222-1ubuntu1) wily; urgency=medium
+systemd (222-2ubuntu1) wily; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
       /etc/writable/ instead.
     - Keep our much simpler udev maintainer scripts (all platforms must
       support udev, no debconf).
-    - initramfs init-top: Drop scsi_wait_scan and udevadm settle, we do that
-      in a more sensible way with wait-for-root.
     - initramfs init-bottom: If LVM is installed, settle udev,
       otherwise we get missing LV symlinks. Workaround for LP #1185394.
     - Add debian/udev.lvm2.init: Dummy SysV init script to satisfy insserv
@@ -67,18 +46,46 @@ systemd (222-1ubuntu1) wily; urgency=medium
     - systemd Conflicts/Replaces/Provides systemd-services.
     - Remove obsolete systemd-logind upstart job.
     - Clean up obsolete /etc/udev/rules.d/README.
+    - systemd.postinst: Migrate mountall specific fstab options to standard
+      util-linux "nofail" option.
 
-  * systemd.postinst: Migrate mountall specific fstab options to standard
-    util-linux "nofail" option.
-  * Add autopkgtest for user session cgroup permissions. This covers our "Put
-    session scopes into all cgroup controllers" patch for unprivileged LXC
-    containers.
-  * core-Put-session-scopes-into-all-cgroup-controllers.patch: Update
-    unit_get_cgroup_mask() to declare that user session scope units want all
-    cgroup controllers, to avoid resetting them. This re-fixes user LXC
-    containers. (LP: #1470060)
+  * ifup@.service: Run ifup for "auto" class in ExecStart instead of
+    ExecStartPost, as it spawns a long-running dhclient daemon which we can
+    only do in ExecStart. (LP: #1466790)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 09 Jul 2015 06:54:41 +0200
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 16 Jul 2015 11:33:54 +0200
+
+systemd (222-3) UNRELEASED; urgency=medium
+
+  * systemd/udev postinst: Avoid "The group [...] already exists as a system
+    group. Exiting." warnings. (LP: #1475094)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 16 Jul 2015 07:24:55 +0200
+
+systemd (222-2) unstable; urgency=medium
+
+  [ Adam Conrad ]
+  * debian/udev-udeb.install: Install new bits for net.ifnames (LP: #1473542)
+  * debian/extra/initramfs-tools/hooks/udev: Do the same for initramfs-tools.
+
+  [ Martin Pitt ]
+  * emergency.service: Wait for plymouth to shut down. Fixes invisible
+    emergency shell with plymouth running endlessly. (LP: #1471258)
+  * Add "networkd" autopkgtest. Covers basic DHCP on IPv4 and IPv4+6 on a veth
+    device.
+
+  [ Michael Biebl ]
+  * Bump package priorities of systemd and systemd-sysv to important to match
+    what has been used in the Debian archive since Jessie.
+  * Drop scsi_wait_scan hack from the udev initramfs-tools script. This Linux
+    kernel module has been broken since 2.6.30 and as a result was removed in
+    3.5. The Debian Jessie kernel no longer ships this module.
+    (Closes: #752775)
+  * Drop libsystemd-journald-dev and libsystemd-id128-dev. There are no
+    reverse dependencies left and we want to avoid new packages picking up
+    a build dependency on those obsolete transitional packages.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 15 Jul 2015 23:51:15 +0200
 
 systemd (222-1) unstable; urgency=medium
 
