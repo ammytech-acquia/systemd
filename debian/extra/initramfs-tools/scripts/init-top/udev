@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-PREREQS="all_generic_ide blacklist"
+PREREQS=""
 
 prereqs() { echo "$PREREQS"; }
 
@@ -24,6 +24,7 @@ fi
 SYSTEMD_LOG_LEVEL=$log_level /lib/systemd/systemd-udevd --daemon --resolve-names=never
 
 udevadm trigger --action=add
+udevadm settle || true
 
 # Leave udev running to process events that come in out-of-band (like USB
 # connections)
