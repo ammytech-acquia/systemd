@@ -1332,8 +1332,7 @@ static int bus_kernel_translate_message(sd_bus *bus, struct kdbus_msg *k) {
         KDBUS_ITEM_FOREACH(d, k, items) {
                 if (d->type == KDBUS_ITEM_TIMESTAMP)
                         ts = &d->timestamp;
-
-                if (d->type >= _KDBUS_ITEM_KERNEL_BASE && d->type < _KDBUS_ITEM_KERNEL_BASE + ELEMENTSOF(translate)) {
+                else if (d->type >= _KDBUS_ITEM_KERNEL_BASE && d->type < _KDBUS_ITEM_KERNEL_BASE + ELEMENTSOF(translate)) {
                         if (found)
                                 return -EBADMSG;
                         found = d;
@@ -1385,15 +1384,16 @@ int bus_kernel_read_message(sd_bus *bus, bool hint_priority, int64_t priority) {
                         r = 0;
                 }
 
-        } else if (k->payload_type == KDBUS_PAYLOAD_KERNEL)
+                if (r <= 0)
+                        close_kdbus_msg(bus, k);
+        } else if (k->payload_type == KDBUS_PAYLOAD_KERNEL) {
                 r = bus_kernel_translate_message(bus, k);
-        else {
+                close_kdbus_msg(bus, k);
+        } else {
                 log_debug("Ignoring message with unknown payload type %llu.", (unsigned long long) k->payload_type);
                 r = 0;
-        }
-
-        if (r <= 0)
                 close_kdbus_msg(bus, k);
+        }
 
         return r < 0 ? r : 1;
 }

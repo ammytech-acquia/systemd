@@ -400,14 +400,14 @@
         <listitem><para>Bind mounts a directory from the host into the
         specified container. The first directory argument is the
         source directory on the host, the second directory argument
-        the source directory on the host. When the latter is omitted
-        the destination path in the container is the same as the
-        source path on the host. When combined with the
-        <option>--read-only</option> switch a ready-only bind mount is
-        created. When combined with the <option>--mkdir</option>
-        switch the destination path is first created before the mount
-        is applied. Note that this option is currently only supported
-        for
+        is the destination directory in the container. When the
+        latter is omitted the destination path in the container is
+        the same as the source path on the host. When combined with
+        the <option>--read-only</option> switch a ready-only bind
+        mount is created. When combined with the
+        <option>--mkdir</option> switch the destination path is first
+        created before the mount is applied. Note that this option is
+        currently only supported for
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         containers.</para></listitem>
       </varlistentry>
@@ -593,7 +593,7 @@
         <filename>/var/lib/machines/</filename>, that is named after
         the specified URL and its HTTP etag. A writable snapshot is
         then taken from this subvolume, and named after the specified
-        local name. This behaviour ensures that creating multiple
+        local name. This behavior ensures that creating multiple
         container instances of the same URL is efficient, as multiple
         downloads are not necessary. In order to create only the
         read-only image, and avoid creating its writable snapshot,
@@ -628,7 +628,7 @@
         <para>Image verification is identical for raw and tar images
         (see above).</para>
 
-        <para>If the the downloaded image is in
+        <para>If the downloaded image is in
         <filename>.qcow2</filename> format it is converted into a raw
         image file before it is made available.</para>
 
@@ -639,7 +639,7 @@
         machine name. To omit creation of the local, writable copy
         pass <literal>-</literal> as local machine name.</para>
 
-        <para>Similar to the behaviour of <command>pull-tar</command>,
+        <para>Similar to the behavior of <command>pull-tar</command>,
         the read-only image is prefixed with
         <filename>.raw-</filename>, and thus not shown by
         <command>list-images</command>, unless <option>--all</option>

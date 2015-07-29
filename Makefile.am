@@ -42,9 +42,9 @@ LIBUDEV_CURRENT=7
 LIBUDEV_REVISION=4
 LIBUDEV_AGE=6
 
-LIBSYSTEMD_CURRENT=8
+LIBSYSTEMD_CURRENT=10
 LIBSYSTEMD_REVISION=0
-LIBSYSTEMD_AGE=8
+LIBSYSTEMD_AGE=10
 
 # The following four libraries only exist for compatibility reasons,
 # their version info should not be bumped anymore
@@ -137,7 +137,6 @@ dist_udevrules_DATA =
 nodist_udevrules_DATA =
 dist_pkgsysconf_DATA =
 nodist_pkgsysconf_DATA =
-dist_pkgdata_DATA =
 dist_dbuspolicy_DATA =
 dist_dbussystemservice_DATA =
 dist_systemunit_DATA_busnames =
@@ -238,7 +237,6 @@ AM_CPPFLAGS = \
 	-I $(top_srcdir)/src/libsystemd/sd-hwdb \
 	-I $(top_srcdir)/src/libsystemd/sd-device \
 	-I $(top_srcdir)/src/libsystemd-network \
-	-I $(top_srcdir)/src/libsystemd-terminal \
 	$(OUR_CPPFLAGS)
 
 AM_CFLAGS = $(OUR_CFLAGS)
@@ -434,6 +432,7 @@ nodist_bashcompletion_DATA = \
 	shell-completion/bash/systemctl
 
 dist_zshcompletion_DATA = \
+	shell-completion/zsh/_busctl \
 	shell-completion/zsh/_journalctl \
 	shell-completion/zsh/_udevadm \
 	shell-completion/zsh/_kernel-install \
@@ -640,12 +639,22 @@ UNINSTALL_DATA_HOOKS += units-uninstall-hook
 dist_doc_DATA = \
 	README \
 	NEWS \
+	CODING_STYLE \
 	LICENSE.LGPL2.1 \
 	LICENSE.GPL2 \
 	DISTRO_PORTING \
 	src/libsystemd/sd-bus/PORTING-DBUS1 \
 	src/libsystemd/sd-bus/DIFFERENCES \
 	src/libsystemd/sd-bus/GVARIANT-SERIALIZATION
+
+EXTRA_DIST += \
+	README.md \
+	autogen.sh \
+	.dir-locals.el \
+	.vimrc \
+	.ycm_extra_conf.py \
+	.travis.yml \
+	.mailmap
 
 @INTLTOOL_POLICY_RULE@
 
@@ -700,10 +709,14 @@ noinst_DATA += \
 CLEANFILES += \
 	man/index.html
 
+XML_GLOB = $(wildcard $(top_srcdir)/man/*.xml)
 NON_INDEX_XML_FILES = $(filter-out man/systemd.index.xml,$(XML_FILES))
 SOURCE_XML_FILES = ${patsubst %,$(top_srcdir)/%,$(filter-out man/systemd.directives.xml,$(NON_INDEX_XML_FILES))}
 
-update-man-list: $(top_srcdir)/tools/make-man-rules.py $(SOURCE_XML_FILES)
+# This target should only be run manually. It recreates Makefile-man.am
+# file in the source directory based on all man/*.xml files. Run it after
+# adding, removing, or changing the conditional in a man page.
+update-man-list: $(top_srcdir)/tools/make-man-rules.py $(XML_GLOB)
 	$(AM_V_GEN)$(PYTHON) $^ > $(top_srcdir)/Makefile-man.tmp
 	$(AM_V_at)mv $(top_srcdir)/Makefile-man.tmp $(top_srcdir)/Makefile-man.am
 	@echo "Makefile-man.am has been regenerated"
@@ -720,22 +733,19 @@ CLEANFILES += \
 	man/systemd.index.xml \
 	man/systemd.directives.xml
 
+EXTRA_DIST += \
+	tools/make-man-rules.py
+
 endif
 
 endif
 
 EXTRA_DIST += \
-	$(filter-out man/systemd.directives.xml,$(XML_FILES)) \
-	$(HTML_FILES) \
-	$(HTML_ALIAS) \
-	$(man_MANS) \
+	$(filter-out man/systemd.directives.xml man/systemd.index.xml,$(XML_FILES)) \
 	tools/make-man-index.py \
 	tools/make-directive-index.py \
 	tools/xml_helper.py \
-	man/systemd.index.xml \
-	man/index.html \
-	man/glib-event-glue.c \
-	$(NULL)
+	man/glib-event-glue.c
 
 # ------------------------------------------------------------------------------
 noinst_LTLIBRARIES += \
@@ -780,6 +790,8 @@ libbasic_la_SOURCES = \
 	src/basic/siphash24.h \
 	src/basic/set.h \
 	src/basic/ordered-set.h \
+	src/basic/bitmap.c \
+	src/basic/bitmap.h \
 	src/basic/fdset.c \
 	src/basic/fdset.h \
 	src/basic/prioq.c \
@@ -1401,6 +1413,7 @@ tests += \
 	test-time \
 	test-hashmap \
 	test-set \
+	test-bitmap \
 	test-list \
 	test-unaligned \
 	test-tables \
@@ -1755,6 +1768,12 @@ test_set_SOURCES = \
 	src/test/test-set.c
 
 test_set_LDADD = \
+	libshared.la
+
+test_bitmap_SOURCES = \
+	src/test/test-bitmap.c
+
+test_bitmap_LDADD = \
 	libshared.la
 
 test_xml_SOURCES = \
@@ -2183,7 +2202,8 @@ dist_tmpfiles_DATA = \
 	tmpfiles.d/x11.conf \
 	tmpfiles.d/var.conf \
 	tmpfiles.d/home.conf \
-	tmpfiles.d/systemd-nspawn.conf
+	tmpfiles.d/systemd-nspawn.conf \
+	tmpfiles.d/journal-nocow.conf
 
 if HAVE_SYSV_COMPAT
 dist_tmpfiles_DATA += \
@@ -2560,7 +2580,10 @@ stub_sources = \
 	src/boot/efi/linux.c \
 	src/boot/efi/stub.c
 
-EXTRA_DIST += $(stub_sources) $(stub_headers)
+EXTRA_DIST += \
+	$(stub_sources) \
+	$(stub_headers) \
+	test/splash.bmp
 
 if ENABLE_EFI
 if HAVE_GNUEFI
@@ -2972,6 +2995,7 @@ tests += \
 	test-bus-cleanup \
 	test-bus-server \
 	test-bus-match \
+	test-bus-proxy \
 	test-bus-kernel \
 	test-bus-kernel-bloom \
 	test-bus-zero-copy \
@@ -3062,6 +3086,12 @@ test_bus_match_SOURCES = \
 	src/libsystemd/sd-bus/test-bus-match.c
 
 test_bus_match_LDADD = \
+	libshared.la
+
+test_bus_proxy_SOURCES = \
+	src/libsystemd/sd-bus/test-bus-proxy.c
+
+test_bus_proxy_LDADD = \
 	libshared.la
 
 test_bus_kernel_SOURCES = \
@@ -3277,145 +3307,6 @@ manual_tests += \
 	test-pppoe
 
 # ------------------------------------------------------------------------------
-if ENABLE_TERMINAL
-noinst_LTLIBRARIES += \
-	libsystemd-terminal.la
-
-rootlibexec_PROGRAMS += \
-	systemd-consoled
-
-noinst_PROGRAMS += \
-	systemd-evcat \
-	systemd-modeset \
-	systemd-subterm
-
-dist_pkgdata_DATA += \
-       src/libsystemd-terminal/unifont-glyph-array.bin
-
-nodist_userunit_DATA += \
-	units/user/systemd-consoled.service
-
-USER_DEFAULT_TARGET_WANTS += \
-	systemd-consoled.service
-
-tests += \
-	test-term-page \
-	test-term-parser \
-	test-unifont
-endif
-
-EXTRA_DIST += \
-	units/user/systemd-consoled.service.in
-
-libsystemd_terminal_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	$(TERMINAL_CFLAGS)
-
-libsystemd_terminal_la_SOURCES = \
-	src/libsystemd-terminal/grdev.h \
-	src/libsystemd-terminal/grdev-internal.h \
-	src/libsystemd-terminal/grdev.c \
-	src/libsystemd-terminal/grdev-drm.c \
-	src/libsystemd-terminal/idev.h \
-	src/libsystemd-terminal/idev-internal.h \
-	src/libsystemd-terminal/idev.c \
-	src/libsystemd-terminal/idev-evdev.c \
-	src/libsystemd-terminal/idev-keyboard.c \
-	src/libsystemd-terminal/sysview.h \
-	src/libsystemd-terminal/sysview-internal.h \
-	src/libsystemd-terminal/sysview.c \
-	src/libsystemd-terminal/term.h \
-	src/libsystemd-terminal/term-internal.h \
-	src/libsystemd-terminal/term-charset.c \
-	src/libsystemd-terminal/term-page.c \
-	src/libsystemd-terminal/term-parser.c \
-	src/libsystemd-terminal/term-screen.c \
-	src/libsystemd-terminal/term-wcwidth.c \
-	src/libsystemd-terminal/unifont.h \
-	src/libsystemd-terminal/unifont-def.h \
-	src/libsystemd-terminal/unifont.c
-
-libsystemd_terminal_la_LIBADD = \
-	libshared.la \
-	$(TERMINAL_LIBS)
-
-systemd_consoled_CFLAGS = \
-	$(AM_CFLAGS) \
-	$(TERMINAL_CFLAGS)
-
-systemd_consoled_SOURCES = \
-	src/console/consoled.h \
-	src/console/consoled.c \
-	src/console/consoled-display.c \
-	src/console/consoled-manager.c \
-	src/console/consoled-session.c \
-	src/console/consoled-terminal.c \
-	src/console/consoled-workspace.c
-
-systemd_consoled_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la \
-	$(TERMINAL_LIBS)
-
-systemd_evcat_CFLAGS = \
-	$(AM_CFLAGS) \
-	$(TERMINAL_CFLAGS)
-
-systemd_evcat_SOURCES = \
-	src/libsystemd-terminal/evcat.c
-
-systemd_evcat_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la \
-	$(TERMINAL_LIBS)
-
-systemd_modeset_CFLAGS = \
-	$(AM_CFLAGS) \
-	$(TERMINAL_CFLAGS)
-
-systemd_modeset_SOURCES = \
-	src/libsystemd-terminal/modeset.c
-
-systemd_modeset_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la \
-	$(TERMINAL_LIBS)
-
-systemd_subterm_SOURCES = \
-	src/libsystemd-terminal/subterm.c
-
-systemd_subterm_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la
-
-test_term_page_SOURCES = \
-	src/libsystemd-terminal/test-term-page.c
-
-test_term_page_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la
-
-test_term_parser_SOURCES = \
-	src/libsystemd-terminal/test-term-parser.c
-
-test_term_parser_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la
-
-test_unifont_SOURCES = \
-	src/libsystemd-terminal/test-unifont.c
-
-test_unifont_LDADD = \
-	libsystemd-terminal.la \
-	libshared.la
-
-src/libsystemd-terminal/unifont-glyph-array.bin: tools/compile-unifont.py $(UNIFONT)
-	$(AM_V_GEN)$(PYTHON) $< <$(UNIFONT) >$@
-
-EXTRA_DIST += \
-	tools/compile-unifont.py
-
-# ------------------------------------------------------------------------------
 include_HEADERS += \
 	src/libudev/libudev.h
 
@@ -3477,7 +3368,6 @@ dist_network_DATA = \
 	network/80-container-ve.network
 
 dist_udevrules_DATA += \
-	rules/42-usb-hid-pm.rules \
 	rules/50-udev-default.rules \
 	rules/60-block.rules \
 	rules/60-drm.rules \
@@ -3489,7 +3379,6 @@ dist_udevrules_DATA += \
 	rules/60-serial.rules \
 	rules/64-btrfs.rules \
 	rules/70-mouse.rules \
-	rules/70-touchpad.rules \
 	rules/75-net-description.rules \
 	rules/78-sound-card.rules \
 	rules/80-net-setup-link.rules
@@ -3658,8 +3547,7 @@ dist_udevhwdb_DATA = \
 	hwdb/60-evdev.hwdb \
 	hwdb/60-keyboard.hwdb \
 	hwdb/70-mouse.hwdb \
-	hwdb/70-pointingstick.hwdb \
-	hwdb/70-touchpad.hwdb
+	hwdb/70-pointingstick.hwdb
 
 SYSINIT_TARGET_WANTS += \
 	systemd-hwdb-update.service
@@ -3683,18 +3571,15 @@ EXTRA_DIST += \
 
 # ------------------------------------------------------------------------------
 TESTS += \
-	test/udev-test.pl \
-	$(NULL)
+	test/udev-test.pl
 
 if HAVE_PYTHON
 TESTS += \
-	test/rule-syntax-check.py \
-	$(NULL)
+	test/rule-syntax-check.py
 
 if HAVE_SYSV_COMPAT
 TESTS += \
-	test/sysv-generator-test.py \
-	$(NULL)
+	test/sysv-generator-test.py
 endif
 endif
 
@@ -3733,9 +3618,7 @@ EXTRA_DIST += \
 	test/udev-test.pl \
 	test/rule-syntax-check.py \
 	test/sysv-generator-test.py \
-	test/mocks/fsck \
-	$(NULL)
-
+	test/mocks/fsck
 
 # ------------------------------------------------------------------------------
 ata_id_SOURCES = \
@@ -3798,19 +3681,6 @@ udevlibexec_PROGRAMS += \
 
 dist_udevrules_DATA += \
 	rules/60-persistent-v4l.rules
-
-# ------------------------------------------------------------------------------
-accelerometer_SOURCES = \
-	src/udev/accelerometer/accelerometer.c
-
-accelerometer_LDADD = \
-	libshared.la
-
-udevlibexec_PROGRAMS += \
-	accelerometer
-
-dist_udevrules_DATA += \
-	rules/61-accelerometer.rules
 
 # ------------------------------------------------------------------------------
 mtd_probe_SOURCES =  \
@@ -3913,7 +3783,6 @@ journal-remote-install-hook: journal-install-hook
 	-chmod 755 $(DESTDIR)/var/log/journal/remote
 
 INSTALL_EXEC_HOOKS += journal-remote-install-hook
-
 endif
 
 nodist_pkgsysconf_DATA += \
@@ -3921,8 +3790,8 @@ nodist_pkgsysconf_DATA += \
 
 EXTRA_DIST += \
 	units/systemd-journal-remote.service.in \
-	src/journal-remote/journal-remote.conf.in
-
+	src/journal-remote/journal-remote.conf.in \
+	src/journal-remote/log-generator.py
 endif
 
 if HAVE_LIBCURL
@@ -3947,7 +3816,6 @@ nodist_systemunit_DATA += \
 
 nodist_pkgsysconf_DATA += \
 	src/journal-remote/journal-upload.conf
-
 endif
 
 EXTRA_DIST += \
@@ -4681,7 +4549,7 @@ SYSTEM_UNIT_ALIASES += \
 BUSNAMES_TARGET_WANTS += \
 	org.freedesktop.locale1.busname
 
-dist_pkgdata_DATA += \
+dist_pkgdata_DATA = \
 	src/locale/kbd-model-map \
 	src/locale/language-fallback-map
 
@@ -5110,6 +4978,8 @@ systemd_resolved_SOURCES = \
 	src/resolve/resolved-bus.h \
 	src/resolve/resolved-link.h \
 	src/resolve/resolved-link.c \
+	src/resolve/resolved-llmnr.h \
+	src/resolve/resolved-llmnr.c \
 	src/resolve/resolved-def.h \
 	src/resolve/resolved-dns-rr.h \
 	src/resolve/resolved-dns-rr.c \
@@ -5607,163 +5477,28 @@ EXTRA_DIST += \
 	units/systemd-user-sessions.service.in
 
 # ------------------------------------------------------------------------------
+EXTRA_DIST += \
+	test/Makefile \
+	test/README.testsuite \
+	test/TEST-01-BASIC \
+	test/TEST-01-BASIC/Makefile \
+	test/TEST-01-BASIC/test.sh \
+	test/TEST-02-CRYPTSETUP \
+	test/TEST-02-CRYPTSETUP/Makefile \
+	test/TEST-02-CRYPTSETUP/test.sh \
+	test/TEST-03-JOBS \
+	test/TEST-03-JOBS/Makefile \
+	test/TEST-03-JOBS/test-jobs.sh \
+	test/TEST-03-JOBS/test.sh \
+	test/test-functions
 
-if HAVE_PYTHON_DEVEL
-pkgpyexec_LTLIBRARIES = \
-	_journal.la \
-	id128.la \
-	_daemon.la \
-	_reader.la \
-	login.la
-
-_journal_la_SOURCES = \
-	src/python-systemd/_journal.c
-
-_journal_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	-fvisibility=default \
-	$(PYTHON_DEVEL_CFLAGS)
-
-_journal_la_LDFLAGS = \
-	$(AM_LDFLAGS) \
-	-shared \
-	-module \
-	-avoid-version
-
-_journal_la_LIBADD = \
-	$(PYTHON_DEVEL_LIBS) \
-	libsystemd.la
-
-id128_la_SOURCES = \
-	src/python-systemd/id128.c \
-	src/python-systemd/pyutil.c \
-	src/python-systemd/pyutil.h
-
-nodist_id128_la_SOURCES = \
-	src/python-systemd/id128-constants.h
-
-id128_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	-fvisibility=default \
-	$(PYTHON_DEVEL_CFLAGS) \
-	-I$(top_builddir)/src/python-systemd
-
-id128_la_LDFLAGS = \
-	$(AM_LDFLAGS) \
-	-shared \
-	-module \
-	-avoid-version
-
-id128_la_LIBADD = \
-	$(PYTHON_DEVEL_LIBS) \
-	libshared.la \
-	libsystemd.la
-
-_daemon_la_SOURCES = \
-	src/python-systemd/_daemon.c \
-	src/python-systemd/pyutil.c \
-	src/python-systemd/pyutil.h
-
-_daemon_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	-fvisibility=default \
-	$(PYTHON_DEVEL_CFLAGS) \
-	-I$(top_builddir)/src/python-systemd
-
-_daemon_la_LDFLAGS = \
-	$(AM_LDFLAGS) \
-	-shared \
-	-module \
-	-avoid-version
-
-_daemon_la_LIBADD = \
-	$(PYTHON_DEVEL_LIBS) \
-	libshared.la \
-	libsystemd.la
-
-_reader_la_SOURCES = \
-	src/python-systemd/_reader.c \
-	src/python-systemd/pyutil.c \
-	src/python-systemd/pyutil.h
-
-_reader_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	-fvisibility=default \
-	$(PYTHON_DEVEL_CFLAGS)
-
-_reader_la_LDFLAGS = \
-	$(AM_LDFLAGS) \
-	-shared \
-	-module \
-	-avoid-version
-
-_reader_la_LIBADD = \
-	$(PYTHON_DEVEL_LIBS) \
-	libshared.la \
-	libsystemd.la
-
-login_la_SOURCES = \
-	src/python-systemd/login.c \
-	src/python-systemd/pyutil.c \
-	src/python-systemd/pyutil.h
-
-login_la_CFLAGS = \
-	$(AM_CFLAGS) \
-	-fvisibility=default \
-	$(PYTHON_DEVEL_CFLAGS)
-
-login_la_LDFLAGS = \
-	$(AM_LDFLAGS) \
-	-shared \
-	-module \
-	-avoid-version
-
-login_la_LIBADD = \
-	$(PYTHON_DEVEL_LIBS) \
-	libshared.la \
-	libsystemd.la
-
-dist_pkgpyexec_PYTHON = \
-	src/python-systemd/journal.py \
-	src/python-systemd/daemon.py \
-	src/python-systemd/__init__.py
-
-src/python-systemd/id128-constants.h: src/systemd/sd-messages.h
-	$(AM_V_at)$(MKDIR_P) $(dir $@)
-	$(AM_V_GEN)$(SED) -n -r 's/,//g; s/#define (SD_MESSAGE_[A-Z0-9_]+)\s.*/add_id(m, "\1", \1) JOINER/p' <$< >$@
-
-BUILT_SOURCES += \
-	$(nodist_id128_la_SOURCES)
-
-SPHINXOPTS = -D version=$(VERSION) -D release=$(VERSION)
-sphinx-%:
-	$(AM_V_at)test -n "$(SPHINX_BUILD)" || { echo " *** sphinx-build is not available"; exit 1; }
-	$(AM_V_GEN)PYTHONPATH=$(DESTDIR)$(pyexecdir) LD_LIBRARY_PATH=$(DESTDIR)$(libdir) $(SPHINX_BUILD) -b $* $(SPHINXOPTS) $(top_srcdir)/src/python-systemd/docs $(top_builddir)/docs/html/python-systemd/
-	$(AM_V_at)echo Output has been generated in $(abs_top_builddir)/docs/html/python-systemd/
-
-python-shell:
-	$(AM_V_at)echo "Starting python with $(DESTDIR)$(pyexecdir)"
-	$(AM_V_at)PYTHONPATH=$(DESTDIR)$(pyexecdir) LD_LIBRARY_PATH=$(DESTDIR)$(libdir) $(PYTHON)
-
-destdir-sphinx: all
-	dir="$$(mktemp -d /tmp/systemd-install.XXXXXX)" && \
-		$(MAKE) DESTDIR="$$dir" install && \
-		$(MAKE) DESTDIR="$$dir" sphinx-html && \
-		rm -rf "$$dir"
-
-endif
-
-CLEAN_LOCAL_HOOKS += clean-sphinx
-
-.PHONY: python-shell destdir-sphinx clean-sphinx clean-python
-
-clean-sphinx:
-	-rm -rf docs/html/python-systemd/
-
-# Remove Python stuff, e.g. to force rebuilding for a different Python version.
-clean-python:
-	-rm -rf src/python-systemd/.libs src/python-systemd/*.l[ao]
-	-rm -f _daemon.la id128.la _journal.la login.la _reader.la
+EXTRA_DIST += \
+	test/loopy2.service \
+	test/loopy3.service \
+	test/loopy4.service \
+	test/loopy.service \
+	test/loopy.service.d \
+	test/loopy.service.d/compat.conf
 
 # ------------------------------------------------------------------------------
 if ENABLE_COMPAT_LIBS
@@ -5777,8 +5512,10 @@ BUILT_SOURCES += \
 	libsystemd-id128.c \
 	libsystemd-daemon.c
 
+nodist_libsystemd_journal_la_SOURCES = \
+	libsystemd-journal.c
+
 libsystemd_journal_la_SOURCES = \
-	libsystemd-journal.c \
 	src/compat-libs/libsystemd-journal.sym
 
 libsystemd_journal_la_CPPFLAGS = \
@@ -5794,8 +5531,10 @@ libsystemd_journal_la_LIBADD = \
 	libsystemd-journal-internal.la \
 	libsystemd-internal.la
 
+nodist_libsystemd_login_la_SOURCES = \
+	libsystemd-login.c
+
 libsystemd_login_la_SOURCES = \
-	libsystemd-login.c \
 	src/compat-libs/libsystemd-login.sym
 
 libsystemd_login_la_CPPFLAGS = \
@@ -5810,8 +5549,10 @@ libsystemd_login_la_LDFLAGS = \
 libsystemd_login_la_LIBADD = \
 	libsystemd-internal.la
 
+nodist_libsystemd_id128_la_SOURCES = \
+	libsystemd-id128.c
+
 libsystemd_id128_la_SOURCES = \
-	libsystemd-id128.c \
 	src/compat-libs/libsystemd-id128.sym
 
 libsystemd_id128_la_CPPFLAGS = \
@@ -5826,8 +5567,10 @@ libsystemd_id128_la_LDFLAGS = \
 libsystemd_id128_la_LIBADD = \
 	libsystemd-internal.la
 
+nodist_libsystemd_daemon_la_SOURCES = \
+	libsystemd-daemon.c
+
 libsystemd_daemon_la_SOURCES = \
-	libsystemd-daemon.c \
 	src/compat-libs/libsystemd-daemon.sym
 
 libsystemd_daemon_la_CPPFLAGS = \
@@ -5929,7 +5672,6 @@ substitutions = \
        '|RC_LOCAL_SCRIPT_PATH_START=$(RC_LOCAL_SCRIPT_PATH_START)|' \
        '|RC_LOCAL_SCRIPT_PATH_STOP=$(RC_LOCAL_SCRIPT_PATH_STOP)|' \
        '|PYTHON=$(PYTHON)|' \
-       '|PYTHON_BINARY=$(PYTHON_BINARY)|' \
        '|NTP_SERVERS=$(NTP_SERVERS)|' \
        '|DNS_SERVERS=$(DNS_SERVERS)|' \
        '|systemuidmax=$(SYSTEM_UID_MAX)|' \
@@ -6230,11 +5972,6 @@ DISTCHECK_CONFIGURE_FLAGS += \
 	--with-sysvrcnd-path=
 endif
 
-if HAVE_PYTHON
-DISTCHECK_CONFIGURE_FLAGS += \
-	--with-python
-endif
-
 if ENABLE_SPLIT_USR
 DISTCHECK_CONFIGURE_FLAGS += \
 	--enable-split-usr
@@ -6278,19 +6015,22 @@ hwdb-update:
 		http://standards.ieee.org/develop/regauth/iab/iab.txt && \
 	./ids-update.pl )
 
+.PHONY: built-sources
+built-sources: $(BUILT_SOURCES)
+
 .PHONY: git-tag
 git-tag:
 	git tag -s "v$(VERSION)" -m "systemd $(VERSION)"
 
+.PHONY: git-tar
+git-tar:
+	git archive --format=tar --prefix=systemd-$(VERSION)/ HEAD | xz > systemd-$(VERSION).tar.xz
+
 www_target = www.freedesktop.org:/srv/www.freedesktop.org/www/software/systemd
-.PHONY: upload
-upload: all check dist
-	scp systemd-$(VERSION).tar.xz $(www_target)
 
 .PHONY: doc-sync
 doc-sync: all destdir-sphinx
 	rsync -rlv --delete-excluded --include="*.html" --exclude="*" --omit-dir-times man/ $(www_target)/man/
-	rsync -rlv --delete --omit-dir-times docs/html/python-systemd/ $(www_target)/python-systemd/
 
 .PHONY: gardel
 gardel: upload
@@ -6322,7 +6062,7 @@ exported-%: %
 	$(AM_V_GEN)$(NM) -g --defined-only $(builddir)/.libs/$(<:.la=.so) 2>&1 /dev/null | grep " T " | cut -d" " -f3 > $@
 
 exported: $(addprefix exported-, $(lib_LTLIBRARIES))
-	$(AM_V_GEN)cat $^ > $@
+	$(AM_V_GEN)sort -u $^ > $@
 
 .PHONY: check-api-docs
 check-api-docs: exported man
@@ -6387,12 +6127,12 @@ test-libudev-sym.c: \
 		src/udev/udev.h
 	$(generate-sym-test)
 
-test_libsystemd_sym_SOURCES = \
+nodist_test_libsystemd_sym_SOURCES = \
 	test-libsystemd-sym.c
 test_libsystemd_sym_LDADD = \
 	libsystemd.la
 
-test_libudev_sym_SOURCES = \
+nodist_test_libudev_sym_SOURCES = \
 	test-libudev-sym.c
 test_libudev_sym_CFLAGS = \
 	$(AM_CFLAGS) \
@@ -6401,8 +6141,12 @@ test_libudev_sym_LDADD = \
 	libudev.la
 
 BUILT_SOURCES += \
-	$(test_libsystemd_sym_SOURCES) \
-	$(test_libudev_sym_SOURCES)
+	test-libsystemd-sym.c \
+	test-libudev-sym.c
+
+CLEANFILES += \
+	test-libsystemd-sym.c \
+	test-libudev-sym.c
 
 tests += \
 	test-libsystemd-sym \

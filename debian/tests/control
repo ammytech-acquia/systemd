@@ -14,12 +14,16 @@ Tests: unit-config
 Depends: systemd, python3
 Restrictions: needs-root, allow-stderr
 
+Tests: networkd
+Depends: systemd-sysv, python3, dnsmasq-base
+Restrictions: needs-root, isolation-container
+
 Tests: build-login
 Depends: libsystemd-dev, build-essential, pkg-config
 Restrictions: isolation-container
 
 Tests: boot-and-services
-Depends: systemd-sysv, lightdm, cron, network-manager, busybox-static, apparmor, python3
+Depends: systemd-sysv, xserver-xorg-video-dummy, lightdm, cron, network-manager, busybox-static, apparmor, python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
 Tests: ifupdown-hotplug
@@ -31,7 +35,7 @@ Depends: systemd-sysv, cron, network-manager, python3
 Restrictions: needs-root, isolation-machine, breaks-testbed
 
 Tests: display-managers
-Depends: systemd-sysv, lightdm, python3
+Depends: systemd-sysv, lightdm, xserver-xorg-video-dummy, python3
 Restrictions: needs-root, isolation-machine, breaks-testbed
 
 Tests: boot-smoke
@@ -39,5 +43,5 @@ Depends: systemd-sysv, network-manager, policykit-1, lightdm
 Restrictions: needs-recommends, needs-root, isolation-container, allow-stderr
 
 Tests: systemd-fsckd
-Depends: systemd, systemd-sysv, python3, lightdm, plymouth
+Depends: systemd-sysv, python3, plymouth
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed

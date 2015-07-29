@@ -107,9 +107,15 @@ static int network_load_one(Manager *manager, const char *filename) {
         network->dhcp_route_metric = DHCP_ROUTE_METRIC;
         network->dhcp_client_identifier = DHCP_CLIENT_ID_DUID;
 
+        network->use_bpdu = true;
+        network->allow_port_to_be_root = true;
+        network->unicast_flood = true;
+
         network->llmnr = LLMNR_SUPPORT_YES;
 
         network->link_local = ADDRESS_FAMILY_IPV6;
+
+        network->ipv6_privacy_extensions = IPV6_PRIVACY_EXTENSIONS_NO;
 
         r = config_parse(NULL, filename, file,
                          "Match\0"
@@ -205,6 +211,7 @@ void network_free(Network *network) {
 
         free(network->description);
         free(network->dhcp_vendor_class_identifier);
+        free(network->hostname);
 
         free(network->mac);
 
@@ -421,6 +428,7 @@ int config_parse_netdev(const char *unit,
                 break;
         case NETDEV_KIND_VLAN:
         case NETDEV_KIND_MACVLAN:
+        case NETDEV_KIND_MACVTAP:
         case NETDEV_KIND_IPVLAN:
         case NETDEV_KIND_VXLAN:
                 r = hashmap_put(network->stacked_netdevs, netdev->ifname, netdev);
@@ -748,6 +756,97 @@ int config_parse_address_family_boolean_with_kernel(
         }
 
         *fwd = s;
+
+        return 0;
+}
+
+static const char* const ipv6_privacy_extensions_table[_IPV6_PRIVACY_EXTENSIONS_MAX] = {
+        [IPV6_PRIVACY_EXTENSIONS_NO] = "no",
+        [IPV6_PRIVACY_EXTENSIONS_PREFER_PUBLIC] = "prefer-public",
+        [IPV6_PRIVACY_EXTENSIONS_YES] = "yes",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(ipv6_privacy_extensions, IPv6PrivacyExtensions);
+
+int config_parse_ipv6_privacy_extensions(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        IPv6PrivacyExtensions *ipv6_privacy_extensions = data;
+        int k;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(ipv6_privacy_extensions);
+
+        /* Our enum shall be a superset of booleans, hence first try
+         * to parse as boolean, and then as enum */
+
+        k = parse_boolean(rvalue);
+        if (k > 0)
+                *ipv6_privacy_extensions = IPV6_PRIVACY_EXTENSIONS_YES;
+        else if (k == 0)
+                *ipv6_privacy_extensions = IPV6_PRIVACY_EXTENSIONS_NO;
+        else {
+                IPv6PrivacyExtensions s;
+
+                s = ipv6_privacy_extensions_from_string(rvalue);
+                if (s < 0) {
+
+                        if (streq(rvalue, "kernel"))
+                                s = _IPV6_PRIVACY_EXTENSIONS_INVALID;
+                        else {
+                                log_syntax(unit, LOG_ERR, filename, line, s, "Failed to parse IPv6 privacy extensions option, ignoring: %s", rvalue);
+                                return 0;
+                        }
+                }
+
+                *ipv6_privacy_extensions = s;
+        }
+
+        return 0;
+}
+
+int config_parse_hostname(const char *unit,
+                          const char *filename,
+                          unsigned line,
+                          const char *section,
+                          unsigned section_line,
+                          const char *lvalue,
+                          int ltype,
+                          const char *rvalue,
+                          void *data,
+                          void *userdata) {
+        char **hostname = data;
+        char *hn = NULL;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        r = config_parse_string(unit, filename, line, section, section_line,
+                                lvalue, ltype, rvalue, &hn, userdata);
+        if (r < 0)
+                return r;
+
+        if (!hostname_is_valid(hn)) {
+                log_syntax(unit, LOG_ERR, filename, line, EINVAL, "hostname is not valid, ignoring assignment: %s", rvalue);
+
+                free(hn);
+                return 0;
+        }
+
+        *hostname = hn;
 
         return 0;
 }

@@ -1131,7 +1131,7 @@ static int add_name_change_match(sd_bus *bus,
 
                 /* If the old name is unset or empty, then
                  * this can match against added names */
-                if (!old_owner || old_owner[0] == 0) {
+                if (isempty(old_owner)) {
                         item->type = KDBUS_ITEM_NAME_ADD;
 
                         r = ioctl(bus->input_fd, KDBUS_CMD_MATCH_ADD, m);
@@ -1141,7 +1141,7 @@ static int add_name_change_match(sd_bus *bus,
 
                 /* If the new name is unset or empty, then
                  * this can match against removed names */
-                if (!new_owner || new_owner[0] == 0) {
+                if (isempty(new_owner)) {
                         item->type = KDBUS_ITEM_NAME_REMOVE;
 
                         r = ioctl(bus->input_fd, KDBUS_CMD_MATCH_ADD, m);
@@ -1185,8 +1185,10 @@ static int add_name_change_match(sd_bus *bus,
 
                 /* If the old name is unset or empty, then this can
                  * match against added ids */
-                if (!old_owner || old_owner[0] == 0) {
+                if (isempty(old_owner)) {
                         item->type = KDBUS_ITEM_ID_ADD;
+                        if (!isempty(new_owner))
+                                item->id_change.id = new_owner_id;
 
                         r = ioctl(bus->input_fd, KDBUS_CMD_MATCH_ADD, m);
                         if (r < 0)
@@ -1195,8 +1197,10 @@ static int add_name_change_match(sd_bus *bus,
 
                 /* If thew new name is unset or empty, then this can
                  * match against removed ids */
-                if (!new_owner || new_owner[0] == 0) {
+                if (isempty(new_owner)) {
                         item->type = KDBUS_ITEM_ID_REMOVE;
+                        if (!isempty(old_owner))
+                                item->id_change.id = old_owner_id;
 
                         r = ioctl(bus->input_fd, KDBUS_CMD_MATCH_ADD, m);
                         if (r < 0)
@@ -1219,7 +1223,7 @@ int bus_add_match_internal_kernel(
         size_t sz;
         const char *sender = NULL;
         size_t sender_length = 0;
-        uint64_t src_id = KDBUS_MATCH_ID_ANY;
+        uint64_t src_id = KDBUS_MATCH_ID_ANY, dst_id = KDBUS_MATCH_ID_ANY;
         bool using_bloom = false;
         unsigned i;
         bool matches_name_change = true;
@@ -1332,13 +1336,25 @@ int bus_add_match_internal_kernel(
                         break;
                 }
 
-                case BUS_MATCH_DESTINATION:
-                        /* The bloom filter does not include
-                           the destination, since it is only
-                           available for broadcast messages
-                           which do not carry a destination
-                           since they are undirected. */
+                case BUS_MATCH_DESTINATION: {
+                        /*
+                         * Kernel only supports matching on destination IDs, but
+                         * not on destination names. So just skip the
+                         * destination name restriction and verify it in
+                         * user-space on retrieval.
+                         */
+                        r = bus_kernel_parse_unique_name(c->value_str, &dst_id);
+                        if (r < 0)
+                                return r;
+                        else if (r > 0)
+                                sz += ALIGN8(offsetof(struct kdbus_item, id) + sizeof(uint64_t));
+
+                        /* if not a broadcast, it cannot be a name-change */
+                        if (r <= 0 || dst_id != KDBUS_DST_ID_BROADCAST)
+                                matches_name_change = false;
+
                         break;
+                }
 
                 case BUS_MATCH_ROOT:
                 case BUS_MATCH_VALUE:
@@ -1362,6 +1378,13 @@ int bus_add_match_internal_kernel(
                 item->size = offsetof(struct kdbus_item, id) + sizeof(uint64_t);
                 item->type = KDBUS_ITEM_ID;
                 item->id = src_id;
+                item = KDBUS_ITEM_NEXT(item);
+        }
+
+        if (dst_id != KDBUS_MATCH_ID_ANY) {
+                item->size = offsetof(struct kdbus_item, id) + sizeof(uint64_t);
+                item->type = KDBUS_ITEM_DST_ID;
+                item->id = dst_id;
                 item = KDBUS_ITEM_NEXT(item);
         }
 

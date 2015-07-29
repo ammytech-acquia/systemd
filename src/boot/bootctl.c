@@ -294,6 +294,8 @@ static int status_binaries(const char *esp_path, sd_id128_t partition) {
         else if (r < 0)
                 return r;
 
+        printf("\n");
+
         return 0;
 }
 
@@ -888,7 +890,7 @@ static int install_loader_config(const char *esp_path) {
 
         f = fopen("/etc/machine-id", "re");
         if (!f)
-                return -errno;
+                return errno == ENOENT ? 0 : -errno;
 
         if (fgets(line, sizeof(line), f) != NULL) {
                 char *s;
@@ -918,7 +920,7 @@ static int install_loader_config(const char *esp_path) {
 static int help(void) {
         printf("%s [COMMAND] [OPTIONS...]\n"
                "\n"
-               "Install, update or remove the sdboot EFI boot manager.\n\n"
+               "Install, update or remove the systemd-boot EFI boot manager.\n\n"
                "  -h --help          Show this help\n"
                "     --version       Print version\n"
                "     --path=PATH     Path to the EFI System Partition (ESP)\n"
