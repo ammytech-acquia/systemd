@@ -76,7 +76,7 @@ index e52b872..4b26365 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index b8c5be4..a11cfb3 100644
+index 552a2f9..b637910 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -155,13 +155,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
@@ -145,9 +145,9 @@ index b8c5be4..a11cfb3 100644
                  return r;
  
 -        if (stat("/etc/timezone", &st) == 0 && S_ISREG(st.st_mode)) {
--                r = write_string_file_atomic("/etc/timezone", c->zone);
+-                r = write_string_file("/etc/timezone", c->zone, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC);
 +        if (stat(writable_filename("/etc/timezone"), &st) == 0 && S_ISREG(st.st_mode)) {
-+                r = write_string_file_atomic(writable_filename("/etc/timezone"), c->zone);
++                r = write_string_file(writable_filename("/etc/timezone"), c->zone, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC);
                  if (r < 0)
                          return r;
          }
