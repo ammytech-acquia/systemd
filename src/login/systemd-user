@@ -1,6 +1,8 @@
-# This file is part of systemd.
-#
-# Used by systemd --user instances.
+#%PAM-1.0
 
-account  include system-auth
-session  include system-auth
+# Used by systemd when launching systemd user instances.
+
+account include system-auth
+session include system-auth
+auth required pam_deny.so
+password required pam_deny.so

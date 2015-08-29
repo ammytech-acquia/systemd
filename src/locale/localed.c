@@ -33,16 +33,11 @@
 #include "env-util.h"
 #include "fileio.h"
 #include "fileio-label.h"
+#include "label.h"
 #include "bus-util.h"
 #include "bus-error.h"
 #include "bus-message.h"
 #include "event-util.h"
-#include "locale-util.h"
-#include "selinux-util.h"
-
-#ifdef HAVE_XKBCOMMON
-#include <xkbcommon/xkbcommon.h>
-#endif
 
 enum {
         /* We don't list LC_ALL here on purpose. People should be
@@ -95,14 +90,25 @@ typedef struct Context {
         Hashmap *polkit_registry;
 } Context;
 
-static const char* nonempty(const char *s) {
-        return isempty(s) ? NULL : s;
+static int free_and_copy(char **s, const char *v) {
+        int r;
+        char *t;
+
+        assert(s);
+
+        r = strdup_or_null(isempty(v) ? NULL : v, &t);
+        if (r < 0)
+                return r;
+
+        free(*s);
+        *s = t;
+
+        return 0;
 }
 
-static bool startswith_comma(const char *s, const char *prefix) {
-        const char *t;
-
-        return s && (t = startswith(s, prefix)) && (*t == ',');
+static void free_and_replace(char **s, char *v) {
+        free(*s);
+        *s = v;
 }
 
 static void context_free_x11(Context *c) {
@@ -124,20 +130,22 @@ static void context_free_locale(Context *c) {
                 free_and_replace(&c->locale[p], NULL);
 }
 
-static void context_free(Context *c) {
+static void context_free(Context *c, sd_bus *bus) {
         context_free_locale(c);
         context_free_x11(c);
         context_free_vconsole(c);
 
-        bus_verify_polkit_async_registry_free(c->polkit_registry);
+        bus_verify_polkit_async_registry_free(bus, c->polkit_registry);
 };
 
 static void locale_simplify(Context *c) {
         int p;
 
         for (p = LOCALE_LANG+1; p < _LOCALE_MAX; p++)
-                if (isempty(c->locale[p]) || streq_ptr(c->locale[LOCALE_LANG], c->locale[p]))
-                        free_and_replace(&c->locale[p], NULL);
+                if (isempty(c->locale[p]) || streq_ptr(c->locale[LOCALE_LANG], c->locale[p])) {
+                        free(c->locale[p]);
+                        c->locale[p] = NULL;
+                }
 }
 
 static int locale_read_data(Context *c) {
@@ -169,8 +177,7 @@ static int locale_read_data(Context *c) {
                 for (p = 0; p < _LOCALE_MAX; p++) {
                         assert(names[p]);
 
-                        r = free_and_strdup(&c->locale[p],
-                                            nonempty(getenv(names[p])));
+                        r = free_and_copy(&c->locale[p], getenv(names[p]));
                         if (r < 0)
                                 return r;
                 }
@@ -199,10 +206,9 @@ static int vconsole_read_data(Context *c) {
 }
 
 static int x11_read_data(Context *c) {
-        _cleanup_fclose_ FILE *f;
+        FILE *f;
         char line[LINE_MAX];
         bool in_section = false;
-        int r;
 
         context_free_x11(c);
 
@@ -220,11 +226,13 @@ static int x11_read_data(Context *c) {
                         continue;
 
                 if (in_section && first_word(l, "Option")) {
-                        _cleanup_strv_free_ char **a = NULL;
+                        char **a;
 
-                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_QUOTES);
-                        if (r < 0)
-                                return r;
+                        a = strv_split_quoted(l);
+                        if (!a) {
+                                fclose(f);
+                                return -ENOMEM;
+                        }
 
                         if (strv_length(a) == 3) {
                                 if (streq(a[1], "XkbLayout")) {
@@ -242,19 +250,26 @@ static int x11_read_data(Context *c) {
                                 }
                         }
 
-                } else if (!in_section && first_word(l, "Section")) {
-                        _cleanup_strv_free_ char **a = NULL;
+                        strv_free(a);
 
-                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_QUOTES);
-                        if (r < 0)
+                } else if (!in_section && first_word(l, "Section")) {
+                        char **a;
+
+                        a = strv_split_quoted(l);
+                        if (!a) {
+                                fclose(f);
                                 return -ENOMEM;
+                        }
 
                         if (strv_length(a) == 2 && streq(a[1], "InputClass"))
                                 in_section = true;
 
+                        strv_free(a);
                 } else if (in_section && first_word(l, "EndSection"))
                         in_section = false;
         }
+
+        fclose(f);
 
         return 0;
 }
@@ -269,19 +284,16 @@ static int context_read_data(Context *c) {
         return r < 0 ? r : q < 0 ? q : p;
 }
 
-static int locale_write_data(Context *c, char ***settings) {
+static int locale_write_data(Context *c) {
         int r, p;
-        _cleanup_strv_free_ char **l = NULL;
-
-        /* Set values will be returned as strv in *settings on success. */
+        char **l = NULL;
 
         r = load_env_file(NULL, "/etc/locale.conf", NULL, &l);
         if (r < 0 && r != -ENOENT)
                 return r;
 
         for (p = 0; p < _LOCALE_MAX; p++) {
-                _cleanup_free_ char *t = NULL;
-                char **u;
+                char *t, **u;
 
                 assert(names[p]);
 
@@ -290,18 +302,24 @@ static int locale_write_data(Context *c, char ***settings) {
                         continue;
                 }
 
-                if (asprintf(&t, "%s=%s", names[p], c->locale[p]) < 0)
+                if (asprintf(&t, "%s=%s", names[p], c->locale[p]) < 0) {
+                        strv_free(l);
                         return -ENOMEM;
+                }
 
                 u = strv_env_set(l, t);
+                free(t);
+                strv_free(l);
+
                 if (!u)
                         return -ENOMEM;
 
-                strv_free(l);
                 l = u;
         }
 
         if (strv_isempty(l)) {
+                strv_free(l);
+
                 if (unlink("/etc/locale.conf") < 0)
                         return errno == ENOENT ? 0 : -errno;
 
@@ -309,12 +327,9 @@ static int locale_write_data(Context *c, char ***settings) {
         }
 
         r = write_env_file_label("/etc/locale.conf", l);
-        if (r < 0)
-                return r;
+        strv_free(l);
 
-        *settings = l;
-        l = NULL;
-        return 0;
+        return r;
 }
 
 static int locale_update_system_manager(Context *c, sd_bus *bus) {
@@ -369,7 +384,7 @@ static int locale_update_system_manager(Context *c, sd_bus *bus) {
 
         r = sd_bus_call(bus, m, 0, &error, NULL);
         if (r < 0)
-                log_error_errno(r, "Failed to update the manager environment: %m");
+                log_error("Failed to update the manager environment: %s", strerror(-r));
 
         return 0;
 }
@@ -385,36 +400,38 @@ static int vconsole_write_data(Context *c) {
         if (isempty(c->vc_keymap))
                 l = strv_env_unset(l, "KEYMAP");
         else {
-                _cleanup_free_ char *s = NULL;
-                char **u;
+                char *s, **u;
 
                 s = strappend("KEYMAP=", c->vc_keymap);
                 if (!s)
                         return -ENOMEM;
 
                 u = strv_env_set(l, s);
+                free(s);
+                strv_free(l);
+
                 if (!u)
                         return -ENOMEM;
 
-                strv_free(l);
                 l = u;
         }
 
         if (isempty(c->vc_keymap_toggle))
                 l = strv_env_unset(l, "KEYMAP_TOGGLE");
         else  {
-                _cleanup_free_ char *s = NULL;
-                char **u;
+                char *s, **u;
 
                 s = strappend("KEYMAP_TOGGLE=", c->vc_keymap_toggle);
                 if (!s)
                         return -ENOMEM;
 
                 u = strv_env_set(l, s);
+                free(s);
+                strv_free(l);
+
                 if (!u)
                         return -ENOMEM;
 
-                strv_free(l);
                 l = u;
         }
 
@@ -425,10 +442,11 @@ static int vconsole_write_data(Context *c) {
                 return 0;
         }
 
-        return write_env_file_label("/etc/vconsole.conf", l);
+        r = write_env_file_label("/etc/vconsole.conf", l);
+        return r;
 }
 
-static int x11_write_data(Context *c) {
+static int write_data_x11(Context *c) {
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *temp_path = NULL;
         int r;
@@ -471,25 +489,15 @@ static int x11_write_data(Context *c) {
                 fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
 
         fputs("EndSection\n", f);
+        fflush(f);
 
-        r = fflush_and_check(f);
-        if (r < 0)
-                goto fail;
-
-        if (rename(temp_path, "/etc/X11/xorg.conf.d/00-keyboard.conf") < 0) {
+        if (ferror(f) || rename(temp_path, "/etc/X11/xorg.conf.d/00-keyboard.conf") < 0) {
                 r = -errno;
-                goto fail;
-        }
-
-        return 0;
-
-fail:
-        (void) unlink("/etc/X11/xorg.conf.d/00-keyboard.conf");
-
-        if (temp_path)
-                (void) unlink(temp_path);
-
-        return r;
+                unlink("/etc/X11/xorg.conf.d/00-keyboard.conf");
+                unlink(temp_path);
+                return r;
+        } else
+                return 0;
 }
 
 static int vconsole_reload(sd_bus *bus) {
@@ -512,13 +520,11 @@ static int vconsole_reload(sd_bus *bus) {
         return r;
 }
 
-static const char* strnulldash(const char *s) {
-        return isempty(s) || streq(s, "-") ? NULL : s;
+static char *strnulldash(const char *s) {
+        return s == NULL || *s == 0 || (s[0] == '-' && s[1] == 0) ? NULL : (char*) s;
 }
 
-static int read_next_mapping(const char* filename,
-                             unsigned min_fields, unsigned max_fields,
-                             FILE *f, unsigned *n, char ***a) {
+static int read_next_mapping(FILE *f, unsigned *n, char ***a) {
         assert(f);
         assert(n);
         assert(a);
@@ -526,8 +532,6 @@ static int read_next_mapping(const char* filename,
         for (;;) {
                 char line[LINE_MAX];
                 char *l, **b;
-                int r;
-                size_t length;
 
                 errno = 0;
                 if (!fgets(line, sizeof(line), f)) {
@@ -544,13 +548,12 @@ static int read_next_mapping(const char* filename,
                 if (l[0] == 0 || l[0] == '#')
                         continue;
 
-                r = strv_split_extract(&b, l, WHITESPACE, EXTRACT_QUOTES);
-                if (r < 0)
-                        return r;
+                b = strv_split_quoted(l);
+                if (!b)
+                        return -ENOMEM;
 
-                length = strv_length(b);
-                if (length < min_fields || length > max_fields) {
-                        log_error("Invalid line %s:%u, ignoring.", filename, *n);
+                if (strv_length(b) < 5) {
+                        log_error("Invalid line "SYSTEMD_KBD_MODEL_MAP":%u, ignoring.", *n);
                         strv_free(b);
                         continue;
 
@@ -587,7 +590,7 @@ static int vconsole_convert_to_x11(Context *c, sd_bus *bus) {
                         _cleanup_strv_free_ char **a = NULL;
                         int r;
 
-                        r = read_next_mapping(SYSTEMD_KBD_MODEL_MAP, 5, UINT_MAX, f, &n, &a);
+                        r = read_next_mapping(f, &n, &a);
                         if (r < 0)
                                 return r;
                         if (r == 0)
@@ -601,10 +604,10 @@ static int vconsole_convert_to_x11(Context *c, sd_bus *bus) {
                             !streq_ptr(c->x11_variant, strnulldash(a[3])) ||
                             !streq_ptr(c->x11_options, strnulldash(a[4]))) {
 
-                                if (free_and_strdup(&c->x11_layout, strnulldash(a[1])) < 0 ||
-                                    free_and_strdup(&c->x11_model, strnulldash(a[2])) < 0 ||
-                                    free_and_strdup(&c->x11_variant, strnulldash(a[3])) < 0 ||
-                                    free_and_strdup(&c->x11_options, strnulldash(a[4])) < 0)
+                                if (free_and_copy(&c->x11_layout, strnulldash(a[1])) < 0 ||
+                                    free_and_copy(&c->x11_model, strnulldash(a[2])) < 0 ||
+                                    free_and_copy(&c->x11_variant, strnulldash(a[3])) < 0 ||
+                                    free_and_copy(&c->x11_options, strnulldash(a[4])) < 0)
                                         return -ENOMEM;
 
                                 modified = true;
@@ -617,51 +620,39 @@ static int vconsole_convert_to_x11(Context *c, sd_bus *bus) {
         if (modified) {
                 int r;
 
-                r = x11_write_data(c);
+                r = write_data_x11(c);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to set X11 keyboard layout: %m");
-
-                log_info("Changed X11 keyboard layout to '%s' model '%s' variant '%s' options '%s'",
-                         strempty(c->x11_layout),
-                         strempty(c->x11_model),
-                         strempty(c->x11_variant),
-                         strempty(c->x11_options));
+                        log_error("Failed to set X11 keyboard layout: %s", strerror(-r));
 
                 sd_bus_emit_properties_changed(bus,
                                 "/org/freedesktop/locale1",
                                 "org.freedesktop.locale1",
                                 "X11Layout", "X11Model", "X11Variant", "X11Options", NULL);
-        } else
-                log_debug("X11 keyboard layout was not modified.");
+        }
 
         return 0;
 }
 
-static int find_converted_keymap(const char *x11_layout, const char *x11_variant, char **new_keymap) {
+static int find_converted_keymap(Context *c, char **new_keymap) {
         const char *dir;
         _cleanup_free_ char *n;
 
-        if (x11_variant)
-                n = strjoin(x11_layout, "-", x11_variant, NULL);
+        if (c->x11_variant)
+                n = strjoin(c->x11_layout, "-", c->x11_variant, NULL);
         else
-                n = strdup(x11_layout);
+                n = strdup(c->x11_layout);
         if (!n)
                 return -ENOMEM;
 
         NULSTR_FOREACH(dir, KBD_KEYMAP_DIRS) {
                 _cleanup_free_ char *p = NULL, *pz = NULL;
-                bool uncompressed;
 
                 p = strjoin(dir, "xkb/", n, ".map", NULL);
                 pz = strjoin(dir, "xkb/", n, ".map.gz", NULL);
                 if (!p || !pz)
                         return -ENOMEM;
 
-                uncompressed = access(p, F_OK) == 0;
-                if (uncompressed || access(pz, F_OK) == 0) {
-                        log_debug("Found converted keymap %s at %s",
-                                  n, uncompressed ? p : pz);
-
+                if (access(p, F_OK) == 0 || access(pz, F_OK) == 0) {
                         *new_keymap = n;
                         n = NULL;
                         return 1;
@@ -675,7 +666,7 @@ static int find_legacy_keymap(Context *c, char **new_keymap) {
         _cleanup_fclose_ FILE *f;
         unsigned n = 0;
         unsigned best_matching = 0;
-        int r;
+
 
         f = fopen(SYSTEMD_KBD_MODEL_MAP, "re");
         if (!f)
@@ -684,8 +675,9 @@ static int find_legacy_keymap(Context *c, char **new_keymap) {
         for (;;) {
                 _cleanup_strv_free_ char **a = NULL;
                 unsigned matching = 0;
+                int r;
 
-                r = read_next_mapping(SYSTEMD_KBD_MODEL_MAP, 5, UINT_MAX, f, &n, &a);
+                r = read_next_mapping(f, &n, &a);
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -696,18 +688,26 @@ static int find_legacy_keymap(Context *c, char **new_keymap) {
                         /* If we got an exact match, this is best */
                         matching = 10;
                 else {
+                        size_t x;
+
+                        x = strcspn(c->x11_layout, ",");
+
                         /* We have multiple X layouts, look for an
                          * entry that matches our key with everything
                          * but the first layout stripped off. */
-                        if (startswith_comma(c->x11_layout, a[1]))
+                        if (x > 0 &&
+                            strlen(a[1]) == x &&
+                            strneq(c->x11_layout, a[1], x))
                                 matching = 5;
                         else  {
-                                char *x;
+                                size_t w;
 
                                 /* If that didn't work, strip off the
                                  * other layouts from the entry, too */
-                                x = strndupa(a[1], strcspn(a[1], ","));
-                                if (startswith_comma(c->x11_layout, x))
+                                w = strcspn(a[1], ",");
+
+                                if (x > 0 && x == w &&
+                                    memcmp(c->x11_layout, a[1], x) == 0)
                                         matching = 1;
                         }
                 }
@@ -726,67 +726,17 @@ static int find_legacy_keymap(Context *c, char **new_keymap) {
                 }
 
                 /* The best matching entry so far, then let's save that */
-                if (matching >= MAX(best_matching, 1u)) {
-                        log_debug("Found legacy keymap %s with score %u",
-                                  a[0], matching);
+                if (matching > best_matching) {
+                        best_matching = matching;
 
-                        if (matching > best_matching) {
-                                best_matching = matching;
-
-                                r = free_and_strdup(new_keymap, a[0]);
-                                if (r < 0)
-                                        return r;
-                        }
+                        free(*new_keymap);
+                        *new_keymap = strdup(a[0]);
+                        if (!*new_keymap)
+                                return -ENOMEM;
                 }
-        }
-
-        if (best_matching < 10 && c->x11_layout) {
-                /* The best match is only the first part of the X11
-                 * keymap. Check if we have a converted map which
-                 * matches just the first layout.
-                 */
-                char *l, *v = NULL, *converted;
-
-                l = strndupa(c->x11_layout, strcspn(c->x11_layout, ","));
-                if (c->x11_variant)
-                        v = strndupa(c->x11_variant, strcspn(c->x11_variant, ","));
-                r = find_converted_keymap(l, v, &converted);
-                if (r < 0)
-                        return r;
-                if (r > 0)
-                        free_and_replace(new_keymap, converted);
         }
 
         return 0;
-}
-
-static int find_language_fallback(const char *lang, char **language) {
-        _cleanup_fclose_ FILE *f = NULL;
-        unsigned n = 0;
-
-        assert(language);
-
-        f = fopen(SYSTEMD_LANGUAGE_FALLBACK_MAP, "re");
-        if (!f)
-                return -errno;
-
-        for (;;) {
-                _cleanup_strv_free_ char **a = NULL;
-                int r;
-
-                r = read_next_mapping(SYSTEMD_LANGUAGE_FALLBACK_MAP, 2, 2, f, &n, &a);
-                if (r <= 0)
-                        return r;
-
-                if (streq(lang, a[0])) {
-                        assert(strv_length(a) == 2);
-                        *language = a[1];
-                        a[1] = NULL;
-                        return 1;
-                }
-        }
-
-        assert_not_reached("should not be here");
 }
 
 static int x11_convert_to_vconsole(Context *c, sd_bus *bus) {
@@ -805,7 +755,7 @@ static int x11_convert_to_vconsole(Context *c, sd_bus *bus) {
         } else {
                 char *new_keymap = NULL;
 
-                r = find_converted_keymap(c->x11_layout, c->x11_variant, &new_keymap);
+                r = find_converted_keymap(c, &new_keymap);
                 if (r < 0)
                         return r;
                 else if (r == 0) {
@@ -825,10 +775,7 @@ static int x11_convert_to_vconsole(Context *c, sd_bus *bus) {
         if (modified) {
                 r = vconsole_write_data(c);
                 if (r < 0)
-                        log_error_errno(r, "Failed to set virtual console keymap: %m");
-
-                log_info("Changed virtual console keymap to '%s' toggle '%s'",
-                         strempty(c->vc_keymap), strempty(c->vc_keymap_toggle));
+                        log_error("Failed to set virtual console keymap: %s", strerror(-r));
 
                 sd_bus_emit_properties_changed(bus,
                                 "/org/freedesktop/locale1",
@@ -836,8 +783,7 @@ static int x11_convert_to_vconsole(Context *c, sd_bus *bus) {
                                 "VConsoleKeymap", "VConsoleKeymapToggle", NULL);
 
                 return vconsole_reload(bus);
-        } else
-                log_debug("Virtual console keymap was not modified.");
+        }
 
         return 0;
 }
@@ -874,19 +820,15 @@ static int property_get_locale(
         return sd_bus_message_append_strv(reply, l);
 }
 
-static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int method_set_locale(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
         Context *c = userdata;
         _cleanup_strv_free_ char **l = NULL;
         char **i;
-        const char *lang = NULL;
         int interactive;
         bool modified = false;
-        bool have[_LOCALE_MAX] = {};
+        bool passed[_LOCALE_MAX] = {};
         int p;
         int r;
-
-        assert(m);
-        assert(c);
 
         r = bus_message_read_strv_extend(m, &l);
         if (r < 0)
@@ -896,7 +838,7 @@ static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *er
         if (r < 0)
                 return r;
 
-        /* Check whether a variable changed and if it is valid */
+        /* Check whether a variable changed and if so valid */
         STRV_FOREACH(i, l) {
                 bool valid = false;
 
@@ -906,12 +848,9 @@ static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *er
                         k = strlen(names[p]);
                         if (startswith(*i, names[p]) &&
                             (*i)[k] == '=' &&
-                            locale_is_valid((*i) + k + 1)) {
+                            string_is_safe((*i) + k + 1)) {
                                 valid = true;
-                                have[p] = true;
-
-                                if (p == LOCALE_LANG)
-                                        lang = (*i) + k + 1;
+                                passed[p] = true;
 
                                 if (!streq_ptr(*i + k + 1, c->locale[p]))
                                         modified = true;
@@ -924,66 +863,45 @@ static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *er
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid Locale data.");
         }
 
-        /* If LANG was specified, but not LANGUAGE, check if we should
-         * set it based on the language fallback table. */
-        if (have[LOCALE_LANG] && !have[LOCALE_LANGUAGE]) {
-                _cleanup_free_ char *language = NULL;
-
-                assert(lang);
-
-                (void) find_language_fallback(lang, &language);
-                if (language) {
-                        log_debug("Converted LANG=%s to LANGUAGE=%s", lang, language);
-                        if (!streq_ptr(language, c->locale[LOCALE_LANGUAGE])) {
-                                r = strv_extendf(&l, "LANGUAGE=%s", language);
-                                if (r < 0)
-                                        return r;
-
-                                have[LOCALE_LANGUAGE] = true;
-                                modified = true;
-                        }
-                }
-        }
-
         /* Check whether a variable is unset */
-        if (!modified)
+        if (!modified)  {
                 for (p = 0; p < _LOCALE_MAX; p++)
-                        if (!isempty(c->locale[p]) && !have[p]) {
+                        if (!isempty(c->locale[p]) && !passed[p]) {
                                 modified = true;
                                 break;
                         }
+        }
 
         if (modified) {
-                _cleanup_strv_free_ char **settings = NULL;
-
-                r = bus_verify_polkit_async(
-                                m,
-                                CAP_SYS_ADMIN,
-                                "org.freedesktop.locale1.set-locale",
-                                interactive,
-                                UID_INVALID,
-                                &c->polkit_registry,
-                                error);
+                r = bus_verify_polkit_async(bus, &c->polkit_registry, m,
+                                            "org.freedesktop.locale1.set-locale", interactive,
+                                            error, method_set_locale, c);
                 if (r < 0)
                         return r;
                 if (r == 0)
                         return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-                STRV_FOREACH(i, l)
+                STRV_FOREACH(i, l) {
                         for (p = 0; p < _LOCALE_MAX; p++) {
                                 size_t k;
 
                                 k = strlen(names[p]);
                                 if (startswith(*i, names[p]) && (*i)[k] == '=') {
-                                        r = free_and_strdup(&c->locale[p], *i + k + 1);
-                                        if (r < 0)
-                                                return r;
+                                        char *t;
+
+                                        t = strdup(*i + k + 1);
+                                        if (!t)
+                                                return -ENOMEM;
+
+                                        free(c->locale[p]);
+                                        c->locale[p] = t;
                                         break;
                                 }
                         }
+                }
 
                 for (p = 0; p < _LOCALE_MAX; p++) {
-                        if (have[p])
+                        if (passed[p])
                                 continue;
 
                         free_and_replace(&c->locale[p], NULL);
@@ -991,42 +909,30 @@ static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *er
 
                 locale_simplify(c);
 
-                r = locale_write_data(c, &settings);
+                r = locale_write_data(c);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to set locale: %m");
+                        log_error("Failed to set locale: %s", strerror(-r));
                         return sd_bus_error_set_errnof(error, r, "Failed to set locale: %s", strerror(-r));
                 }
 
-                locale_update_system_manager(c, sd_bus_message_get_bus(m));
+                locale_update_system_manager(c, bus);
 
-                if (settings) {
-                        _cleanup_free_ char *line;
+                log_info("Changed locale information.");
 
-                        line = strv_join(settings, ", ");
-                        log_info("Changed locale to %s.", strnull(line));
-                } else
-                        log_info("Changed locale to unset.");
-
-                (void) sd_bus_emit_properties_changed(
-                                sd_bus_message_get_bus(m),
+                sd_bus_emit_properties_changed(bus,
                                 "/org/freedesktop/locale1",
                                 "org.freedesktop.locale1",
                                 "Locale", NULL);
-        } else
-                log_debug("Locale settings were not modified.");
-
+        }
 
         return sd_bus_reply_method_return(m, NULL);
 }
 
-static int method_set_vc_keyboard(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int method_set_vc_keyboard(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
         Context *c = userdata;
         const char *keymap, *keymap_toggle;
         int convert, interactive;
         int r;
-
-        assert(m);
-        assert(c);
 
         r = sd_bus_message_read(m, "ssbb", &keymap, &keymap_toggle, &convert, &interactive);
         if (r < 0)
@@ -1041,112 +947,54 @@ static int method_set_vc_keyboard(sd_bus_message *m, void *userdata, sd_bus_erro
         if (!streq_ptr(keymap, c->vc_keymap) ||
             !streq_ptr(keymap_toggle, c->vc_keymap_toggle)) {
 
-                if ((keymap && (!filename_is_valid(keymap) || !string_is_safe(keymap))) ||
-                    (keymap_toggle && (!filename_is_valid(keymap_toggle) || !string_is_safe(keymap_toggle))))
+                if ((keymap && (!filename_is_safe(keymap) || !string_is_safe(keymap))) ||
+                    (keymap_toggle && (!filename_is_safe(keymap_toggle) || !string_is_safe(keymap_toggle))))
                         return sd_bus_error_set_errnof(error, -EINVAL, "Received invalid keymap data");
 
-                r = bus_verify_polkit_async(
-                                m,
-                                CAP_SYS_ADMIN,
+                r = bus_verify_polkit_async(bus, &c->polkit_registry, m,
                                 "org.freedesktop.locale1.set-keyboard",
-                                interactive,
-                                UID_INVALID,
-                                &c->polkit_registry,
-                                error);
+                                interactive, error, method_set_vc_keyboard, c);
                 if (r < 0)
                         return r;
                 if (r == 0)
                         return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-                if (free_and_strdup(&c->vc_keymap, keymap) < 0 ||
-                    free_and_strdup(&c->vc_keymap_toggle, keymap_toggle) < 0)
+                if (free_and_copy(&c->vc_keymap, keymap) < 0 ||
+                    free_and_copy(&c->vc_keymap_toggle, keymap_toggle) < 0)
                         return -ENOMEM;
 
                 r = vconsole_write_data(c);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to set virtual console keymap: %m");
+                        log_error("Failed to set virtual console keymap: %s", strerror(-r));
                         return sd_bus_error_set_errnof(error, r, "Failed to set virtual console keymap: %s", strerror(-r));
                 }
 
-                log_info("Changed virtual console keymap to '%s' toggle '%s'",
-                         strempty(c->vc_keymap), strempty(c->vc_keymap_toggle));
+                log_info("Changed virtual console keymap to '%s'", strempty(c->vc_keymap));
 
-                r = vconsole_reload(sd_bus_message_get_bus(m));
+                r = vconsole_reload(bus);
                 if (r < 0)
-                        log_error_errno(r, "Failed to request keymap reload: %m");
+                        log_error("Failed to request keymap reload: %s", strerror(-r));
 
-                (void) sd_bus_emit_properties_changed(
-                                sd_bus_message_get_bus(m),
+                sd_bus_emit_properties_changed(bus,
                                 "/org/freedesktop/locale1",
                                 "org.freedesktop.locale1",
                                 "VConsoleKeymap", "VConsoleKeymapToggle", NULL);
 
                 if (convert) {
-                        r = vconsole_convert_to_x11(c, sd_bus_message_get_bus(m));
+                        r = vconsole_convert_to_x11(c, bus);
                         if (r < 0)
-                                log_error_errno(r, "Failed to convert keymap data: %m");
+                                log_error("Failed to convert keymap data: %s", strerror(-r));
                 }
         }
 
         return sd_bus_reply_method_return(m, NULL);
 }
 
-#ifdef HAVE_XKBCOMMON
-static void log_xkb(struct xkb_context *ctx, enum xkb_log_level lvl, const char *format, va_list args) {
-        const char *fmt;
-
-        fmt = strjoina("libxkbcommon: ", format);
-        log_internalv(LOG_DEBUG, 0, __FILE__, __LINE__, __func__, fmt, args);
-}
-
-static int verify_xkb_rmlvo(const char *model, const char *layout, const char *variant, const char *options) {
-        const struct xkb_rule_names rmlvo = {
-                .model          = model,
-                .layout         = layout,
-                .variant        = variant,
-                .options        = options,
-        };
-        struct xkb_context *ctx = NULL;
-        struct xkb_keymap *km = NULL;
-        int r;
-
-        /* compile keymap from RMLVO information to check out its validity */
-
-        ctx = xkb_context_new(XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
-        if (!ctx) {
-                r = -ENOMEM;
-                goto exit;
-        }
-
-        xkb_context_set_log_fn(ctx, log_xkb);
-
-        km = xkb_keymap_new_from_names(ctx, &rmlvo, XKB_KEYMAP_COMPILE_NO_FLAGS);
-        if (!km) {
-                r = -EINVAL;
-                goto exit;
-        }
-
-        r = 0;
-
-exit:
-        xkb_keymap_unref(km);
-        xkb_context_unref(ctx);
-        return r;
-}
-#else
-static int verify_xkb_rmlvo(const char *model, const char *layout, const char *variant, const char *options) {
-        return 0;
-}
-#endif
-
-static int method_set_x11_keyboard(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int method_set_x11_keyboard(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
         Context *c = userdata;
         const char *layout, *model, *variant, *options;
         int convert, interactive;
         int r;
-
-        assert(m);
-        assert(c);
 
         r = sd_bus_message_read(m, "ssssbb", &layout, &model, &variant, &options, &convert, &interactive);
         if (r < 0)
@@ -1175,54 +1023,37 @@ static int method_set_x11_keyboard(sd_bus_message *m, void *userdata, sd_bus_err
                     (options && !string_is_safe(options)))
                         return sd_bus_error_set_errnof(error, -EINVAL, "Received invalid keyboard data");
 
-                r = bus_verify_polkit_async(
-                                m,
-                                CAP_SYS_ADMIN,
+                r = bus_verify_polkit_async(bus, &c->polkit_registry, m,
                                 "org.freedesktop.locale1.set-keyboard",
-                                interactive,
-                                UID_INVALID,
-                                &c->polkit_registry,
-                                error);
+                                interactive, error, method_set_x11_keyboard, c);
                 if (r < 0)
                         return r;
                 if (r == 0)
                         return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-                r = verify_xkb_rmlvo(model, layout, variant, options);
-                if (r < 0) {
-                        log_error_errno(r, "Cannot compile XKB keymap for new x11 keyboard layout ('%s' / '%s' / '%s' / '%s'): %m",
-                                        strempty(model), strempty(layout), strempty(variant), strempty(options));
-                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Cannot compile XKB keymap, refusing");
-                }
-
-                if (free_and_strdup(&c->x11_layout, layout) < 0 ||
-                    free_and_strdup(&c->x11_model, model) < 0 ||
-                    free_and_strdup(&c->x11_variant, variant) < 0 ||
-                    free_and_strdup(&c->x11_options, options) < 0)
+                if (free_and_copy(&c->x11_layout, layout) < 0 ||
+                    free_and_copy(&c->x11_model, model) < 0 ||
+                    free_and_copy(&c->x11_variant, variant) < 0 ||
+                    free_and_copy(&c->x11_options, options) < 0)
                         return -ENOMEM;
 
-                r = x11_write_data(c);
+                r = write_data_x11(c);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to set X11 keyboard layout: %m");
+                        log_error("Failed to set X11 keyboard layout: %s", strerror(-r));
                         return sd_bus_error_set_errnof(error, r, "Failed to set X11 keyboard layout: %s", strerror(-r));
                 }
 
-                log_info("Changed X11 keyboard layout to '%s' model '%s' variant '%s' options '%s'",
-                         strempty(c->x11_layout),
-                         strempty(c->x11_model),
-                         strempty(c->x11_variant),
-                         strempty(c->x11_options));
+                log_info("Changed X11 keyboard layout to '%s'", strempty(c->x11_layout));
 
-                (void) sd_bus_emit_properties_changed(
-                                sd_bus_message_get_bus(m),
+                sd_bus_emit_properties_changed(bus,
                                 "/org/freedesktop/locale1",
                                 "org.freedesktop.locale1",
-                                "X11Layout", "X11Model", "X11Variant", "X11Options", NULL);
+                                "X11Layout" "X11Model" "X11Variant" "X11Options", NULL);
 
                 if (convert) {
-                        r = x11_convert_to_vconsole(c, sd_bus_message_get_bus(m));
+                        r = x11_convert_to_vconsole(c, bus);
                         if (r < 0)
-                                log_error_errno(r, "Failed to convert keymap data: %m");
+                                log_error("Failed to convert keymap data: %s", strerror(-r));
                 }
         }
 
@@ -1245,7 +1076,7 @@ static const sd_bus_vtable locale_vtable[] = {
 };
 
 static int connect_bus(Context *c, sd_event *event, sd_bus **_bus) {
-        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         assert(c);
@@ -1253,20 +1084,28 @@ static int connect_bus(Context *c, sd_event *event, sd_bus **_bus) {
         assert(_bus);
 
         r = sd_bus_default_system(&bus);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get system bus connection: %m");
+        if (r < 0) {
+                log_error("Failed to get system bus connection: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_add_object_vtable(bus, NULL, "/org/freedesktop/locale1", "org.freedesktop.locale1", locale_vtable, c);
-        if (r < 0)
-                return log_error_errno(r, "Failed to register object: %m");
+        if (r < 0) {
+                log_error("Failed to register object: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_request_name(bus, "org.freedesktop.locale1", 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+        if (r < 0) {
+                log_error("Failed to register name: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_attach_event(bus, event, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to attach bus to event loop: %m");
+        if (r < 0) {
+                log_error("Failed to attach bus to event loop: %s", strerror(-r));
+                return r;
+        }
 
         *_bus = bus;
         bus = NULL;
@@ -1275,9 +1114,9 @@ static int connect_bus(Context *c, sd_event *event, sd_bus **_bus) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_(context_free) Context context = {};
+        Context context = {};
         _cleanup_event_unref_ sd_event *event = NULL;
-        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         log_set_target(LOG_TARGET_AUTO);
@@ -1285,7 +1124,7 @@ int main(int argc, char *argv[]) {
         log_open();
 
         umask(0022);
-        mac_selinux_init("/etc");
+        label_init("/etc");
 
         if (argc != 1) {
                 log_error("This program takes no arguments.");
@@ -1295,7 +1134,7 @@ int main(int argc, char *argv[]) {
 
         r = sd_event_default(&event);
         if (r < 0) {
-                log_error_errno(r, "Failed to allocate event loop: %m");
+                log_error("Failed to allocate event loop: %s", strerror(-r));
                 goto finish;
         }
 
@@ -1307,16 +1146,18 @@ int main(int argc, char *argv[]) {
 
         r = context_read_data(&context);
         if (r < 0) {
-                log_error_errno(r, "Failed to read locale data: %m");
+                log_error("Failed to read locale data: %s", strerror(-r));
                 goto finish;
         }
 
         r = bus_event_loop_with_idle(event, bus, "org.freedesktop.locale1", DEFAULT_EXIT_USEC, NULL, NULL);
         if (r < 0) {
-                log_error_errno(r, "Failed to run event loop: %m");
+                log_error("Failed to run event loop: %s", strerror(-r));
                 goto finish;
         }
 
 finish:
+        context_free(&context, bus);
+
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

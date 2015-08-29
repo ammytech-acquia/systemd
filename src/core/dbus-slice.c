@@ -21,6 +21,7 @@
 
 #include "unit.h"
 #include "slice.h"
+#include "dbus-unit.h"
 #include "dbus-cgroup.h"
 #include "dbus-slice.h"
 

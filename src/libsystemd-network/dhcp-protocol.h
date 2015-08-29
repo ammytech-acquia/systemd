@@ -60,8 +60,7 @@ typedef struct DHCPPacket DHCPPacket;
 #define DHCP_IP_SIZE            (int32_t)(sizeof(struct iphdr))
 #define DHCP_IP_UDP_SIZE        (int32_t)(sizeof(struct udphdr) + DHCP_IP_SIZE)
 #define DHCP_MESSAGE_SIZE       (int32_t)(sizeof(DHCPMessage))
-#define DHCP_DEFAULT_MIN_SIZE   576 /* the minimum internet hosts must be able to receive */
-#define DHCP_MIN_OPTIONS_SIZE   DHCP_DEFAULT_MIN_SIZE - DHCP_IP_UDP_SIZE - DHCP_MESSAGE_SIZE
+#define DHCP_MIN_OPTIONS_SIZE   308 /* spec says 312, but that includes the magic cookie */
 #define DHCP_MAGIC_COOKIE       (uint32_t)(0x63825363)
 
 enum {
@@ -96,8 +95,6 @@ enum {
         DHCP_ACK                                = 5,
         DHCP_NAK                                = 6,
         DHCP_RELEASE                            = 7,
-        DHCP_INFORM                             = 8,
-        DHCP_FORCERENEW                         = 9,
 };
 
 enum {
@@ -125,7 +122,6 @@ enum {
         DHCP_OPTION_BROADCAST                   = 28,
         DHCP_OPTION_STATIC_ROUTE                = 33,
         DHCP_OPTION_NTP_SERVER                  = 42,
-        DHCP_OPTION_VENDOR_SPECIFIC             = 43,
         DHCP_OPTION_REQUESTED_IP_ADDRESS        = 50,
         DHCP_OPTION_IP_ADDRESS_LEASE_TIME       = 51,
         DHCP_OPTION_OVERLOAD                    = 52,
@@ -135,10 +131,7 @@ enum {
         DHCP_OPTION_MAXIMUM_MESSAGE_SIZE        = 57,
         DHCP_OPTION_RENEWAL_T1_TIME             = 58,
         DHCP_OPTION_REBINDING_T2_TIME           = 59,
-        DHCP_OPTION_VENDOR_CLASS_IDENTIFIER     = 60,
         DHCP_OPTION_CLIENT_IDENTIFIER           = 61,
         DHCP_OPTION_CLASSLESS_STATIC_ROUTE      = 121,
-        DHCP_OPTION_PRIVATE_BASE                = 224,
-        DHCP_OPTION_PRIVATE_LAST                = 254,
         DHCP_OPTION_END                         = 255,
 };

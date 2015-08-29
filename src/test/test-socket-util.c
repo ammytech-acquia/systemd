@@ -18,11 +18,9 @@
 ***/
 
 #include "socket-util.h"
-#include "in-addr-util.h"
 #include "util.h"
 #include "macro.h"
 #include "log.h"
-#include "async.h"
 
 static void test_socket_address_parse(void) {
         SocketAddress a;
@@ -140,38 +138,6 @@ static void test_socket_address_get_path(void) {
         assert_se(streq(socket_address_get_path(&a), "/foo/bar"));
 }
 
-static void test_socket_address_is(void) {
-        SocketAddress a;
-
-        assert_se(socket_address_parse(&a, "192.168.1.1:8888") >= 0);
-        assert_se(socket_address_is(&a, "192.168.1.1:8888", SOCK_STREAM));
-        assert_se(!socket_address_is(&a, "route", SOCK_STREAM));
-        assert_se(!socket_address_is(&a, "192.168.1.1:8888", SOCK_RAW));
-}
-
-static void test_socket_address_is_netlink(void) {
-        SocketAddress a;
-
-        assert_se(socket_address_parse_netlink(&a, "route 10") >= 0);
-        assert_se(socket_address_is_netlink(&a, "route 10"));
-        assert_se(!socket_address_is_netlink(&a, "192.168.1.1:8888"));
-        assert_se(!socket_address_is_netlink(&a, "route 1"));
-}
-
-static void test_in_addr_is_null(void) {
-
-        union in_addr_union i = {};
-
-        assert_se(in_addr_is_null(AF_INET, &i) == true);
-        assert_se(in_addr_is_null(AF_INET6, &i) == true);
-
-        i.in.s_addr = 0x1000000;
-        assert_se(in_addr_is_null(AF_INET, &i) == false);
-        assert_se(in_addr_is_null(AF_INET6, &i) == false);
-
-        assert_se(in_addr_is_null(-1, &i) == -EAFNOSUPPORT);
-}
-
 static void test_in_addr_prefix_intersect_one(unsigned f, const char *a, unsigned apl, const char *b, unsigned bpl, int result) {
         union in_addr_union ua, ub;
 
@@ -245,104 +211,6 @@ static void test_in_addr_prefix_next(void) {
 
 }
 
-static void test_in_addr_to_string_one(int f, const char *addr) {
-        union in_addr_union ua;
-        _cleanup_free_ char *r = NULL;
-
-        assert_se(in_addr_from_string(f, addr, &ua) >= 0);
-        assert_se(in_addr_to_string(f, &ua, &r) >= 0);
-        printf("test_in_addr_to_string_one: %s == %s\n", addr, r);
-        assert_se(streq(addr, r));
-}
-
-static void test_in_addr_to_string(void) {
-        test_in_addr_to_string_one(AF_INET, "192.168.0.1");
-        test_in_addr_to_string_one(AF_INET, "10.11.12.13");
-        test_in_addr_to_string_one(AF_INET6, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff");
-        test_in_addr_to_string_one(AF_INET6, "::1");
-        test_in_addr_to_string_one(AF_INET6, "fe80::");
-}
-
-static void *connect_thread(void *arg) {
-        union sockaddr_union *sa = arg;
-        _cleanup_close_ int fd = -1;
-
-        fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        assert_se(fd >= 0);
-
-        assert_se(connect(fd, &sa->sa, sizeof(sa->in)) == 0);
-
-        return NULL;
-}
-
-static void test_nameinfo_pretty(void) {
-        _cleanup_free_ char *stdin_name = NULL, *localhost = NULL;
-
-        union sockaddr_union s = {
-                .in.sin_family = AF_INET,
-                .in.sin_port = 0,
-                .in.sin_addr.s_addr = htonl(INADDR_ANY),
-        };
-        int r;
-
-        union sockaddr_union c = {};
-        socklen_t slen = sizeof(c.in), clen = sizeof(c.in);
-
-        _cleanup_close_ int sfd = -1, cfd = -1;
-        r = getnameinfo_pretty(STDIN_FILENO, &stdin_name);
-        log_info_errno(r, "No connection remote: %m");
-
-        assert_se(r < 0);
-
-        sfd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
-        assert_se(sfd >= 0);
-
-        assert_se(bind(sfd, &s.sa, sizeof(s.in)) == 0);
-
-        /* find out the port number */
-        assert_se(getsockname(sfd, &s.sa, &slen) == 0);
-
-        assert_se(listen(sfd, 1) == 0);
-
-        assert_se(asynchronous_job(connect_thread, &s) == 0);
-
-        log_debug("Accepting new connection on fd:%d", sfd);
-        cfd = accept4(sfd, &c.sa, &clen, SOCK_CLOEXEC);
-        assert_se(cfd >= 0);
-
-        r = getnameinfo_pretty(cfd, &localhost);
-        log_info("Connection from %s", localhost);
-        assert_se(r == 0);
-}
-
-static void test_sockaddr_equal(void) {
-        union sockaddr_union a = {
-                .in.sin_family = AF_INET,
-                .in.sin_port = 0,
-                .in.sin_addr.s_addr = htonl(INADDR_ANY),
-        };
-        union sockaddr_union b = {
-                .in.sin_family = AF_INET,
-                .in.sin_port = 0,
-                .in.sin_addr.s_addr = htonl(INADDR_ANY),
-        };
-        union sockaddr_union c = {
-                .in.sin_family = AF_INET,
-                .in.sin_port = 0,
-                .in.sin_addr.s_addr = htonl(1234),
-        };
-        union sockaddr_union d = {
-                .in6.sin6_family = AF_INET6,
-                .in6.sin6_port = 0,
-                .in6.sin6_addr = IN6ADDR_ANY_INIT,
-        };
-        assert_se(sockaddr_equal(&a, &a));
-        assert_se(sockaddr_equal(&a, &b));
-        assert_se(sockaddr_equal(&d, &d));
-        assert_se(!sockaddr_equal(&a, &c));
-        assert_se(!sockaddr_equal(&b, &c));
-}
-
 int main(int argc, char *argv[]) {
 
         log_set_max_level(LOG_DEBUG);
@@ -351,17 +219,9 @@ int main(int argc, char *argv[]) {
         test_socket_address_parse_netlink();
         test_socket_address_equal();
         test_socket_address_get_path();
-        test_socket_address_is();
-        test_socket_address_is_netlink();
 
-        test_in_addr_is_null();
         test_in_addr_prefix_intersect();
         test_in_addr_prefix_next();
-        test_in_addr_to_string();
-
-        test_nameinfo_pretty();
-
-        test_sockaddr_equal();
 
         return 0;
 }

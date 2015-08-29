@@ -20,10 +20,12 @@
 ***/
 
 #include <errno.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include "unit.h"
 #include "scope.h"
+#include "load-fragment.h"
 #include "log.h"
 #include "dbus-scope.h"
 #include "special.h"
@@ -81,18 +83,12 @@ static int scope_arm_timer(Scope *s) {
                 return sd_event_source_set_enabled(s->timer_event_source, SD_EVENT_ONESHOT);
         }
 
-        r = sd_event_add_time(
+        return sd_event_add_time(
                         UNIT(s)->manager->event,
                         &s->timer_event_source,
                         CLOCK_MONOTONIC,
                         now(CLOCK_MONOTONIC) + s->timeout_stop_usec, 0,
                         scope_dispatch_timer, s);
-        if (r < 0)
-                return r;
-
-        (void) sd_event_source_set_description(s->timer_event_source, "scope-timer");
-
-        return 0;
 }
 
 static void scope_set_state(Scope *s, ScopeState state) {
@@ -137,7 +133,7 @@ static int scope_verify(Scope *s) {
                 return 0;
 
         if (set_isempty(UNIT(s)->pids) && UNIT(s)->manager->n_reloading <= 0) {
-                log_unit_error(UNIT(s), "Scope has no PIDs. Refusing.");
+                log_error_unit(UNIT(s)->id, "Scope %s has no PIDs. Refusing.", UNIT(s)->id);
                 return -EINVAL;
         }
 
@@ -247,7 +243,7 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
                 r = unit_kill_context(
                                 UNIT(s),
                                 &s->kill_context,
-                                state != SCOPE_STOP_SIGTERM ? KILL_KILL : KILL_TERMINATE,
+                                state != SCOPE_STOP_SIGTERM,
                                 -1, -1, false);
                 if (r < 0)
                         goto fail;
@@ -268,7 +264,8 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
         return;
 
 fail:
-        log_unit_warning_errno(UNIT(s), r, "Failed to kill processes: %m");
+        log_warning_unit(UNIT(s)->id,
+                         "%s failed to kill processes: %s", UNIT(s)->id, strerror(-r));
 
         scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
 }
@@ -282,7 +279,6 @@ static int scope_start(Unit *u) {
         if (s->state == SCOPE_FAILED)
                 return -EPERM;
 
-        /* We can't fulfill this right now, please try again later */
         if (s->state == SCOPE_STOP_SIGTERM ||
             s->state == SCOPE_STOP_SIGKILL)
                 return -EAGAIN;
@@ -292,20 +288,20 @@ static int scope_start(Unit *u) {
         if (!u->transient && UNIT(s)->manager->n_reloading <= 0)
                 return -ENOENT;
 
-        (void) unit_realize_cgroup(u);
-        (void) unit_reset_cpu_usage(u);
-
-        r = unit_attach_pids_to_cgroup(u);
+        r = unit_realize_cgroup(u);
         if (r < 0) {
-                log_unit_warning_errno(UNIT(s), r, "Failed to add PIDs to scope's control group: %m");
-                scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
+                log_error("Failed to realize cgroup: %s", strerror(-r));
                 return r;
         }
+
+        r = cg_attach_many_everywhere(u->manager->cgroup_supported, u->cgroup_path, UNIT(s)->pids);
+        if (r < 0)
+                return r;
 
         s->result = SCOPE_SUCCESS;
 
         scope_set_state(s, SCOPE_RUNNING);
-        return 1;
+        return 0;
 }
 
 static int scope_stop(Unit *u) {
@@ -321,7 +317,7 @@ static int scope_stop(Unit *u) {
                s->state == SCOPE_ABANDONED);
 
         scope_enter_signal(s, SCOPE_STOP_SIGTERM, SCOPE_SUCCESS);
-        return 1;
+        return 0;
 }
 
 static void scope_reset_failed(Unit *u) {
@@ -377,25 +373,26 @@ static int scope_deserialize_item(Unit *u, const char *key, const char *value, F
 
                 state = scope_state_from_string(value);
                 if (state < 0)
-                        log_unit_debug(u, "Failed to parse state value: %s", value);
+                        log_debug("Failed to parse state value %s", value);
                 else
                         s->deserialized_state = state;
 
         } else
-                log_unit_debug(u, "Unknown serialization key: %s", key);
+                log_debug("Unknown serialization key '%s'", key);
 
         return 0;
 }
 
 static bool scope_check_gc(Unit *u) {
-        assert(u);
+        Scope *s = SCOPE(u);
+        int r;
+
+        assert(s);
 
         /* Never clean up scopes that still have a process around,
          * even if the scope is formally dead. */
 
         if (u->cgroup_path) {
-                int r;
-
                 r = cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, true);
                 if (r <= 0)
                         return true;
@@ -408,7 +405,7 @@ static void scope_notify_cgroup_empty_event(Unit *u) {
         Scope *s = SCOPE(u);
         assert(u);
 
-        log_unit_debug(u, "cgroup is empty");
+        log_debug_unit(u->id, "%s: cgroup is empty", u->id);
 
         if (IN_SET(s->state, SCOPE_RUNNING, SCOPE_ABANDONED, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
                 scope_enter_dead(s, SCOPE_SUCCESS);
@@ -440,17 +437,17 @@ static int scope_dispatch_timer(sd_event_source *source, usec_t usec, void *user
 
         case SCOPE_STOP_SIGTERM:
                 if (s->kill_context.send_sigkill) {
-                        log_unit_warning(UNIT(s), "Stopping timed out. Killing.");
+                        log_warning_unit(UNIT(s)->id, "%s stopping timed out. Killing.", UNIT(s)->id);
                         scope_enter_signal(s, SCOPE_STOP_SIGKILL, SCOPE_FAILURE_TIMEOUT);
                 } else {
-                        log_unit_warning(UNIT(s), "Stopping timed out. Skipping SIGKILL.");
+                        log_warning_unit(UNIT(s)->id, "%s stopping timed out. Skipping SIGKILL.", UNIT(s)->id);
                         scope_enter_dead(s, SCOPE_FAILURE_TIMEOUT);
                 }
 
                 break;
 
         case SCOPE_STOP_SIGKILL:
-                log_unit_warning(UNIT(s), "Still around after SIGKILL. Ignoring.");
+                log_warning_unit(UNIT(s)->id, "%s still around after SIGKILL. Ignoring.", UNIT(s)->id);
                 scope_enter_dead(s, SCOPE_FAILURE_TIMEOUT);
                 break;
 

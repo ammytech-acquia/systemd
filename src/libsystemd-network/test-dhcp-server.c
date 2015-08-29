@@ -20,6 +20,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <netinet/if_ether.h>
+#include <assert.h>
 #include <errno.h>
 
 #include "sd-event.h"
@@ -54,10 +56,9 @@ static int test_basic(sd_event *event) {
         assert_se(!sd_dhcp_server_unref(server));
 
         assert_se(sd_dhcp_server_start(server) == -EUNATCH);
-        assert_se(sd_dhcp_server_set_address(server, &address_any, 28) == -EINVAL);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo, 38) == -ERANGE);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo, 8) >= 0);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo, 8) == -EBUSY);
+        assert_se(sd_dhcp_server_set_address(server, &address_any) == -EINVAL);
+        assert_se(sd_dhcp_server_set_address(server, &address_lo) >= 0);
+        assert_se(sd_dhcp_server_set_address(server, &address_lo) == -EBUSY);
 
         assert_se(sd_dhcp_server_set_lease_pool(server, &address_any, 1) == -EINVAL);
         assert_se(sd_dhcp_server_set_lease_pool(server, &address_lo, 0) == -EINVAL);
@@ -119,7 +120,7 @@ static void test_message_handler(void) {
         };
 
         assert_se(sd_dhcp_server_new(&server, 1) >= 0);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo, 8) >= 0);
+        assert_se(sd_dhcp_server_set_address(server, &address_lo) >= 0);
         assert_se(sd_dhcp_server_attach_event(server, NULL, 0) >= 0);
         assert_se(sd_dhcp_server_start(server) >= 0);
 

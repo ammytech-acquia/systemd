@@ -20,14 +20,22 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <string.h>
+#include <ctype.h>
+#include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
+#include <getopt.h>
 
-#include "systemd/sd-login.h"
+#include <systemd/sd-login.h>
 #include "logind-acl.h"
 #include "udev.h"
 #include "util.h"
 
-static int builtin_uaccess(struct udev_device *dev, int argc, char *argv[], bool test) {
+static int builtin_uaccess(struct udev_device *dev, int argc, char *argv[], bool test)
+{
         int r;
         const char *path = NULL, *seat;
         bool changed_acl = false;
@@ -56,7 +64,7 @@ static int builtin_uaccess(struct udev_device *dev, int argc, char *argv[], bool
 
         r = devnode_acl(path, true, false, 0, true, uid);
         if (r < 0) {
-                log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, r, "Failed to apply ACL on %s: %m", path);
+                log_error("Failed to apply ACL on %s: %s", path, strerror(-r));
                 goto finish;
         }
 
@@ -70,7 +78,7 @@ finish:
                 /* Better be safe than sorry and reset ACL */
                 k = devnode_acl(path, true, false, 0, false, 0);
                 if (k < 0) {
-                        log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, k, "Failed to apply ACL on %s: %m", path);
+                        log_error("Failed to apply ACL on %s: %s", path, strerror(-k));
                         if (r >= 0)
                                 r = k;
                 }
@@ -82,5 +90,5 @@ finish:
 const struct udev_builtin udev_builtin_uaccess = {
         .name = "uaccess",
         .cmd = builtin_uaccess,
-        .help = "Manage device node user ACL",
+        .help = "manage device node user ACL",
 };

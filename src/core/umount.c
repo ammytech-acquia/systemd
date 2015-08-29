@@ -24,6 +24,7 @@
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/swap.h>
+#include <unistd.h>
 #include <linux/loop.h>
 #include <linux/dm-ioctl.h>
 
@@ -62,7 +63,6 @@ static void mount_points_list_free(MountPoint **head) {
 static int mount_points_list_get(MountPoint **head) {
         _cleanup_fclose_ FILE *proc_self_mountinfo = NULL;
         unsigned int i;
-        int r;
 
         assert(head);
 
@@ -98,22 +98,16 @@ static int mount_points_list_get(MountPoint **head) {
                         continue;
                 }
 
-                r = cunescape(path, UNESCAPE_RELAX, &p);
-                if (r < 0)
-                        return r;
+                p = cunescape(path);
+                if (!p)
+                        return -ENOMEM;
 
                 /* Ignore mount points we can't unmount because they
                  * are API or because we are keeping them open (like
-                 * /dev/console). Also, ignore all mounts below API
-                 * file systems, since they are likely virtual too,
-                 * and hence not worth spending time on. Also, in
-                 * unprivileged containers we might lack the rights to
-                 * unmount these things, hence don't bother. */
+                 * /dev/console) */
                 if (mount_point_is_api(p) ||
                     mount_point_ignore(p) ||
-                    path_startswith(p, "/dev") ||
-                    path_startswith(p, "/sys") ||
-                    path_startswith(p, "/proc")) {
+                    path_equal(p, "/dev/console")) {
                         free(p);
                         continue;
                 }
@@ -134,12 +128,10 @@ static int mount_points_list_get(MountPoint **head) {
 static int swap_list_get(MountPoint **head) {
         _cleanup_fclose_ FILE *proc_swaps = NULL;
         unsigned int i;
-        int r;
 
         assert(head);
 
-        proc_swaps = fopen("/proc/swaps", "re");
-        if (!proc_swaps)
+        if (!(proc_swaps = fopen("/proc/swaps", "re")))
                 return (errno == ENOENT) ? 0 : -errno;
 
         (void) fscanf(proc_swaps, "%*s %*s %*s %*s %*s\n");
@@ -149,19 +141,19 @@ static int swap_list_get(MountPoint **head) {
                 char *dev = NULL, *d;
                 int k;
 
-                k = fscanf(proc_swaps,
-                           "%ms " /* device/file */
-                           "%*s " /* type of swap */
-                           "%*s " /* swap size */
-                           "%*s " /* used */
-                           "%*s\n", /* priority */
-                           &dev);
+                if ((k = fscanf(proc_swaps,
+                                "%ms " /* device/file */
+                                "%*s " /* type of swap */
+                                "%*s " /* swap size */
+                                "%*s " /* used */
+                                "%*s\n", /* priority */
+                                &dev)) != 1) {
 
-                if (k != 1) {
                         if (k == EOF)
                                 break;
 
                         log_warning("Failed to parse /proc/swaps:%u.", i);
+
                         free(dev);
                         continue;
                 }
@@ -171,13 +163,14 @@ static int swap_list_get(MountPoint **head) {
                         continue;
                 }
 
-                r = cunescape(dev, UNESCAPE_RELAX, &d);
+                d = cunescape(dev);
                 free(dev);
-                if (r < 0)
-                        return r;
 
-                swap = new0(MountPoint, 1);
-                if (!swap) {
+                if (!d) {
+                        return -ENOMEM;
+                }
+
+                if (!(swap = new0(MountPoint, 1))) {
                         free(d);
                         return -ENOMEM;
                 }
@@ -385,7 +378,7 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
                          * alias read-only we hence should be
                          * relatively safe regarding keeping the fs we
                          * can otherwise not see dirty. */
-                        (void) mount(NULL, m->path, NULL, MS_REMOUNT|MS_RDONLY, NULL);
+                        mount(NULL, m->path, NULL, MS_REMOUNT|MS_RDONLY, NULL);
                 }
 
                 /* Skip / and /usr since we cannot unmount that
@@ -408,7 +401,7 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
 
                         mount_point_free(head, m);
                 } else if (log_error) {
-                        log_warning_errno(errno, "Could not unmount %s: %m", m->path);
+                        log_warning("Could not unmount %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -430,7 +423,7 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not deactivate swap %s: %m", m->path);
+                        log_warning("Could not deactivate swap %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -467,7 +460,7 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not detach loopback %s: %m", m->path);
+                        log_warning("Could not detach loopback %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -502,7 +495,7 @@ static int dm_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning_errno(errno, "Could not detach DM %s: %m", m->path);
+                        log_warning("Could not detach DM %s: %m", m->path);
                         n_failed++;
                 }
         }

@@ -23,4 +23,4 @@
 
 #include <stdbool.h>
 
-int mac_selinux_setup(bool *loaded_policy);
+int selinux_setup(bool *loaded_policy);

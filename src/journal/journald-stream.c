@@ -19,6 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <fcntl.h>
 #include <unistd.h>
 #include <stddef.h>
 
@@ -27,11 +28,8 @@
 #endif
 
 #include "sd-event.h"
-#include "sd-daemon.h"
 #include "socket-util.h"
 #include "selinux-util.h"
-#include "mkdir.h"
-#include "fileio.h"
 #include "journald-server.h"
 #include "journald-stream.h"
 #include "journald-syslog.h"
@@ -59,7 +57,10 @@ struct StdoutStream {
         int fd;
 
         struct ucred ucred;
-        char *label;
+#ifdef HAVE_SELINUX
+        security_context_t security_context;
+#endif
+
         char *identifier;
         char *unit_id;
         int priority;
@@ -68,154 +69,23 @@ struct StdoutStream {
         bool forward_to_kmsg:1;
         bool forward_to_console:1;
 
-        bool fdstore:1;
-
         char buffer[LINE_MAX+1];
         size_t length;
 
         sd_event_source *event_source;
 
-        char *state_file;
-
         LIST_FIELDS(StdoutStream, stdout_stream);
 };
-
-void stdout_stream_free(StdoutStream *s) {
-        if (!s)
-                return;
-
-        if (s->server) {
-                assert(s->server->n_stdout_streams > 0);
-                s->server->n_stdout_streams --;
-                LIST_REMOVE(stdout_stream, s->server->stdout_streams, s);
-        }
-
-        if (s->event_source) {
-                sd_event_source_set_enabled(s->event_source, SD_EVENT_OFF);
-                s->event_source = sd_event_source_unref(s->event_source);
-        }
-
-        safe_close(s->fd);
-        free(s->label);
-        free(s->identifier);
-        free(s->unit_id);
-        free(s->state_file);
-
-        free(s);
-}
-
-DEFINE_TRIVIAL_CLEANUP_FUNC(StdoutStream*, stdout_stream_free);
-
-static void stdout_stream_destroy(StdoutStream *s) {
-        if (!s)
-                return;
-
-        if (s->state_file)
-                unlink(s->state_file);
-
-        stdout_stream_free(s);
-}
-
-static int stdout_stream_save(StdoutStream *s) {
-        _cleanup_free_ char *temp_path = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
-        int r;
-
-        assert(s);
-
-        if (s->state != STDOUT_STREAM_RUNNING)
-                return 0;
-
-        if (!s->state_file) {
-                struct stat st;
-
-                r = fstat(s->fd, &st);
-                if (r < 0)
-                        return log_warning_errno(errno, "Failed to stat connected stream: %m");
-
-                /* We use device and inode numbers as identifier for the stream */
-                if (asprintf(&s->state_file, "/run/systemd/journal/streams/%lu:%lu", (unsigned long) st.st_dev, (unsigned long) st.st_ino) < 0)
-                        return log_oom();
-        }
-
-        mkdir_p("/run/systemd/journal/streams", 0755);
-
-        r = fopen_temporary(s->state_file, &f, &temp_path);
-        if (r < 0)
-                goto fail;
-
-        fprintf(f,
-                "# This is private data. Do not parse\n"
-                "PRIORITY=%i\n"
-                "LEVEL_PREFIX=%i\n"
-                "FORWARD_TO_SYSLOG=%i\n"
-                "FORWARD_TO_KMSG=%i\n"
-                "FORWARD_TO_CONSOLE=%i\n",
-                s->priority,
-                s->level_prefix,
-                s->forward_to_syslog,
-                s->forward_to_kmsg,
-                s->forward_to_console);
-
-        if (!isempty(s->identifier)) {
-                _cleanup_free_ char *escaped;
-
-                escaped = cescape(s->identifier);
-                if (!escaped) {
-                        r = -ENOMEM;
-                        goto fail;
-                }
-
-                fprintf(f, "IDENTIFIER=%s\n", escaped);
-        }
-
-        if (!isempty(s->unit_id)) {
-                _cleanup_free_ char *escaped;
-
-                escaped = cescape(s->unit_id);
-                if (!escaped) {
-                        r = -ENOMEM;
-                        goto fail;
-                }
-
-                fprintf(f, "UNIT=%s\n", escaped);
-        }
-
-        r = fflush_and_check(f);
-        if (r < 0)
-                goto fail;
-
-        if (rename(temp_path, s->state_file) < 0) {
-                r = -errno;
-                goto fail;
-        }
-
-        /* Store the connection fd in PID 1, so that we get it passed
-         * in again on next start */
-        if (!s->fdstore) {
-                sd_pid_notify_with_fds(0, false, "FDSTORE=1", &s->fd, 1);
-                s->fdstore = true;
-        }
-
-        return 0;
-
-fail:
-        (void) unlink(s->state_file);
-
-        if (temp_path)
-                (void) unlink(temp_path);
-
-        return log_error_errno(r, "Failed to save stream data %s: %m", s->state_file);
-}
 
 static int stdout_stream_log(StdoutStream *s, const char *p) {
         struct iovec iovec[N_IOVEC_META_FIELDS + 5];
         int priority;
         char syslog_priority[] = "PRIORITY=\0";
-        char syslog_facility[sizeof("SYSLOG_FACILITY=")-1 + DECIMAL_STR_MAX(int) + 1];
+        char syslog_facility[sizeof("SYSLOG_FACILITY=") + DECIMAL_STR_MAX(priority)];
         _cleanup_free_ char *message = NULL, *syslog_identifier = NULL;
         unsigned n = 0;
-        size_t label_len;
+        char *label = NULL;
+        size_t label_len = 0;
 
         assert(s);
         assert(p);
@@ -246,7 +116,7 @@ static int stdout_stream_log(StdoutStream *s, const char *p) {
         IOVEC_SET_STRING(iovec[n++], syslog_priority);
 
         if (priority & LOG_FACMASK) {
-                xsprintf(syslog_facility, "SYSLOG_FACILITY=%i", LOG_FAC(priority));
+                snprintf(syslog_facility, sizeof(syslog_facility), "SYSLOG_FACILITY=%i", LOG_FAC(priority));
                 IOVEC_SET_STRING(iovec[n++], syslog_facility);
         }
 
@@ -260,8 +130,14 @@ static int stdout_stream_log(StdoutStream *s, const char *p) {
         if (message)
                 IOVEC_SET_STRING(iovec[n++], message);
 
-        label_len = s->label ? strlen(s->label) : 0;
-        server_dispatch_message(s->server, iovec, n, ELEMENTSOF(iovec), &s->ucred, NULL, s->label, label_len, s->unit_id, priority, 0);
+#ifdef HAVE_SELINUX
+        if (s->security_context) {
+                label = (char*) s->security_context;
+                label_len = strlen((char*) s->security_context);
+        }
+#endif
+
+        server_dispatch_message(s->server, iovec, n, ELEMENTSOF(iovec), &s->ucred, NULL, label, label_len, s->unit_id, priority, 0);
         return 0;
 }
 
@@ -353,9 +229,6 @@ static int stdout_stream_line(StdoutStream *s, char *p) {
 
                 s->forward_to_console = !!r;
                 s->state = STDOUT_STREAM_RUNNING;
-
-                /* Try to save the stream, so that journald can be restarted and we can recover */
-                (void) stdout_stream_save(s);
                 return 0;
 
         case STDOUT_STREAM_RUNNING:
@@ -433,7 +306,7 @@ static int stdout_stream_process(sd_event_source *es, int fd, uint32_t revents, 
                 if (errno == EAGAIN)
                         return 0;
 
-                log_warning_errno(errno, "Failed to read from stream: %m");
+                log_warning("Failed to read from stream: %m");
                 goto terminate;
         }
 
@@ -450,62 +323,40 @@ static int stdout_stream_process(sd_event_source *es, int fd, uint32_t revents, 
         return 1;
 
 terminate:
-        stdout_stream_destroy(s);
+        stdout_stream_free(s);
         return 0;
 }
 
-static int stdout_stream_install(Server *s, int fd, StdoutStream **ret) {
-        _cleanup_(stdout_stream_freep) StdoutStream *stream = NULL;
-        int r;
-
+void stdout_stream_free(StdoutStream *s) {
         assert(s);
-        assert(fd >= 0);
 
-        stream = new0(StdoutStream, 1);
-        if (!stream)
-                return log_oom();
-
-        stream->fd = -1;
-        stream->priority = LOG_INFO;
-
-        r = getpeercred(fd, &stream->ucred);
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine peer credentials: %m");
-
-        if (mac_selinux_use()) {
-                r = getpeersec(fd, &stream->label);
-                if (r < 0 && r != -EOPNOTSUPP)
-                        (void) log_warning_errno(r, "Failed to determine peer security context: %m");
+        if (s->server) {
+                assert(s->server->n_stdout_streams > 0);
+                s->server->n_stdout_streams --;
+                LIST_REMOVE(stdout_stream, s->server->stdout_streams, s);
         }
 
-        (void) shutdown(fd, SHUT_WR);
+        if (s->event_source) {
+                sd_event_source_set_enabled(s->event_source, SD_EVENT_OFF);
+                s->event_source = sd_event_source_unref(s->event_source);
+        }
 
-        r = sd_event_add_io(s->event, &stream->event_source, fd, EPOLLIN, stdout_stream_process, stream);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add stream to event loop: %m");
+        safe_close(s->fd);
 
-        r = sd_event_source_set_priority(stream->event_source, SD_EVENT_PRIORITY_NORMAL+5);
-        if (r < 0)
-                return log_error_errno(r, "Failed to adjust stdout event source priority: %m");
+#ifdef HAVE_SELINUX
+        if (s->security_context)
+                freecon(s->security_context);
+#endif
 
-        stream->fd = fd;
-
-        stream->server = s;
-        LIST_PREPEND(stdout_stream, s->stdout_streams, stream);
-        s->n_stdout_streams ++;
-
-        if (ret)
-                *ret = stream;
-
-        stream = NULL;
-
-        return 0;
+        free(s->identifier);
+        free(s->unit_id);
+        free(s);
 }
 
 static int stdout_stream_new(sd_event_source *es, int listen_fd, uint32_t revents, void *userdata) {
-        _cleanup_close_ int fd = -1;
         Server *s = userdata;
-        int r;
+        StdoutStream *stream;
+        int fd, r;
 
         assert(s);
 
@@ -519,169 +370,66 @@ static int stdout_stream_new(sd_event_source *es, int listen_fd, uint32_t revent
                 if (errno == EAGAIN)
                         return 0;
 
-                log_error_errno(errno, "Failed to accept stdout connection: %m");
+                log_error("Failed to accept stdout connection: %m");
                 return -errno;
         }
 
         if (s->n_stdout_streams >= STDOUT_STREAMS_MAX) {
                 log_warning("Too many stdout streams, refusing connection.");
+                safe_close(fd);
                 return 0;
         }
 
-        r = stdout_stream_install(s, fd, NULL);
-        if (r < 0)
-                return r;
-
-        fd = -1;
-        return 0;
-}
-
-static int stdout_stream_load(StdoutStream *stream, const char *fname) {
-        _cleanup_free_ char
-                *priority = NULL,
-                *level_prefix = NULL,
-                *forward_to_syslog = NULL,
-                *forward_to_kmsg = NULL,
-                *forward_to_console = NULL;
-        int r;
-
-        assert(stream);
-        assert(fname);
-
-        if (!stream->state_file) {
-                stream->state_file = strappend("/run/systemd/journal/streams/", fname);
-                if (!stream->state_file)
-                        return log_oom();
+        stream = new0(StdoutStream, 1);
+        if (!stream) {
+                safe_close(fd);
+                return log_oom();
         }
 
-        r = parse_env_file(stream->state_file, NEWLINE,
-                           "PRIORITY", &priority,
-                           "LEVEL_PREFIX", &level_prefix,
-                           "FORWARD_TO_SYSLOG", &forward_to_syslog,
-                           "FORWARD_TO_KMSG", &forward_to_kmsg,
-                           "FORWARD_TO_CONSOLE", &forward_to_console,
-                           "IDENTIFIER", &stream->identifier,
-                           "UNIT", &stream->unit_id,
-                           NULL);
-        if (r < 0)
-                return log_error_errno(r, "Failed to read: %s", stream->state_file);
+        stream->fd = fd;
 
-        if (priority) {
-                int p;
-
-                p = log_level_from_string(priority);
-                if (p >= 0)
-                        stream->priority = p;
+        r = getpeercred(fd, &stream->ucred);
+        if (r < 0) {
+                log_error("Failed to determine peer credentials: %m");
+                goto fail;
         }
 
-        if (level_prefix) {
-                r = parse_boolean(level_prefix);
-                if (r >= 0)
-                        stream->level_prefix = r;
+#ifdef HAVE_SELINUX
+        if (use_selinux()) {
+                if (getpeercon(fd, &stream->security_context) < 0 && errno != ENOPROTOOPT)
+                        log_error("Failed to determine peer security context: %m");
+        }
+#endif
+
+        if (shutdown(fd, SHUT_WR) < 0) {
+                log_error("Failed to shutdown writing side of socket: %m");
+                goto fail;
         }
 
-        if (forward_to_syslog) {
-                r = parse_boolean(forward_to_syslog);
-                if (r >= 0)
-                        stream->forward_to_syslog = r;
+        r = sd_event_add_io(s->event, &stream->event_source, fd, EPOLLIN, stdout_stream_process, stream);
+        if (r < 0) {
+                log_error("Failed to add stream to event loop: %s", strerror(-r));
+                goto fail;
         }
 
-        if (forward_to_kmsg) {
-                r = parse_boolean(forward_to_kmsg);
-                if (r >= 0)
-                        stream->forward_to_kmsg = r;
+        r = sd_event_source_set_priority(stream->event_source, SD_EVENT_PRIORITY_NORMAL+5);
+        if (r < 0) {
+                log_error("Failed to adjust stdout event source priority: %s", strerror(-r));
+                goto fail;
         }
 
-        if (forward_to_console) {
-                r = parse_boolean(forward_to_console);
-                if (r >= 0)
-                        stream->forward_to_console = r;
-        }
-
-        return 0;
-}
-
-static int stdout_stream_restore(Server *s, const char *fname, int fd) {
-        StdoutStream *stream;
-        int r;
-
-        assert(s);
-        assert(fname);
-        assert(fd >= 0);
-
-        if (s->n_stdout_streams >= STDOUT_STREAMS_MAX) {
-                log_warning("Too many stdout streams, refusing restoring of stream.");
-                return -ENOBUFS;
-        }
-
-        r = stdout_stream_install(s, fd, &stream);
-        if (r < 0)
-                return r;
-
-        stream->state = STDOUT_STREAM_RUNNING;
-        stream->fdstore = true;
-
-        /* Ignore all parsing errors */
-        (void) stdout_stream_load(stream, fname);
-
-        return 0;
-}
-
-static int server_restore_streams(Server *s, FDSet *fds) {
-        _cleanup_closedir_ DIR *d = NULL;
-        struct dirent *de;
-        int r;
-
-        d = opendir("/run/systemd/journal/streams");
-        if (!d) {
-                if (errno == ENOENT)
-                        return 0;
-
-                return log_warning_errno(errno, "Failed to enumerate /run/systemd/journal/streams: %m");
-        }
-
-        FOREACH_DIRENT(de, d, goto fail) {
-                unsigned long st_dev, st_ino;
-                bool found = false;
-                Iterator i;
-                int fd;
-
-                if (sscanf(de->d_name, "%lu:%lu", &st_dev, &st_ino) != 2)
-                        continue;
-
-                FDSET_FOREACH(fd, fds, i) {
-                        struct stat st;
-
-                        if (fstat(fd, &st) < 0)
-                                return log_error_errno(errno, "Failed to stat %s: %m", de->d_name);
-
-                        if (S_ISSOCK(st.st_mode) && st.st_dev == st_dev && st.st_ino == st_ino) {
-                                found = true;
-                                break;
-                        }
-                }
-
-                if (!found) {
-                        /* No file descriptor? Then let's delete the state file */
-                        log_debug("Cannot restore stream file %s", de->d_name);
-                        unlinkat(dirfd(d), de->d_name, 0);
-                        continue;
-                }
-
-                fdset_remove(fds, fd);
-
-                r = stdout_stream_restore(s, de->d_name, fd);
-                if (r < 0)
-                        safe_close(fd);
-        }
+        stream->server = s;
+        LIST_PREPEND(stdout_stream, s->stdout_streams, stream);
+        s->n_stdout_streams ++;
 
         return 0;
 
 fail:
-        return log_error_errno(errno, "Failed to read streams directory: %m");
+        stdout_stream_free(stream);
+        return 0;
 }
 
-int server_open_stdout_socket(Server *s, FDSet *fds) {
+int server_open_stdout_socket(Server *s) {
         int r;
 
         assert(s);
@@ -693,32 +441,39 @@ int server_open_stdout_socket(Server *s, FDSet *fds) {
                 };
 
                 s->stdout_fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-                if (s->stdout_fd < 0)
-                        return log_error_errno(errno, "socket() failed: %m");
+                if (s->stdout_fd < 0) {
+                        log_error("socket() failed: %m");
+                        return -errno;
+                }
 
                 unlink(sa.un.sun_path);
 
                 r = bind(s->stdout_fd, &sa.sa, offsetof(union sockaddr_union, un.sun_path) + strlen(sa.un.sun_path));
-                if (r < 0)
-                        return log_error_errno(errno, "bind(%s) failed: %m", sa.un.sun_path);
+                if (r < 0) {
+                        log_error("bind() failed: %m");
+                        return -errno;
+                }
 
-                (void) chmod(sa.un.sun_path, 0666);
+                chmod(sa.un.sun_path, 0666);
 
-                if (listen(s->stdout_fd, SOMAXCONN) < 0)
-                        return log_error_errno(errno, "listen(%s) failed: %m", sa.un.sun_path);
+                if (listen(s->stdout_fd, SOMAXCONN) < 0) {
+                        log_error("listen() failed: %m");
+                        return -errno;
+                }
         } else
                 fd_nonblock(s->stdout_fd, 1);
 
         r = sd_event_add_io(s->event, &s->stdout_event_source, s->stdout_fd, EPOLLIN, stdout_stream_new, s);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add stdout server fd to event source: %m");
+        if (r < 0) {
+                log_error("Failed to add stdout server fd to event source: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_event_source_set_priority(s->stdout_event_source, SD_EVENT_PRIORITY_NORMAL+10);
-        if (r < 0)
-                return log_error_errno(r, "Failed to adjust priority of stdout server event source: %m");
-
-        /* Try to restore streams, but don't bother if this fails */
-        (void) server_restore_streams(s, fds);
+        if (r < 0) {
+                log_error("Failed to adjust priority of stdout server event source: %s", strerror(-r));
+                return r;
+        }
 
         return 0;
 }

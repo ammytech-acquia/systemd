@@ -27,7 +27,6 @@
 #include "sysfs-show.h"
 #include "path-util.h"
 #include "udev-util.h"
-#include "terminal-util.h"
 
 static int show_sysfs_one(
                 struct udev *udev,

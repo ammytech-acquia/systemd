@@ -23,6 +23,7 @@
 
 typedef struct Slice Slice;
 
+#include "unit.h"
 
 typedef enum SliceState {
         SLICE_DEAD,

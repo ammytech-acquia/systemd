@@ -126,94 +126,12 @@ static void test_fdset_remove(void) {
         unlink(name);
 }
 
-static void test_fdset_iterate(void) {
-        int fd = -1;
-        FDSet *fdset = NULL;
-        char name[] = "/tmp/test-fdset_iterate.XXXXXX";
-        Iterator i;
-        int c = 0;
-        int a;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-
-        fdset = fdset_new();
-        assert_se(fdset);
-        assert_se(fdset_put(fdset, fd) >= 0);
-        assert_se(fdset_put(fdset, fd) >= 0);
-        assert_se(fdset_put(fdset, fd) >= 0);
-
-        FDSET_FOREACH(a, fdset, i) {
-                c++;
-                assert_se(a == fd);
-        }
-        assert_se(c == 1);
-
-        fdset_free(fdset);
-
-        unlink(name);
-}
-
-static void test_fdset_isempty(void) {
-        int fd;
-        _cleanup_fdset_free_ FDSet *fdset = NULL;
-        char name[] = "/tmp/test-fdset_isempty.XXXXXX";
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-
-        fdset = fdset_new();
-        assert_se(fdset);
-
-        assert_se(fdset_isempty(fdset));
-        assert_se(fdset_put(fdset, fd) >= 0);
-        assert_se(!fdset_isempty(fdset));
-
-        unlink(name);
-}
-
-static void test_fdset_steal_first(void) {
-        int fd;
-        _cleanup_fdset_free_ FDSet *fdset = NULL;
-        char name[] = "/tmp/test-fdset_steal_first.XXXXXX";
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-
-        fdset = fdset_new();
-        assert_se(fdset);
-
-        assert_se(fdset_steal_first(fdset) < 0);
-        assert_se(fdset_put(fdset, fd) >= 0);
-        assert_se(fdset_steal_first(fdset) == fd);
-        assert_se(fdset_steal_first(fdset) < 0);
-        assert_se(fdset_put(fdset, fd) >= 0);
-
-        unlink(name);
-}
-
-static void test_fdset_new_array(void) {
-        int fds[] = {10, 11, 12, 13};
-        _cleanup_fdset_free_ FDSet *fdset = NULL;
-
-        assert_se(fdset_new_array(&fdset, fds, 4) >= 0);
-        assert_se(fdset_size(fdset) == 4);
-        assert_se(fdset_contains(fdset, 10));
-        assert_se(fdset_contains(fdset, 11));
-        assert_se(fdset_contains(fdset, 12));
-        assert_se(fdset_contains(fdset, 13));
-}
-
 int main(int argc, char *argv[]) {
         test_fdset_new_fill();
         test_fdset_put_dup();
         test_fdset_cloexec();
         test_fdset_close_others();
         test_fdset_remove();
-        test_fdset_iterate();
-        test_fdset_isempty();
-        test_fdset_steal_first();
-        test_fdset_new_array();
 
         return 0;
 }

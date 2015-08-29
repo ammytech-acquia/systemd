@@ -21,10 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
-
 #include "list.h"
-#include "time-util.h"
 
 typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
@@ -86,11 +83,10 @@ struct CGroupContext {
 
         CGroupDevicePolicy device_policy;
         LIST_HEAD(CGroupDeviceAllow, device_allow);
-
-        bool delegate;
 };
 
 #include "unit.h"
+#include "manager.h"
 #include "cgroup-util.h"
 
 void cgroup_context_init(CGroupContext *c);
@@ -111,8 +107,7 @@ CGroupControllerMask unit_get_target_mask(Unit *u);
 
 void unit_update_cgroup_members_masks(Unit *u);
 int unit_realize_cgroup(Unit *u);
-void unit_destroy_cgroup_if_empty(Unit *u);
-int unit_attach_pids_to_cgroup(Unit *u);
+void unit_destroy_cgroup(Unit *u);
 
 int manager_setup_cgroup(Manager *m);
 void manager_shutdown_cgroup(Manager *m, bool delete);
@@ -125,10 +120,6 @@ Unit* manager_get_unit_by_pid(Manager *m, pid_t pid);
 pid_t unit_search_main_pid(Unit *u);
 
 int manager_notify_cgroup_empty(Manager *m, const char *group);
-
-int unit_get_memory_current(Unit *u, uint64_t *ret);
-int unit_get_cpu_usage(Unit *u, nsec_t *ret);
-int unit_reset_cpu_usage(Unit *u);
 
 const char* cgroup_device_policy_to_string(CGroupDevicePolicy i) _const_;
 CGroupDevicePolicy cgroup_device_policy_from_string(const char *s) _pure_;

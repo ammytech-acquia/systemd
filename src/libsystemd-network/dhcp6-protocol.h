@@ -51,8 +51,6 @@ enum {
         DHCP6_PORT_CLIENT                       = 546,
 };
 
-#define DHCP6_INF_TIMEOUT                       1 * USEC_PER_SEC
-#define DHCP6_INF_MAX_RT                        120 * USEC_PER_SEC
 #define DHCP6_SOL_MAX_DELAY                     1 * USEC_PER_SEC
 #define DHCP6_SOL_TIMEOUT                       1 * USEC_PER_SEC
 #define DHCP6_SOL_MAX_RT                        120 * USEC_PER_SEC
@@ -73,7 +71,7 @@ enum {
 
 enum DHCP6State {
         DHCP6_STATE_STOPPED                     = 0,
-        DHCP6_STATE_INFORMATION_REQUEST         = 1,
+        DHCP6_STATE_RS                          = 1,
         DHCP6_STATE_SOLICITATION                = 2,
         DHCP6_STATE_REQUEST                     = 3,
         DHCP6_STATE_BOUND                       = 4,
@@ -123,7 +121,7 @@ enum {
         DHCP6_OPTION_DNS_SERVERS                = 23,  /* RFC 3646 */
         DHCP6_OPTION_DOMAIN_LIST                = 24,  /* RFC 3646 */
 
-        DHCP6_OPTION_SNTP_SERVERS               = 31,  /* RFC 4075, deprecated */
+        DHCP6_OPTION_SNTP_SERVERS               = 31,  /* RFC 4075 */
 
         /* option code 35 is unassigned */
 
@@ -131,12 +129,6 @@ enum {
 
         /* option codes 89-142 are unassigned */
         /* option codes 144-65535 are unassigned */
-};
-
-enum {
-        DHCP6_NTP_SUBOPTION_SRV_ADDR            = 1,
-        DHCP6_NTP_SUBOPTION_MC_ADDR             = 2,
-        DHCP6_NTP_SUBOPTION_SRV_FQDN            = 3,
 };
 
 enum {

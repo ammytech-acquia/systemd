@@ -19,15 +19,18 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/types.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <sys/prctl.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <errno.h>
-#include <poll.h>
+#include <sys/poll.h>
 
 #include "log.h"
 #include "util.h"
-#include "process-util.h"
 #include "spawn-polkit-agent.h"
 
 #ifdef ENABLE_POLKIT
@@ -36,7 +39,7 @@ static pid_t agent_pid = 0;
 int polkit_agent_open(void) {
         int r;
         int pipe_fd[2];
-        char notify_fd[DECIMAL_STR_MAX(int) + 1];
+        char notify_fd[10 + 1];
 
         if (agent_pid > 0)
                 return 0;
@@ -49,7 +52,8 @@ int polkit_agent_open(void) {
         if (pipe2(pipe_fd, 0) < 0)
                 return -errno;
 
-        xsprintf(notify_fd, "%i", pipe_fd[1]);
+        snprintf(notify_fd, sizeof(notify_fd), "%i", pipe_fd[1]);
+        char_array_0(notify_fd);
 
         r = fork_agent(&agent_pid,
                        &pipe_fd[1], 1,
@@ -60,10 +64,10 @@ int polkit_agent_open(void) {
         safe_close(pipe_fd[1]);
 
         if (r < 0)
-                log_error_errno(r, "Failed to fork TTY ask password agent: %m");
+                log_error("Failed to fork TTY ask password agent: %s", strerror(-r));
         else
                 /* Wait until the agent closes the fd */
-                fd_wait_for_event(pipe_fd[0], POLLHUP, USEC_INFINITY);
+                fd_wait_for_event(pipe_fd[0], POLLHUP, (usec_t) -1);
 
         safe_close(pipe_fd[0]);
 
@@ -78,7 +82,7 @@ void polkit_agent_close(void) {
         /* Inform agent that we are done */
         kill(agent_pid, SIGTERM);
         kill(agent_pid, SIGCONT);
-        (void) wait_for_terminate(agent_pid, NULL);
+        wait_for_terminate(agent_pid, NULL);
         agent_pid = 0;
 }
 

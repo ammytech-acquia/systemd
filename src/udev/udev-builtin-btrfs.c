@@ -17,19 +17,27 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 
-#ifdef HAVE_LINUX_BTRFS_H
-#include <linux/btrfs.h>
-#endif
-
-#include "missing.h"
 #include "udev.h"
 
-static int builtin_btrfs(struct udev_device *dev, int argc, char *argv[], bool test) {
-        struct btrfs_ioctl_vol_args args = {};
+#define BTRFS_PATH_NAME_MAX 4087
+struct btrfs_ioctl_vol_args {
+        int64_t fd;
+        char name[BTRFS_PATH_NAME_MAX + 1];
+};
+#define BTRFS_IOCTL_MAGIC 0x94
+#define BTRFS_IOC_DEVICES_READY _IOR(BTRFS_IOCTL_MAGIC, 39, struct btrfs_ioctl_vol_args)
+
+static int builtin_btrfs(struct udev_device *dev, int argc, char *argv[], bool test)
+{
+        struct  btrfs_ioctl_vol_args args;
         _cleanup_close_ int fd = -1;
         int err;
 
@@ -45,7 +53,7 @@ static int builtin_btrfs(struct udev_device *dev, int argc, char *argv[], bool t
         if (err < 0)
                 return EXIT_FAILURE;
 
-        udev_builtin_add_property(dev, test, "ID_BTRFS_READY", one_zero(err == 0));
+        udev_builtin_add_property(dev, test, "ID_BTRFS_READY", err == 0 ? "1" : "0");
         return EXIT_SUCCESS;
 }
 

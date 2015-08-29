@@ -22,7 +22,6 @@
 #include <stdio.h>
 
 #include "util.h"
-#include "terminal-util.h"
 
 int main(int argc, char *argv[]) {
         char *p;

@@ -19,19 +19,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
-
-#ifdef HAVE_KMOD
+#include <errno.h>
 #include <libkmod.h>
-#endif
 
 #include "macro.h"
+#include "execute.h"
 #include "capability.h"
-#include "bus-util.h"
 #include "kmod-setup.h"
 
-#ifdef HAVE_KMOD
 static void systemd_kmod_log(
                 void *data,
                 int priority,
@@ -42,37 +40,38 @@ static void systemd_kmod_log(
 
         /* library logging is enabled at debug only */
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        log_internalv(LOG_DEBUG, 0, file, line, fn, format, args);
+        log_metav(LOG_DEBUG, file, line, fn, format, args);
         REENABLE_WARNING;
 }
-#endif
+
+static bool cmdline_check_kdbus(void) {
+        _cleanup_free_ char *line = NULL;
+
+        if (proc_cmdline(&line) <= 0)
+                return false;
+
+        return strstr(line, "kdbus") != NULL;
+}
 
 int kmod_setup(void) {
-#ifdef HAVE_KMOD
 
         static const struct {
                 const char *module;
                 const char *path;
-                bool warn_if_unavailable:1;
-                bool warn_if_module:1;
+                bool warn;
                 bool (*condition_fn)(void);
         } kmod_table[] = {
                 /* auto-loading on use doesn't work before udev is up */
-                { "autofs4",   "/sys/class/misc/autofs",    true,   false,   NULL      },
+                { "autofs4", "/sys/class/misc/autofs", true, NULL },
 
                 /* early configure of ::1 on the loopback device */
-                { "ipv6",      "/sys/module/ipv6",          false,  true,    NULL      },
+                { "ipv6",    "/sys/module/ipv6",       true, NULL },
 
                 /* this should never be a module */
-                { "unix",      "/proc/net/unix",            true,   true,    NULL      },
+                { "unix",    "/proc/net/unix",         true, NULL },
 
                 /* IPC is needed before we bring up any other services */
-                { "kdbus",     "/sys/fs/kdbus",             false,  false,   is_kdbus_wanted },
-
-#ifdef HAVE_LIBIPTC
-                /* netfilter is needed by networkd, nspawn among others, and cannot be autoloaded */
-                { "ip_tables", "/proc/net/ip_tables_names", false,  false,   NULL      },
-#endif
+                { "kdbus",   "/sys/bus/kdbus",         false, cmdline_check_kdbus },
         };
         struct kmod_ctx *ctx = NULL;
         unsigned int i;
@@ -90,7 +89,7 @@ int kmod_setup(void) {
                 if (kmod_table[i].condition_fn && !kmod_table[i].condition_fn())
                         continue;
 
-                if (kmod_table[i].warn_if_module)
+                if (kmod_table[i].warn)
                         log_debug("Your kernel apparently lacks built-in %s support. Might be "
                                   "a good idea to compile it in. We'll now try to work around "
                                   "this by loading the module...", kmod_table[i].module);
@@ -112,15 +111,11 @@ int kmod_setup(void) {
 
                 r = kmod_module_probe_insert_module(mod, KMOD_PROBE_APPLY_BLACKLIST, NULL, NULL, NULL, NULL);
                 if (r == 0)
-                        log_debug("Inserted module '%s'", kmod_module_get_name(mod));
+                        log_info("Inserted module '%s'", kmod_module_get_name(mod));
                 else if (r == KMOD_PROBE_APPLY_BLACKLIST)
                         log_info("Module '%s' is blacklisted", kmod_module_get_name(mod));
-                else {
-                        bool print_warning = kmod_table[i].warn_if_unavailable || (r < 0 && r != -ENOENT);
-
-                        log_full_errno(print_warning ? LOG_WARNING : LOG_DEBUG, r,
-                                       "Failed to insert module '%s': %m", kmod_module_get_name(mod));
-                }
+                else if (kmod_table[i].warn)
+                        log_error("Failed to insert module '%s'", kmod_module_get_name(mod));
 
                 kmod_module_unref(mod);
         }
@@ -128,6 +123,5 @@ int kmod_setup(void) {
         if (ctx)
                 kmod_unref(ctx);
 
-#endif
         return 0;
 }

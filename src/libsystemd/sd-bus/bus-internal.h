@@ -22,6 +22,8 @@
 ***/
 
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <netinet/in.h>
 #include <pthread.h>
 
 #include "hashmap.h"
@@ -29,7 +31,6 @@
 #include "list.h"
 #include "util.h"
 #include "refcnt.h"
-#include "socket-util.h"
 
 #include "sd-bus.h"
 #include "bus-error.h"
@@ -141,8 +142,6 @@ struct sd_bus_slot {
         void *userdata;
         BusSlotType type:5;
         bool floating:1;
-        bool match_added:1;
-        char *description;
 
         LIST_FIELDS(sd_bus_slot, slots);
 
@@ -206,11 +205,9 @@ struct sd_bus {
         bool nodes_modified:1;
         bool trusted:1;
         bool fake_creds_valid:1;
-        bool fake_pids_valid:1;
         bool manual_peer_interface:1;
         bool is_system:1;
         bool is_user:1;
-        bool allow_interactive_authorization:1;
 
         int use_memfd;
 
@@ -233,19 +230,23 @@ struct sd_bus {
 
         struct bus_match_node match_callbacks;
         Prioq *reply_callbacks_prioq;
-        OrderedHashmap *reply_callbacks;
+        Hashmap *reply_callbacks;
         LIST_HEAD(struct filter_callback, filter_callbacks);
 
         Hashmap *nodes;
         Hashmap *vtable_methods;
         Hashmap *vtable_properties;
 
-        union sockaddr_union sockaddr;
+        union {
+                struct sockaddr sa;
+                struct sockaddr_un un;
+                struct sockaddr_in in;
+                struct sockaddr_in6 in6;
+        } sockaddr;
         socklen_t sockaddr_size;
 
         char *kernel;
         char *machine;
-        pid_t nspid;
 
         sd_id128_t server_id;
 
@@ -262,7 +263,7 @@ struct sd_bus {
         usec_t auth_timeout;
 
         struct ucred ucred;
-        char *label;
+        char label[NAME_MAX];
 
         uint64_t creds_mask;
 
@@ -302,19 +303,16 @@ struct sd_bus {
 
         sd_bus_message *current_message;
         sd_bus_slot *current_slot;
-        sd_bus_message_handler_t current_handler;
-        void *current_userdata;
 
         sd_bus **default_bus_ptr;
         pid_t tid;
 
         struct kdbus_creds fake_creds;
-        struct kdbus_pids fake_pids;
         char *fake_label;
 
         char *cgroup_root;
 
-        char *description;
+        char *connection_name;
 
         size_t bloom_size;
         unsigned bloom_n_hash;
@@ -344,7 +342,6 @@ struct sd_bus {
 
 bool interface_name_is_valid(const char *p) _pure_;
 bool service_name_is_valid(const char *p) _pure_;
-char* service_name_startswith(const char *a, const char *b);
 bool member_name_is_valid(const char *p) _pure_;
 bool object_path_is_valid(const char *p) _pure_;
 char *object_path_startswith(const char *a, const char *b) _pure_;
@@ -386,16 +383,6 @@ char *bus_address_escape(const char *v);
 int bus_set_address_system(sd_bus *bus);
 int bus_set_address_user(sd_bus *bus);
 int bus_set_address_system_remote(sd_bus *b, const char *host);
-int bus_set_address_system_machine(sd_bus *b, const char *machine);
+int bus_set_address_system_container(sd_bus *b, const char *machine);
 
 int bus_remove_match_by_string(sd_bus *bus, const char *match, sd_bus_message_handler_t callback, void *userdata);
-
-int bus_get_root_path(sd_bus *bus);
-
-int bus_maybe_reply_error(sd_bus_message *m, int r, sd_bus_error *error);
-
-#define bus_assert_return(expr, r, error)                               \
-        do {                                                            \
-                if (!assert_log(expr))                                  \
-                        return sd_bus_error_set_errno(error, r);        \
-        } while (false)

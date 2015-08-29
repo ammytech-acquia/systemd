@@ -21,16 +21,15 @@
 
 #include <utmpx.h>
 #include <errno.h>
+#include <assert.h>
 #include <string.h>
 #include <sys/utsname.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/poll.h>
 
 #include "macro.h"
 #include "path-util.h"
-#include "terminal-util.h"
-#include "hostname-util.h"
 #include "utmp-wtmp.h"
 
 int utmp_get_runlevel(int *runlevel, int *previous) {
@@ -93,6 +92,8 @@ int utmp_get_runlevel(int *runlevel, int *previous) {
 static void init_timestamp(struct utmpx *store, usec_t t) {
         assert(store);
 
+        zero(*store);
+
         if (t <= 0)
                 t = now(CLOCK_REALTIME);
 
@@ -142,7 +143,7 @@ static int write_entry_wtmp(const struct utmpx *store) {
         assert(store);
 
         /* wtmp is a simple append-only file where each entry is
-        simply appended to the end; i.e. basically a log. */
+        simply appended to * the end; i.e. basically a log. */
 
         errno = 0;
         updwtmpx(_PATH_WTMPX, store);
@@ -171,7 +172,7 @@ static int write_entry_both(const struct utmpx *store) {
 }
 
 int utmp_put_shutdown(void) {
-        struct utmpx store = {};
+        struct utmpx store;
 
         init_entry(&store, 0);
 
@@ -182,7 +183,7 @@ int utmp_put_shutdown(void) {
 }
 
 int utmp_put_reboot(usec_t t) {
-        struct utmpx store = {};
+        struct utmpx store;
 
         init_entry(&store, t);
 
@@ -204,56 +205,34 @@ _pure_ static const char *sanitize_id(const char *id) {
         return id + l - sizeof(((struct utmpx*) NULL)->ut_id);
 }
 
-int utmp_put_init_process(const char *id, pid_t pid, pid_t sid, const char *line, int ut_type, const char *user) {
-        struct utmpx store = {
-                .ut_type = INIT_PROCESS,
-                .ut_pid = pid,
-                .ut_session = sid,
-        };
-        int r;
+int utmp_put_init_process(const char *id, pid_t pid, pid_t sid, const char *line) {
+        struct utmpx store;
 
         assert(id);
 
         init_timestamp(&store, 0);
 
-        /* ut_id needs only be nul-terminated if it is shorter than sizeof(ut_id) */
+        store.ut_type = INIT_PROCESS;
+        store.ut_pid = pid;
+        store.ut_session = sid;
+
         strncpy(store.ut_id, sanitize_id(id), sizeof(store.ut_id));
 
         if (line)
                 strncpy(store.ut_line, basename(line), sizeof(store.ut_line));
 
-        r = write_entry_both(&store);
-        if (r < 0)
-                return r;
-
-        if (ut_type == LOGIN_PROCESS || ut_type == USER_PROCESS) {
-                store.ut_type = LOGIN_PROCESS;
-                r = write_entry_both(&store);
-                if (r < 0)
-                        return r;
-        }
-
-        if (ut_type == USER_PROCESS) {
-                store.ut_type = USER_PROCESS;
-                strncpy(store.ut_user, user, sizeof(store.ut_user)-1);
-                r = write_entry_both(&store);
-                if (r < 0)
-                        return r;
-        }
-
-        return 0;
+        return write_entry_both(&store);
 }
 
 int utmp_put_dead_process(const char *id, pid_t pid, int code, int status) {
-        struct utmpx lookup = {
-                .ut_type = INIT_PROCESS /* looks for DEAD_PROCESS, LOGIN_PROCESS, USER_PROCESS, too */
-        }, store, store_wtmp, *found;
+        struct utmpx lookup, store, store_wtmp, *found;
 
         assert(id);
 
         setutxent();
 
-        /* ut_id needs only be nul-terminated if it is shorter than sizeof(ut_id) */
+        zero(lookup);
+        lookup.ut_type = INIT_PROCESS; /* looks for DEAD_PROCESS, LOGIN_PROCESS, USER_PROCESS, too */
         strncpy(lookup.ut_id, sanitize_id(id), sizeof(lookup.ut_id));
 
         found = getutxid(&lookup);
@@ -281,7 +260,7 @@ int utmp_put_dead_process(const char *id, pid_t pid, int code, int status) {
 
 
 int utmp_put_runlevel(int runlevel, int previous) {
-        struct utmpx store = {};
+        struct utmpx store;
         int r;
 
         assert(runlevel > 0);
@@ -368,14 +347,8 @@ static int write_to_terminal(const char *tty, const char *message) {
         return 0;
 }
 
-int utmp_wall(
-        const char *message,
-        const char *username,
-        const char *origin_tty,
-        bool (*match_tty)(const char *tty, void *userdata),
-        void *userdata) {
-
-        _cleanup_free_ char *text = NULL, *hn = NULL, *un = NULL, *stdin_tty = NULL;
+int utmp_wall(const char *message, const char *username, bool (*match_tty)(const char *tty)) {
+        _cleanup_free_ char *text = NULL, *hn = NULL, *un = NULL, *tty = NULL;
         char date[FORMAT_TIMESTAMP_MAX];
         struct utmpx *u;
         int r;
@@ -389,17 +362,14 @@ int utmp_wall(
                         return -ENOMEM;
         }
 
-        if (!origin_tty) {
-                getttyname_harder(STDIN_FILENO, &stdin_tty);
-                origin_tty = stdin_tty;
-        }
+        getttyname_harder(STDIN_FILENO, &tty);
 
         if (asprintf(&text,
                      "\a\r\n"
                      "Broadcast message from %s@%s%s%s (%s):\r\n\r\n"
                      "%s\r\n\r\n",
                      un ?: username, hn,
-                     origin_tty ? " on " : "", strempty(origin_tty),
+                     tty ? " on " : "", strempty(tty),
                      format_timestamp(date, sizeof(date), now(CLOCK_REALTIME)),
                      message) < 0)
                 return -ENOMEM;
@@ -426,7 +396,7 @@ int utmp_wall(
                         path = buf;
                 }
 
-                if (!match_tty || match_tty(path, userdata)) {
+                if (!match_tty || match_tty(path)) {
                         q = write_to_terminal(path, text);
                         if (q < 0)
                                 r = q;

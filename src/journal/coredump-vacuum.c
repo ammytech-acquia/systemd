@@ -103,7 +103,8 @@ static bool vacuum_necessary(int fd, off_t sum, off_t keep_free, off_t max_use) 
 
                         if (max_use < DEFAULT_MAX_USE_LOWER)
                                 max_use = DEFAULT_MAX_USE_LOWER;
-                } else
+                }
+                else
                         max_use = DEFAULT_MAX_USE_LOWER;
         } else
                 max_use = PAGE_ALIGN(max_use);
@@ -134,12 +135,14 @@ int coredump_vacuum(int exclude_fd, off_t keep_free, off_t max_use) {
         struct stat exclude_st;
         int r;
 
-        if (keep_free == 0 && max_use == 0)
+        if (keep_free <= 0 && max_use <= 0)
                 return 0;
 
         if (exclude_fd >= 0) {
-                if (fstat(exclude_fd, &exclude_st) < 0)
-                        return log_error_errno(errno, "Failed to fstat(): %m");
+                if (fstat(exclude_fd, &exclude_st) < 0) {
+                        log_error("Failed to fstat(): %m");
+                        return -errno;
+                }
         }
 
         /* This algorithm will keep deleting the oldest file of the
@@ -153,7 +156,7 @@ int coredump_vacuum(int exclude_fd, off_t keep_free, off_t max_use) {
                 if (errno == ENOENT)
                         return 0;
 
-                log_error_errno(errno, "Can't open coredump directory: %m");
+                log_error("Can't open coredump directory: %m");
                 return -errno;
         }
 
@@ -191,7 +194,7 @@ int coredump_vacuum(int exclude_fd, off_t keep_free, off_t max_use) {
                             exclude_st.st_ino == st.st_ino)
                                 continue;
 
-                        r = hashmap_ensure_allocated(&h, NULL);
+                        r = hashmap_ensure_allocated(&h, NULL, NULL);
                         if (r < 0)
                                 return log_oom();
 
@@ -255,7 +258,7 @@ int coredump_vacuum(int exclude_fd, off_t keep_free, off_t max_use) {
                         if (errno == ENOENT)
                                 continue;
 
-                        log_error_errno(errno, "Failed to remove file %s: %m", worst->oldest_file);
+                        log_error("Failed to remove file %s: %m", worst->oldest_file);
                         return -errno;
                 } else
                         log_info("Removed old coredump %s.", worst->oldest_file);
@@ -264,6 +267,6 @@ int coredump_vacuum(int exclude_fd, off_t keep_free, off_t max_use) {
         return 0;
 
 fail:
-        log_error_errno(errno, "Failed to read directory: %m");
+        log_error("Failed to read directory: %m");
         return -errno;
 }

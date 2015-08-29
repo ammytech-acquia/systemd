@@ -26,7 +26,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "sd-journal.h"
+#include <systemd/sd-journal.h>
+
 #include "build.h"
 #include "set.h"
 #include "util.h"
@@ -35,11 +36,8 @@
 #include "pager.h"
 #include "macro.h"
 #include "journal-internal.h"
+#include "copy.h"
 #include "compress.h"
-#include "sigbus.h"
-#include "process-util.h"
-#include "terminal-util.h"
-#include "signal-util.h"
 
 static enum {
         ACTION_NONE,
@@ -49,18 +47,18 @@ static enum {
         ACTION_GDB,
 } arg_action = ACTION_LIST;
 static const char* arg_field = NULL;
-static const char *arg_directory = NULL;
 static int arg_no_pager = false;
 static int arg_no_legend = false;
 static int arg_one = false;
-static FILE* arg_output = NULL;
+
+static FILE* output = NULL;
 
 static Set *new_matches(void) {
         Set *set;
         char *tmp;
         int r;
 
-        set = set_new(NULL);
+        set = set_new(trivial_hash_func, trivial_compare_func);
         if (!set) {
                 log_oom();
                 return NULL;
@@ -75,12 +73,35 @@ static Set *new_matches(void) {
 
         r = set_consume(set, tmp);
         if (r < 0) {
-                log_error_errno(r, "failed to add to set: %m");
+                log_error("failed to add to set: %s", strerror(-r));
                 set_free(set);
                 return NULL;
         }
 
         return set;
+}
+
+static int help(void) {
+
+        printf("%s [OPTIONS...]\n\n"
+               "List or retrieve coredumps from the journal.\n\n"
+               "Flags:\n"
+               "  -h --help          Show this help\n"
+               "     --version       Print version string\n"
+               "     --no-pager      Do not pipe output into a pager\n"
+               "     --no-legend     Do not print the column headers.\n"
+               "  -1                 Show information about most recent entry only\n"
+               "  -F --field=FIELD   List all values a certain field takes\n"
+               "  -o --output=FILE   Write output to FILE\n\n"
+
+               "Commands:\n"
+               "  list [MATCHES...]  List available coredumps (default)\n"
+               "  info [MATCHES...]  Show detailed information about one or more coredumps\n"
+               "  dump [MATCHES...]  Print first matching coredump to stdout\n"
+               "  gdb [MATCHES...]   Start gdb for the first matching coredump\n"
+               , program_invocation_short_name);
+
+        return 0;
 }
 
 static int add_match(Set *set, const char *match) {
@@ -110,36 +131,18 @@ static int add_match(Set *set, const char *match) {
                 goto fail;
 
         log_debug("Adding pattern: %s", pattern);
-        r = set_consume(set, pattern);
+        r = set_put(set, pattern);
         if (r < 0) {
-                log_error_errno(r, "Failed to add pattern: %m");
+                log_error("Failed to add pattern '%s': %s",
+                          pattern, strerror(-r));
+                free(pattern);
                 goto fail;
         }
 
         return 0;
 fail:
-        return log_error_errno(r, "Failed to add match: %m");
-}
-
-static void help(void) {
-        printf("%s [OPTIONS...]\n\n"
-               "List or retrieve coredumps from the journal.\n\n"
-               "Flags:\n"
-               "  -h --help          Show this help\n"
-               "     --version       Print version string\n"
-               "     --no-pager      Do not pipe output into a pager\n"
-               "     --no-legend     Do not print the column headers.\n"
-               "  -1                 Show information about most recent entry only\n"
-               "  -F --field=FIELD   List all values a certain field takes\n"
-               "  -o --output=FILE   Write output to FILE\n\n"
-               "  -D --directory=DIR Use journal files from directory\n\n"
-
-               "Commands:\n"
-               "  list [MATCHES...]  List available coredumps (default)\n"
-               "  info [MATCHES...]  Show detailed information about one or more coredumps\n"
-               "  dump [MATCHES...]  Print first matching coredump to stdout\n"
-               "  gdb [MATCHES...]   Start gdb for the first matching coredump\n"
-               , program_invocation_short_name);
+        log_error("Failed to add match: %s", strerror(-r));
+        return r;
 }
 
 static int parse_argv(int argc, char *argv[], Set *matches) {
@@ -158,20 +161,18 @@ static int parse_argv(int argc, char *argv[], Set *matches) {
                 { "no-legend",    no_argument,       NULL, ARG_NO_LEGEND },
                 { "output",       required_argument, NULL, 'o'           },
                 { "field",        required_argument, NULL, 'F'           },
-                { "directory",    required_argument, NULL, 'D'           },
                 {}
         };
 
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "ho:F:1D:", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "ho:F:1", options, NULL)) >= 0)
                 switch(c) {
 
                 case 'h':
                         arg_action = ACTION_NONE;
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
                         arg_action = ACTION_NONE;
@@ -188,14 +189,16 @@ static int parse_argv(int argc, char *argv[], Set *matches) {
                         break;
 
                 case 'o':
-                        if (arg_output) {
+                        if (output) {
                                 log_error("cannot set output more than once");
                                 return -EINVAL;
                         }
 
-                        arg_output = fopen(optarg, "we");
-                        if (!arg_output)
-                                return log_error_errno(errno, "writing to '%s': %m", optarg);
+                        output = fopen(optarg, "we");
+                        if (!output) {
+                                log_error("writing to '%s': %m", optarg);
+                                return -errno;
+                        }
 
                         break;
 
@@ -209,10 +212,6 @@ static int parse_argv(int argc, char *argv[], Set *matches) {
 
                 case '1':
                         arg_one = true;
-                        break;
-
-                case 'D':
-                        arg_directory = optarg;
                         break;
 
                 case '?':
@@ -331,8 +330,10 @@ static int print_list(FILE* file, sd_journal *j, int had_legend) {
         }
 
         r = sd_journal_get_realtime_usec(j, &t);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get realtime timestamp: %m");
+        if (r < 0) {
+                log_error("Failed to get realtime timestamp: %s", strerror(-r));
+                return r;
+        }
 
         format_timestamp(buf, sizeof(buf), t);
         present = filename && access(filename, F_OK) == 0;
@@ -524,8 +525,10 @@ static int focus(sd_journal *j) {
         r = sd_journal_seek_tail(j);
         if (r == 0)
                 r = sd_journal_previous(j);
-        if (r < 0)
-                return log_error_errno(r, "Failed to search journal: %m");
+        if (r < 0) {
+                log_error("Failed to search journal: %s", strerror(-r));
+                return r;
+        }
         if (r == 0) {
                 log_error("No match found.");
                 return -ESRCH;
@@ -587,17 +590,17 @@ static int save_core(sd_journal *j, int fd, char **path, bool *unlink_temp) {
          * compressed file (probably uncached). */
         r = sd_journal_get_data(j, "COREDUMP_FILENAME", (const void**) &data, &len);
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to retrieve COREDUMP_FILENAME: %m");
+                log_warning("Failed to retrieve COREDUMP_FILENAME: %s", strerror(-r));
         else if (r == 0)
                 retrieve(data, len, "COREDUMP_FILENAME", &filename);
 
         if (filename && access(filename, R_OK) < 0) {
-                log_full(errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
-                         "File %s is not readable: %m", filename);
-                filename = mfree(filename);
+                log_debug("File %s is not readable: %m", filename);
+                free(filename);
+                filename = NULL;
         }
 
-        if (filename && !endswith(filename, ".xz") && !endswith(filename, ".lz4")) {
+        if (filename && !endswith(filename, ".xz")) {
                 if (path) {
                         *path = filename;
                         filename = NULL;
@@ -614,8 +617,10 @@ static int save_core(sd_journal *j, int fd, char **path, bool *unlink_temp) {
                                 return log_oom();
 
                         fdt = mkostemp_safe(temp, O_WRONLY|O_CLOEXEC);
-                        if (fdt < 0)
-                                return log_error_errno(errno, "Failed to create temporary file: %m");
+                        if (fdt < 0) {
+                                log_error("Failed to create temporary file: %m");
+                                return -errno;
+                        }
                         log_debug("Created temporary file %s", temp);
 
                         fd = fdt;
@@ -631,7 +636,7 @@ static int save_core(sd_journal *j, int fd, char **path, bool *unlink_temp) {
 
                         sz = write(fdt, data, len);
                         if (sz < 0) {
-                                log_error_errno(errno, "Failed to write temporary file: %m");
+                                log_error("Failed to write temporary file: %m");
                                 r = -errno;
                                 goto error;
                         }
@@ -641,31 +646,31 @@ static int save_core(sd_journal *j, int fd, char **path, bool *unlink_temp) {
                                 goto error;
                         }
                 } else if (filename) {
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
+#ifdef HAVE_XZ
                         _cleanup_close_ int fdf;
 
                         fdf = open(filename, O_RDONLY | O_CLOEXEC);
                         if (fdf < 0) {
-                                log_error_errno(errno, "Failed to open %s: %m", filename);
+                                log_error("Failed to open %s: %m", filename);
                                 r = -errno;
                                 goto error;
                         }
 
-                        r = decompress_stream(filename, fdf, fd, -1);
+                        r = decompress_stream(fdf, fd, -1);
                         if (r < 0) {
-                                log_error_errno(r, "Failed to decompress %s: %m", filename);
+                                log_error("Failed to decompress %s: %s", filename, strerror(-r));
                                 goto error;
                         }
 #else
-                        log_error("Cannot decompress file. Compiled without compression support.");
-                        r = -EOPNOTSUPP;
+                        log_error("Cannot decompress file. Compiled without XZ support.");
+                        r = -ENOTSUP;
                         goto error;
 #endif
                 } else {
                         if (r == -ENOENT)
-                                log_error("Cannot retrieve coredump from journal nor disk.");
+                                log_error("Coredump neither in journal file nor stored externally on disk.");
                         else
-                                log_error_errno(r, "Failed to retrieve COREDUMP field: %m");
+                                log_error("Failed to retrieve COREDUMP field: %s", strerror(-r));
                         goto error;
                 }
 
@@ -694,16 +699,18 @@ static int dump_core(sd_journal* j) {
         if (r < 0)
                 return r;
 
-        print_info(arg_output ? stdout : stderr, j, false);
+        print_info(output ? stdout : stderr, j, false);
 
-        if (on_tty() && !arg_output) {
+        if (on_tty() && !output) {
                 log_error("Refusing to dump core to tty.");
                 return -ENOTTY;
         }
 
-        r = save_core(j, arg_output ? fileno(arg_output) : STDOUT_FILENO, NULL, NULL);
-        if (r < 0)
-                return log_error_errno(r, "Coredump retrieval failed: %m");
+        r = save_core(j, output ? fileno(output) : STDOUT_FILENO, NULL, NULL);
+        if (r < 0) {
+                log_error("Coredump retrieval failed: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_journal_previous(j);
         if (r >= 0)
@@ -731,8 +738,10 @@ static int run_gdb(sd_journal *j) {
         fputs("\n", stdout);
 
         r = sd_journal_get_data(j, "COREDUMP_EXE", (const void**) &data, &len);
-        if (r < 0)
-                return log_error_errno(r, "Failed to retrieve COREDUMP_EXE field: %m");
+        if (r < 0) {
+                log_error("Failed to retrieve COREDUMP_EXE field: %s", strerror(-r));
+                return r;
+        }
 
         assert(len > strlen("COREDUMP_EXE="));
         data += strlen("COREDUMP_EXE=");
@@ -753,28 +762,27 @@ static int run_gdb(sd_journal *j) {
         }
 
         r = save_core(j, -1, &path, &unlink_path);
-        if (r < 0)
-                return log_error_errno(r, "Failed to retrieve core: %m");
+        if (r < 0) {
+                log_error("Failed to retrieve core: %s", strerror(-r));
+                return r;
+        }
 
         pid = fork();
         if (pid < 0) {
-                log_error_errno(errno, "Failed to fork(): %m");
+                log_error("Failed to fork(): %m");
                 r = -errno;
                 goto finish;
         }
         if (pid == 0) {
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-
                 execlp("gdb", "gdb", exe, path, NULL);
 
-                log_error_errno(errno, "Failed to invoke gdb: %m");
+                log_error("Failed to invoke gdb: %m");
                 _exit(1);
         }
 
         r = wait_for_terminate(pid, &st);
         if (r < 0) {
-                log_error_errno(errno, "Failed to wait for gdb: %m");
+                log_error("Failed to wait for gdb: %m");
                 goto finish;
         }
 
@@ -813,20 +821,10 @@ int main(int argc, char *argv[]) {
         if (arg_action == ACTION_NONE)
                 goto end;
 
-        sigbus_install();
-
-        if (arg_directory) {
-                r = sd_journal_open_directory(&j, arg_directory, 0);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to open journals in directory: %s: %m", arg_directory);
-                        goto end;
-                }
-        } else {
-                r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to open journal: %m");
-                        goto end;
-                }
+        r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+        if (r < 0) {
+                log_error("Failed to open journal: %s", strerror(-r));
+                goto end;
         }
 
         /* We want full data, nothing truncated. */
@@ -835,13 +833,13 @@ int main(int argc, char *argv[]) {
         SET_FOREACH(match, matches, it) {
                 r = sd_journal_add_match(j, match, strlen(match));
                 if (r != 0) {
-                        log_error_errno(r, "Failed to add match '%s': %m",
-                                        match);
+                        log_error("Failed to add match '%s': %s",
+                                  match, strerror(-r));
                         goto end;
                 }
         }
 
-        if (_unlikely_(log_get_max_level() >= LOG_DEBUG)) {
+        if (_unlikely_(log_get_max_level() >= LOG_PRI(LOG_DEBUG))) {
                 _cleanup_free_ char *filter;
 
                 filter = journal_make_match_string(j);
@@ -873,8 +871,8 @@ int main(int argc, char *argv[]) {
 end:
         pager_close();
 
-        if (arg_output)
-                fclose(arg_output);
+        if (output)
+                fclose(output);
 
         return r >= 0 ? r : EXIT_FAILURE;
 }

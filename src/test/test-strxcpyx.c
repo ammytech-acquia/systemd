@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "util.h"
+#include "strv.h"
 #include "strxcpyx.h"
 
 static void test_strpcpy(void) {
@@ -37,8 +38,8 @@ static void test_strpcpy(void) {
         space_left = strpcpy(&s, space_left, "r");
         space_left = strpcpy(&s, space_left, "foo");
 
-        assert_se(streq(target, "12345hey hey heywaldobar"));
-        assert_se(space_left == 0);
+        assert(streq(target, "12345hey hey heywaldobar"));
+        assert(space_left == 0);
 }
 
 static void test_strpcpyf(void) {
@@ -47,11 +48,11 @@ static void test_strpcpyf(void) {
         size_t space_left;
 
         space_left = sizeof(target);
-        space_left = strpcpyf(&s, space_left, "space left: %zu. ", space_left);
+        space_left = strpcpyf(&s, space_left, "space left: %zd. ", space_left);
         space_left = strpcpyf(&s, space_left, "foo%s", "bar");
 
-        assert_se(streq(target, "space left: 25. foobar"));
-        assert_se(space_left == 3);
+        assert(streq(target, "space left: 25. foobar"));
+        assert(space_left == 3);
 }
 
 static void test_strpcpyl(void) {
@@ -63,8 +64,8 @@ static void test_strpcpyl(void) {
         space_left = strpcpyl(&s, space_left, "waldo", " test", " waldo. ", NULL);
         space_left = strpcpyl(&s, space_left, "Banana", NULL);
 
-        assert_se(streq(target, "waldo test waldo. Banana"));
-        assert_se(space_left == 1);
+        assert(streq(target, "waldo test waldo. Banana"));
+        assert(space_left == 1);
 }
 
 static void test_strscpy(void) {
@@ -74,8 +75,8 @@ static void test_strscpy(void) {
         space_left = sizeof(target);
         space_left = strscpy(target, space_left, "12345");
 
-        assert_se(streq(target, "12345"));
-        assert_se(space_left == 20);
+        assert(streq(target, "12345"));
+        assert(space_left == 20);
 }
 
 static void test_strscpyl(void) {
@@ -85,8 +86,8 @@ static void test_strscpyl(void) {
         space_left = sizeof(target);
         space_left = strscpyl(target, space_left, "12345", "waldo", "waldo", NULL);
 
-        assert_se(streq(target, "12345waldowaldo"));
-        assert_se(space_left == 10);
+        assert(streq(target, "12345waldowaldo"));
+        assert(space_left == 10);
 }
 
 int main(int argc, char *argv[]) {

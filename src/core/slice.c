@@ -20,9 +20,12 @@
 ***/
 
 #include <errno.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "unit.h"
 #include "slice.h"
+#include "load-fragment.h"
 #include "log.h"
 #include "dbus-slice.h"
 #include "special.h"
@@ -93,28 +96,27 @@ static int slice_add_default_dependencies(Slice *s) {
         return 0;
 }
 
-
 static int slice_verify(Slice *s) {
-        _cleanup_free_ char *parent = NULL;
-        int r;
-
         assert(s);
 
         if (UNIT(s)->load_state != UNIT_LOADED)
                 return 0;
 
-        if (!slice_name_is_valid(UNIT(s)->id)) {
-                log_unit_error(UNIT(s), "Slice name %s is not valid. Refusing.", UNIT(s)->id);
-                return -EINVAL;
-        }
+        if (UNIT_DEREF(UNIT(s)->slice)) {
+                char *a, *dash;
 
-        r = slice_build_parent_slice(UNIT(s)->id, &parent);
-        if (r < 0)
-                return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
+                a = strdupa(UNIT(s)->id);
+                dash = strrchr(a, '-');
+                if (dash)
+                        strcpy(dash, ".slice");
+                else
+                        a = (char*) SPECIAL_ROOT_SLICE;
 
-        if (parent ? !unit_has_name(UNIT_DEREF(UNIT(s)->slice), parent) : UNIT_ISSET(UNIT(s)->slice)) {
-                log_unit_error(UNIT(s), "Located outside of parent slice. Refusing.");
-                return -EINVAL;
+                if (!unit_has_name(UNIT_DEREF(UNIT(s)->slice), a)) {
+                        log_error_unit(UNIT(s)->id,
+                                       "%s located outside its parent slice. Refusing.", UNIT(s)->id);
+                        return -EINVAL;
+                }
         }
 
         return 0;
@@ -182,11 +184,10 @@ static int slice_start(Unit *u) {
         assert(t);
         assert(t->state == SLICE_DEAD);
 
-        (void) unit_realize_cgroup(u);
-        (void) unit_reset_cpu_usage(u);
+        unit_realize_cgroup(u);
 
         slice_set_state(t, SLICE_ACTIVE);
-        return 1;
+        return 0;
 }
 
 static int slice_stop(Unit *u) {
@@ -199,7 +200,7 @@ static int slice_stop(Unit *u) {
          * unit_notify() will do that for us anyway. */
 
         slice_set_state(t, SLICE_DEAD);
-        return 1;
+        return 0;
 }
 
 static int slice_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
@@ -297,6 +298,7 @@ const UnitVTable slice_vtable = {
         .status_message_formats = {
                 .finished_start_job = {
                         [JOB_DONE]       = "Created slice %s.",
+                        [JOB_DEPENDENCY] = "Dependency failed for %s.",
                 },
                 .finished_stop_job = {
                         [JOB_DONE]       = "Removed slice %s.",

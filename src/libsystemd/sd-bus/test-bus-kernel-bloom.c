@@ -23,22 +23,15 @@
 #include "log.h"
 
 #include "sd-bus.h"
+#include "bus-message.h"
+#include "bus-error.h"
 #include "bus-kernel.h"
 #include "bus-util.h"
-
-static int test_match(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        int *found = userdata;
-
-        *found = 1;
-
-        return 0;
-}
 
 static void test_one(
                 const char *path,
                 const char *interface,
                 const char *member,
-                bool as_list,
                 const char *arg0,
                 const char *match,
                 bool good) {
@@ -47,7 +40,7 @@ static void test_one(
         _cleanup_free_ char *name = NULL, *bus_name = NULL, *address = NULL;
         _cleanup_bus_message_unref_ sd_bus_message *m = NULL;
         sd_bus *a, *b;
-        int r, found = 0;
+        int r;
 
         assert_se(asprintf(&name, "deine-mutter-%u", (unsigned) getpid()) >= 0);
 
@@ -79,19 +72,15 @@ static void test_one(
         assert_se(r >= 0);
 
         log_debug("match");
-        r = sd_bus_add_match(b, NULL, match, test_match, &found);
+        r = sd_bus_add_match(b, NULL, match, NULL, NULL);
         assert_se(r >= 0);
 
         log_debug("signal");
-
-        if (as_list)
-                r = sd_bus_emit_signal(a, path, interface, member, "as", 1, arg0);
-        else
-                r = sd_bus_emit_signal(a, path, interface, member, "s", arg0);
+        r = sd_bus_emit_signal(a, path, interface, member, "s", arg0);
         assert_se(r >= 0);
 
         r = sd_bus_process(b, &m);
-        assert_se(r >= 0 && good == !!found);
+        assert_se(r >= 0 && (good == !!m));
 
         sd_bus_unref(a);
         sd_bus_unref(b);
@@ -100,42 +89,27 @@ static void test_one(
 int main(int argc, char *argv[]) {
         log_set_max_level(LOG_DEBUG);
 
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo/tuut'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "interface='waldo.com'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "member='Piep'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "member='Pi_ep'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "arg0='foobar'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "arg0='foo_bar'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", true, "foobar", "arg0='foobar'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", true, "foobar", "arg0='foo_bar'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", true, "foobar", "arg0has='foobar'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", true, "foobar", "arg0has='foo_bar'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo',interface='waldo.com',member='Piep',arg0='foobar'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo',interface='waldo.com',member='Piep',arg0='foobar2'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo/tuut'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "interface='waldo.com'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "member='Piep'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "member='Pi_ep'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "arg0='foobar'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "arg0='foo_bar'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo',interface='waldo.com',member='Piep',arg0='foobar'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo',interface='waldo.com',member='Piep',arg0='foobar2'", false);
 
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo/quux'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/foo/bar/waldo'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/foo/bar'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/foo'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/quux'", false);
-        test_one("/", "waldo.com", "Piep", false, "foobar", "path_namespace='/'", true);
-
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/bar/waldo/'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path='/foo/'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/foo/bar/waldo/'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "foobar", "path_namespace='/foo/'", true);
-
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "/foo/bar/waldo", "arg0path='/foo/'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "/foo", "arg0path='/foo'", true);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "/foo", "arg0path='/foo/bar/waldo'", false);
-        test_one("/foo/bar/waldo", "waldo.com", "Piep", false, "/foo/", "arg0path='/foo/bar/waldo'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path='/foo/bar/waldo/quux'", false);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path_namespace='/foo/bar/waldo'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path_namespace='/foo/bar'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path_namespace='/foo'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path_namespace='/'", true);
+        test_one("/foo/bar/waldo", "waldo.com", "Piep", "foobar", "path_namespace='/quux'", false);
 
         return 0;
 }

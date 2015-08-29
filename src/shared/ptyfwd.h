@@ -21,18 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
+#include <sys/types.h>
+#include <signal.h>
 
-#include "sd-event.h"
-
-typedef struct PTYForward PTYForward;
-
-int pty_forward_new(sd_event *event, int master, bool ignore_vhangup, bool read_only, PTYForward **f);
-PTYForward *pty_forward_free(PTYForward *f);
-
-int pty_forward_get_last_char(PTYForward *f, char *ch);
-
-int pty_forward_set_ignore_vhangup(PTYForward *f, bool ignore_vhangup);
-int pty_forward_get_ignore_vhangup(PTYForward *f);
-
-DEFINE_TRIVIAL_CLEANUP_FUNC(PTYForward*, pty_forward_free);
+int process_pty(int master, sigset_t *mask, pid_t kill_pid, int signo);

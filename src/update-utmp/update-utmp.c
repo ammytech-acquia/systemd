@@ -19,8 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #ifdef HAVE_AUDIT
@@ -37,7 +39,6 @@
 #include "bus-util.h"
 #include "bus-error.h"
 #include "unit-name.h"
-#include "formats-util.h"
 
 typedef struct Context {
         sd_bus *bus;
@@ -79,9 +80,11 @@ static int get_current_runlevel(Context *c) {
                  * here over the others, since these are the main
                  * runlevels used on Fedora. It might make sense to
                  * change the order on some distributions. */
-                { '5', SPECIAL_GRAPHICAL_TARGET  },
-                { '3', SPECIAL_MULTI_USER_TARGET },
-                { '1', SPECIAL_RESCUE_TARGET     },
+                { '5', SPECIAL_RUNLEVEL5_TARGET },
+                { '3', SPECIAL_RUNLEVEL3_TARGET },
+                { '4', SPECIAL_RUNLEVEL4_TARGET },
+                { '2', SPECIAL_RUNLEVEL2_TARGET },
+                { '1', SPECIAL_RESCUE_TARGET },
         };
 
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -128,9 +131,9 @@ static int on_reboot(Context *c) {
 
 #ifdef HAVE_AUDIT
         if (c->audit_fd >= 0)
-                if (audit_log_user_comm_message(c->audit_fd, AUDIT_SYSTEM_BOOT, "", "systemd-update-utmp", NULL, NULL, NULL, 1) < 0 &&
+                if (audit_log_user_message(c->audit_fd, AUDIT_SYSTEM_BOOT, "init", NULL, NULL, NULL, 1) < 0 &&
                     errno != EPERM) {
-                        log_error_errno(errno, "Failed to send audit message: %m");
+                        log_error("Failed to send audit message: %m");
                         r = -errno;
                 }
 #endif
@@ -141,7 +144,7 @@ static int on_reboot(Context *c) {
 
         q = utmp_put_reboot(t);
         if (q < 0) {
-                log_error_errno(q, "Failed to write utmp record: %m");
+                log_error("Failed to write utmp record: %s", strerror(-q));
                 r = q;
         }
 
@@ -158,16 +161,16 @@ static int on_shutdown(Context *c) {
 
 #ifdef HAVE_AUDIT
         if (c->audit_fd >= 0)
-                if (audit_log_user_comm_message(c->audit_fd, AUDIT_SYSTEM_SHUTDOWN, "", "systemd-update-utmp", NULL, NULL, NULL, 1) < 0 &&
+                if (audit_log_user_message(c->audit_fd, AUDIT_SYSTEM_SHUTDOWN, "init", NULL, NULL, NULL, 1) < 0 &&
                     errno != EPERM) {
-                        log_error_errno(errno, "Failed to send audit message: %m");
+                        log_error("Failed to send audit message: %m");
                         r = -errno;
                 }
 #endif
 
         q = utmp_put_shutdown();
         if (q < 0) {
-                log_error_errno(q, "Failed to write utmp record: %m");
+                log_error("Failed to write utmp record: %s", strerror(-q));
                 r = q;
         }
 
@@ -186,8 +189,10 @@ static int on_runlevel(Context *c) {
         q = utmp_get_runlevel(&previous, NULL);
 
         if (q < 0) {
-                if (q != -ESRCH && q != -ENOENT)
-                        return log_error_errno(q, "Failed to get current runlevel: %m");
+                if (q != -ESRCH && q != -ENOENT) {
+                        log_error("Failed to get current runlevel: %s", strerror(-q));
+                        return q;
+                }
 
                 previous = 0;
         }
@@ -210,9 +215,9 @@ static int on_runlevel(Context *c) {
                              runlevel > 0 ? runlevel : 'N') < 0)
                         return log_oom();
 
-                if (audit_log_user_comm_message(c->audit_fd, AUDIT_SYSTEM_RUNLEVEL, s, "systemd-update-utmp", NULL, NULL, NULL, 1) < 0 &&
+                if (audit_log_user_message(c->audit_fd, AUDIT_SYSTEM_RUNLEVEL, s, NULL, NULL, NULL, 1) < 0 &&
                     errno != EPERM) {
-                        log_error_errno(errno, "Failed to send audit message: %m");
+                        log_error("Failed to send audit message: %m");
                         r = -errno;
                 }
         }
@@ -220,7 +225,7 @@ static int on_runlevel(Context *c) {
 
         q = utmp_put_runlevel(runlevel, previous);
         if (q < 0 && q != -ESRCH && q != -ENOENT) {
-                log_error_errno(q, "Failed to write utmp record: %m");
+                log_error("Failed to write utmp record: %s", strerror(-q));
                 r = q;
         }
 
@@ -256,11 +261,11 @@ int main(int argc, char *argv[]) {
          * don't worry about it. */
         c.audit_fd = audit_open();
         if (c.audit_fd < 0 && errno != EAFNOSUPPORT && errno != EPROTONOSUPPORT)
-                log_error_errno(errno, "Failed to connect to audit log: %m");
+                log_error("Failed to connect to audit log: %m");
 #endif
         r = bus_open_system_systemd(&c.bus);
         if (r < 0) {
-                log_error_errno(r, "Failed to get D-Bus connection: %m");
+                log_error("Failed to get D-Bus connection: %s", strerror(-r));
                 r = -EIO;
                 goto finish;
         }
@@ -286,6 +291,8 @@ finish:
                 audit_close(c.audit_fd);
 #endif
 
-        sd_bus_unref(c.bus);
+        if (c.bus)
+                sd_bus_unref(c.bus);
+
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

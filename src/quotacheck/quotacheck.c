@@ -21,13 +21,12 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/prctl.h>
 
 #include "util.h"
-#include "process-util.h"
-#include "signal-util.h"
+#include "fileio.h"
 
 static bool arg_skip = false;
 static bool arg_force = false;
@@ -75,7 +74,6 @@ int main(int argc, char *argv[]) {
         };
 
         pid_t pid;
-        int r;
 
         if (argc > 1) {
                 log_error("This program takes no arguments.");
@@ -88,10 +86,7 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
-        r = parse_proc_cmdline(parse_proc_cmdline_item);
-        if (r < 0)
-                log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
-
+        parse_proc_cmdline(parse_proc_cmdline_item);
         test_files();
 
         if (!arg_force) {
@@ -104,21 +99,13 @@ int main(int argc, char *argv[]) {
 
         pid = fork();
         if (pid < 0) {
-                log_error_errno(errno, "fork(): %m");
+                log_error("fork(): %m");
                 return EXIT_FAILURE;
         } else if (pid == 0) {
-
                 /* Child */
-
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
-
                 execv(cmdline[0], (char**) cmdline);
                 _exit(1); /* Operational error */
         }
 
-        r = wait_for_terminate_and_warn("quotacheck", pid, true);
-
-        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        return wait_for_terminate_and_warn("quotacheck", pid) >= 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

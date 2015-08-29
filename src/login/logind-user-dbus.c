@@ -21,12 +21,12 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/capability.h>
 
 #include "strv.h"
 #include "bus-util.h"
 #include "logind.h"
 #include "logind-user.h"
-#include "formats-util.h"
 
 static int property_get_display(
                 sd_bus *bus,
@@ -103,7 +103,11 @@ static int property_get_sessions(
 
         }
 
-        return sd_bus_message_close_container(reply);
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return 1;
 }
 
 static int property_get_idle_hint(
@@ -134,7 +138,7 @@ static int property_get_idle_since_hint(
                 sd_bus_error *error) {
 
         User *u = userdata;
-        dual_timestamp t = DUAL_TIMESTAMP_NULL;
+        dual_timestamp t;
         uint64_t k;
 
         assert(bus);
@@ -168,25 +172,13 @@ static int property_get_linger(
         return sd_bus_message_append(reply, "b", r > 0);
 }
 
-int bus_user_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_terminate(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         User *u = userdata;
         int r;
 
+        assert(bus);
         assert(message);
         assert(u);
-
-        r = bus_verify_polkit_async(
-                        message,
-                        CAP_KILL,
-                        "org.freedesktop.login1.manage",
-                        false,
-                        u->uid,
-                        &u->manager->polkit_registry,
-                        error);
-        if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* Will call us back */
 
         r = user_stop(u, true);
         if (r < 0)
@@ -195,26 +187,14 @@ int bus_user_method_terminate(sd_bus_message *message, void *userdata, sd_bus_er
         return sd_bus_reply_method_return(message, NULL);
 }
 
-int bus_user_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_kill(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         User *u = userdata;
         int32_t signo;
         int r;
 
+        assert(bus);
         assert(message);
         assert(u);
-
-        r = bus_verify_polkit_async(
-                        message,
-                        CAP_KILL,
-                        "org.freedesktop.login1.manage",
-                        false,
-                        u->uid,
-                        &u->manager->polkit_registry,
-                        error);
-        if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* Will call us back */
 
         r = sd_bus_message_read(message, "i", &signo);
         if (r < 0)
@@ -248,15 +228,14 @@ const sd_bus_vtable user_vtable[] = {
         SD_BUS_PROPERTY("IdleSinceHintMonotonic", "t", property_get_idle_since_hint, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Linger", "b", property_get_linger, 0, 0),
 
-        SD_BUS_METHOD("Terminate", NULL, NULL, bus_user_method_terminate, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Kill", "i", NULL, bus_user_method_kill, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Terminate", NULL, NULL, method_terminate, SD_BUS_VTABLE_CAPABILITY(CAP_KILL)),
+        SD_BUS_METHOD("Kill", "i", NULL, method_kill, SD_BUS_VTABLE_CAPABILITY(CAP_KILL)),
 
         SD_BUS_VTABLE_END
 };
 
 int user_object_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error) {
         Manager *m = userdata;
-        uid_t uid;
         User *user;
         int r;
 
@@ -269,31 +248,39 @@ int user_object_find(sd_bus *bus, const char *path, const char *interface, void 
         if (streq(path, "/org/freedesktop/login1/user/self")) {
                 _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
                 sd_bus_message *message;
+                pid_t pid;
 
                 message = sd_bus_get_current_message(bus);
                 if (!message)
                         return 0;
 
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
+                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_PID, &creds);
                 if (r < 0)
                         return r;
 
-                r = sd_bus_creds_get_owner_uid(creds, &uid);
+                r = sd_bus_creds_get_pid(creds, &pid);
+                if (r < 0)
+                        return r;
+
+                r = manager_get_user_by_pid(m, pid, &user);
+                if (r <= 0)
+                        return 0;
         } else {
+                unsigned long lu;
                 const char *p;
 
                 p = startswith(path, "/org/freedesktop/login1/user/_");
                 if (!p)
                         return 0;
 
-                r = parse_uid(p, &uid);
-        }
-        if (r < 0)
-                return 0;
+                r = safe_atolu(p, &lu);
+                if (r < 0)
+                        return 0;
 
-        user = hashmap_get(m->users, UID_TO_PTR(uid));
-        if (!user)
-                return 0;
+                user = hashmap_get(m->users, ULONG_TO_PTR(lu));
+                if (!user)
+                        return 0;
+        }
 
         *found = user;
         return 1;
@@ -312,7 +299,6 @@ char *user_bus_path(User *u) {
 
 int user_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error) {
         _cleanup_strv_free_ char **l = NULL;
-        sd_bus_message *message;
         Manager *m = userdata;
         User *user;
         Iterator i;
@@ -332,25 +318,6 @@ int user_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***
                 r = strv_consume(&l, p);
                 if (r < 0)
                         return r;
-        }
-
-        message = sd_bus_get_current_message(bus);
-        if (message) {
-                _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
-                uid_t uid;
-
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
-                if (r >= 0) {
-                        r = sd_bus_creds_get_owner_uid(creds, &uid);
-                        if (r >= 0) {
-                                user = hashmap_get(m->users, UID_TO_PTR(uid));
-                                if (user) {
-                                        r = strv_extend(&l, "/org/freedesktop/login1/user/self");
-                                        if (r < 0)
-                                                return r;
-                                }
-                        }
-                }
         }
 
         *nodes = l;

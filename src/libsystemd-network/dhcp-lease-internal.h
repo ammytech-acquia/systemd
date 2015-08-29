@@ -27,7 +27,6 @@
 
 #include "refcnt.h"
 #include "util.h"
-#include "list.h"
 
 #include "dhcp-protocol.h"
 
@@ -36,15 +35,7 @@
 struct sd_dhcp_route {
         struct in_addr dst_addr;
         struct in_addr gw_addr;
-        unsigned char dst_prefixlen;
-};
-
-struct sd_dhcp_raw_option {
-        LIST_FIELDS(struct sd_dhcp_raw_option, options);
-
-        uint8_t tag;
-        uint8_t length;
-        void *data;
+        uint8_t dst_prefixlen;
 };
 
 struct sd_dhcp_lease {
@@ -79,23 +70,16 @@ struct sd_dhcp_lease {
         char *domainname;
         char *hostname;
         char *root_path;
-        uint8_t *client_id;
-        size_t client_id_len;
-        uint8_t *vendor_specific;
-        size_t vendor_specific_len;
-        LIST_HEAD(struct sd_dhcp_raw_option, private_options);
 };
 
 int dhcp_lease_new(sd_dhcp_lease **ret);
 int dhcp_lease_parse_options(uint8_t code, uint8_t len, const uint8_t *option,
                               void *user_data);
-int dhcp_lease_insert_private_option(sd_dhcp_lease *lease, uint8_t tag,
-                                     const uint8_t *data, uint8_t len);
+
+int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file);
+int dhcp_lease_load(const char *lease_file, sd_dhcp_lease **ret);
 
 int dhcp_lease_set_default_subnet_mask(sd_dhcp_lease *lease);
-
-int dhcp_lease_set_client_id(sd_dhcp_lease *lease, const uint8_t *client_id,
-                             size_t client_id_len);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_dhcp_lease*, sd_dhcp_lease_unref);
 #define _cleanup_dhcp_lease_unref_ _cleanup_(sd_dhcp_lease_unrefp)

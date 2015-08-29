@@ -26,9 +26,9 @@
 
 #include "util.h"
 #include "mkdir.h"
+#include "path-util.h"
 #include "logind-inhibit.h"
 #include "fileio.h"
-#include "formats-util.h"
 
 Inhibitor* inhibitor_new(Manager *m, const char* id) {
         Inhibitor *i;
@@ -86,11 +86,11 @@ int inhibitor_save(Inhibitor *i) {
 
         r = mkdir_safe_label("/run/systemd/inhibit", 0755, 0, 0);
         if (r < 0)
-                goto fail;
+                goto finish;
 
         r = fopen_temporary(i->state_file, &f, &temp_path);
         if (r < 0)
-                goto fail;
+                goto finish;
 
         fchmod(fileno(f), 0644);
 
@@ -109,47 +109,38 @@ int inhibitor_save(Inhibitor *i) {
                 _cleanup_free_ char *cc = NULL;
 
                 cc = cescape(i->who);
-                if (!cc) {
+                if (!cc)
                         r = -ENOMEM;
-                        goto fail;
-                }
-
-                fprintf(f, "WHO=%s\n", cc);
+                else
+                        fprintf(f, "WHO=%s\n", cc);
         }
 
         if (i->why) {
                 _cleanup_free_ char *cc = NULL;
 
                 cc = cescape(i->why);
-                if (!cc) {
+                if (!cc)
                         r = -ENOMEM;
-                        goto fail;
-                }
-
-                fprintf(f, "WHY=%s\n", cc);
+                else
+                        fprintf(f, "WHY=%s\n", cc);
         }
 
         if (i->fifo_path)
                 fprintf(f, "FIFO=%s\n", i->fifo_path);
 
-        r = fflush_and_check(f);
-        if (r < 0)
-                goto fail;
+        fflush(f);
 
-        if (rename(temp_path, i->state_file) < 0) {
+        if (ferror(f) || rename(temp_path, i->state_file) < 0) {
                 r = -errno;
-                goto fail;
+                unlink(i->state_file);
+                unlink(temp_path);
         }
 
-        return 0;
+finish:
+        if (r < 0)
+                log_error("Failed to save inhibit data %s: %s", i->state_file, strerror(-r));
 
-fail:
-        (void) unlink(i->state_file);
-
-        if (temp_path)
-                (void) unlink(temp_path);
-
-        return log_error_errno(r, "Failed to save inhibit data %s: %m", i->state_file);
+        return r;
 }
 
 int inhibitor_start(Inhibitor *i) {
@@ -241,18 +232,18 @@ int inhibitor_load(Inhibitor *i) {
         }
 
         if (who) {
-                r = cunescape(who, 0, &cc);
-                if (r < 0)
-                        return r;
+                cc = cunescape(who);
+                if (!cc)
+                        return -ENOMEM;
 
                 free(i->who);
                 i->who = cc;
         }
 
         if (why) {
-                r = cunescape(why, 0, &cc);
-                if (r < 0)
-                        return r;
+                cc = cunescape(why);
+                if (!cc)
+                        return -ENOMEM;
 
                 free(i->why);
                 i->why = cc;
@@ -380,7 +371,7 @@ bool manager_is_inhibited(
 
         Inhibitor *i;
         Iterator j;
-        struct dual_timestamp ts = DUAL_TIMESTAMP_NULL;
+        struct dual_timestamp ts = { 0, 0 };
         bool inhibited = false;
 
         assert(m);
@@ -448,23 +439,23 @@ const char *inhibit_what_to_string(InhibitWhat w) {
 
 InhibitWhat inhibit_what_from_string(const char *s) {
         InhibitWhat what = 0;
-        const char *word, *state;
+        char *w, *state;
         size_t l;
 
-        FOREACH_WORD_SEPARATOR(word, l, s, ":", state) {
-                if (l == 8 && strneq(word, "shutdown", l))
+        FOREACH_WORD_SEPARATOR(w, l, s, ":", state) {
+                if (l == 8 && strneq(w, "shutdown", l))
                         what |= INHIBIT_SHUTDOWN;
-                else if (l == 5 && strneq(word, "sleep", l))
+                else if (l == 5 && strneq(w, "sleep", l))
                         what |= INHIBIT_SLEEP;
-                else if (l == 4 && strneq(word, "idle", l))
+                else if (l == 4 && strneq(w, "idle", l))
                         what |= INHIBIT_IDLE;
-                else if (l == 16 && strneq(word, "handle-power-key", l))
+                else if (l == 16 && strneq(w, "handle-power-key", l))
                         what |= INHIBIT_HANDLE_POWER_KEY;
-                else if (l == 18 && strneq(word, "handle-suspend-key", l))
+                else if (l == 18 && strneq(w, "handle-suspend-key", l))
                         what |= INHIBIT_HANDLE_SUSPEND_KEY;
-                else if (l == 20 && strneq(word, "handle-hibernate-key", l))
+                else if (l == 20 && strneq(w, "handle-hibernate-key", l))
                         what |= INHIBIT_HANDLE_HIBERNATE_KEY;
-                else if (l == 17 && strneq(word, "handle-lid-switch", l))
+                else if (l == 17 && strneq(w, "handle-lid-switch", l))
                         what |= INHIBIT_HANDLE_LID_SWITCH;
                 else
                         return _INHIBIT_WHAT_INVALID;

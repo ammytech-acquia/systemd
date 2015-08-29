@@ -23,29 +23,26 @@
 #include <fcntl.h>
 
 #include "util.h"
-#include "process-util.h"
+#include "fileio.h"
 #include "bus-internal.h"
 #include "bus-socket.h"
 #include "bus-container.h"
 
 int bus_container_connect_socket(sd_bus *b) {
-        _cleanup_close_ int pidnsfd = -1, mntnsfd = -1, usernsfd = -1, rootfd = -1;
-        pid_t child;
+        _cleanup_close_ int pidnsfd = -1, mntnsfd = -1, rootfd = -1;
+        pid_t leader, child;
         siginfo_t si;
         int r;
 
         assert(b);
         assert(b->input_fd < 0);
         assert(b->output_fd < 0);
-        assert(b->nspid > 0 || b->machine);
 
-        if (b->nspid <= 0) {
-                r = container_get_leader(b->machine, &b->nspid);
-                if (r < 0)
-                        return r;
-        }
+        r = container_get_leader(b->machine, &leader);
+        if (r < 0)
+                return r;
 
-        r = namespace_open(b->nspid, &pidnsfd, &mntnsfd, NULL, &usernsfd, &rootfd);
+        r = namespace_open(leader, &pidnsfd, &mntnsfd, NULL, &rootfd);
         if (r < 0)
                 return r;
 
@@ -64,7 +61,7 @@ int bus_container_connect_socket(sd_bus *b) {
         if (child == 0) {
                 pid_t grandchild;
 
-                r = namespace_enter(pidnsfd, mntnsfd, -1, usernsfd, rootfd);
+                r = namespace_enter(pidnsfd, mntnsfd, -1, rootfd);
                 if (r < 0)
                         _exit(255);
 
@@ -120,7 +117,7 @@ int bus_container_connect_socket(sd_bus *b) {
 
 int bus_container_connect_kernel(sd_bus *b) {
         _cleanup_close_pair_ int pair[2] = { -1, -1 };
-        _cleanup_close_ int pidnsfd = -1, mntnsfd = -1, usernsfd = -1, rootfd = -1;
+        _cleanup_close_ int pidnsfd = -1, mntnsfd = -1, rootfd = -1;
         union {
                 struct cmsghdr cmsghdr;
                 uint8_t buf[CMSG_SPACE(sizeof(int))];
@@ -130,7 +127,7 @@ int bus_container_connect_kernel(sd_bus *b) {
                 .msg_controllen = sizeof(control),
         };
         struct cmsghdr *cmsg;
-        pid_t child;
+        pid_t leader, child;
         siginfo_t si;
         int r;
         _cleanup_close_ int fd = -1;
@@ -138,15 +135,12 @@ int bus_container_connect_kernel(sd_bus *b) {
         assert(b);
         assert(b->input_fd < 0);
         assert(b->output_fd < 0);
-        assert(b->nspid > 0 || b->machine);
 
-        if (b->nspid <= 0) {
-                r = container_get_leader(b->machine, &b->nspid);
-                if (r < 0)
-                        return r;
-        }
+        r = container_get_leader(b->machine, &leader);
+        if (r < 0)
+                return r;
 
-        r = namespace_open(b->nspid, &pidnsfd, &mntnsfd, NULL, &usernsfd, &rootfd);
+        r = namespace_open(leader, &pidnsfd, &mntnsfd, NULL, &rootfd);
         if (r < 0)
                 return r;
 
@@ -162,7 +156,7 @@ int bus_container_connect_kernel(sd_bus *b) {
 
                 pair[0] = safe_close(pair[0]);
 
-                r = namespace_enter(pidnsfd, mntnsfd, -1, usernsfd, rootfd);
+                r = namespace_enter(pidnsfd, mntnsfd, -1, rootfd);
                 if (r < 0)
                         _exit(EXIT_FAILURE);
 
@@ -222,7 +216,7 @@ int bus_container_connect_kernel(sd_bus *b) {
         if (recvmsg(pair[0], &mh, MSG_NOSIGNAL|MSG_CMSG_CLOEXEC) < 0)
                 return -errno;
 
-        CMSG_FOREACH(cmsg, &mh)
+        for (cmsg = CMSG_FIRSTHDR(&mh); cmsg; cmsg = CMSG_NXTHDR(&mh, cmsg))
                 if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
                         int *fds;
                         unsigned n_fds;

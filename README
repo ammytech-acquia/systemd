@@ -7,11 +7,11 @@ WEB SITE:
         http://www.freedesktop.org/wiki/Software/systemd
 
 GIT:
-        git@github.com:systemd/systemd.git
-        https://github.com/systemd/systemd.git
+        git://anongit.freedesktop.org/systemd/systemd
+        ssh://git.freedesktop.org/git/systemd/systemd
 
 GITWEB:
-        https://github.com/systemd/systemd
+        http://cgit.freedesktop.org/systemd/systemd
 
 MAILING LIST:
         http://lists.freedesktop.org/mailman/listinfo/systemd-devel
@@ -21,7 +21,7 @@ IRC:
         #systemd on irc.freenode.org
 
 BUG REPORTS:
-        https://github.com/systemd/systemd/issues
+        https://bugs.freedesktop.org/enter_bug.cgi?product=systemd
 
 AUTHOR:
         Lennart Poettering
@@ -30,13 +30,15 @@ AUTHOR:
 
 LICENSE:
         LGPLv2.1+ for all code
-        - except src/basic/MurmurHash2.c which is Public Domain
-        - except src/basic/siphash24.c which is CC0 Public Domain
+        - except sd-readahead.[ch] which is MIT
+        - except src/shared/MurmurHash2.c which is Public Domain
+        - except src/shared/siphash24.c which is CC0 Public Domain
         - except src/journal/lookup3.c which is Public Domain
         - except src/udev/* which is (currently still) GPLv2, GPLv2+
 
 REQUIREMENTS:
-        Linux kernel >= 3.7
+        Linux kernel >= 3.0
+        Linux kernel >= 3.3 for loop device partition support features with nspawn
         Linux kernel >= 3.8 for Smack support
 
         Kernel Config Options:
@@ -51,14 +53,14 @@ REQUIREMENTS:
           CONFIG_PROC_FS
           CONFIG_FHANDLE (libudev, mount and bind mount handling)
 
-        udev will fail to work with the legacy sysfs layout:
+        Udev will fail to work with the legacy layout:
           CONFIG_SYSFS_DEPRECATED=n
 
         Legacy hotplug slows down the system and confuses udev:
           CONFIG_UEVENT_HELPER_PATH=""
 
-        Userspace firmware loading is not supported and should
-        be disabled in the kernel:
+        Userspace firmware loading is deprecated, will go away, and
+        sometimes causes problems:
           CONFIG_FW_LOADER_USER_HELPER=n
 
         Some udev rules and virtualization detection relies on it:
@@ -68,26 +70,19 @@ REQUIREMENTS:
         create additional symlinks in /dev/disk/ and /dev/tape:
           CONFIG_BLK_DEV_BSG
 
-        Required for PrivateNetwork and PrivateDevices in service units:
+        Required for PrivateNetwork in service units:
           CONFIG_NET_NS
-          CONFIG_DEVPTS_MULTIPLE_INSTANCES
-        Note that systemd-localed.service and other systemd units use
-        PrivateNetwork and PrivateDevices so this is effectively required.
 
         Optional but strongly recommended:
           CONFIG_IPV6
           CONFIG_AUTOFS4_FS
+          CONFIG_TMPFS_POSIX_ACL
           CONFIG_TMPFS_XATTR
-          CONFIG_{TMPFS,EXT4,XFS,BTRFS_FS,...}_POSIX_ACL
           CONFIG_SECCOMP
-          CONFIG_CHECKPOINT_RESTORE (for the kcmp() syscall)
 
-        Required for CPUShares= in resource control unit settings
+        Required for CPUShares in resource control unit settings
           CONFIG_CGROUP_SCHED
           CONFIG_FAIR_GROUP_SCHED
-
-        Required for CPUQuota= in resource control unit settings
-          CONFIG_CFS_BANDWIDTH
 
         For systemd-bootchart, several proc debug interfaces are required:
           CONFIG_SCHEDSTATS
@@ -96,15 +91,6 @@ REQUIREMENTS:
         For UEFI systems:
           CONFIG_EFIVAR_FS
           CONFIG_EFI_PARTITION
-
-        We recommend to turn off Real-Time group scheduling in the
-        kernel when using systemd. RT group scheduling effectively
-        makes RT scheduling unavailable for most userspace, since it
-        requires explicit assignment of RT budgets to each unit whose
-        processes making use of RT. As there's no sensible way to
-        assign these budgets automatically this cannot really be
-        fixed, and it's best to disable group scheduling hence.
-           CONFIG_RT_GROUP_SCHED=n
 
         Note that kernel auditing is broken when used with systemd's
         container code. When using systemd in conjunction with
@@ -120,11 +106,10 @@ REQUIREMENTS:
         with audit being enabled. This works correctly only on kernels
         3.14 and newer though. TL;DR: turn audit off, still.
 
-        glibc >= 2.16
+        glibc >= 2.14
         libcap
-        libmount >= 2.20 (from util-linux)
         libseccomp >= 1.0.0 (optional)
-        libblkid >= 2.24 (from util-linux) (optional)
+        libblkid >= 2.20 (from util-linux) (optional)
         libkmod >= 15 (optional)
         PAM >= 1.1.2 (optional)
         libcryptsetup (optional)
@@ -132,26 +117,28 @@ REQUIREMENTS:
         libacl (optional)
         libselinux (optional)
         liblzma (optional)
-        liblz4 >= 119 (optional)
         libgcrypt (optional)
         libqrencode (optional)
         libmicrohttpd (optional)
         libpython (optional)
-        libidn (optional)
+        gobject-introspection > 1.40.0 (optional)
         elfutils >= 158 (optional)
         make, gcc, and similar tools
 
         During runtime, you need the following additional
         dependencies:
 
-        util-linux >= v2.26 required
+        util-linux >= v2.19 (requires fsck -l, agetty -s),
+                      v2.21 required for tests in test/
         dbus >= 1.4.0 (strictly speaking optional, but recommended)
+        sulogin (from util-linux >= 2.22 or sysvinit-tools, optional but recommended,
+                 required for tests in test/)
         dracut (optional)
         PolicyKit (optional)
 
-        When building from git, the following tools are needed:
+        When building from git, you need the following additional
+        dependencies:
 
-        pkg-config
         docbook-xsl
         xsltproc
         automake
@@ -159,13 +146,10 @@ REQUIREMENTS:
         libtool
         intltool
         gperf
+        gtkdocize (optional)
         python (optional)
         python-lxml (optional, but required to build the indices)
         sphinx (optional)
-
-        The build system is initialized with ./autogen.sh. A tar ball
-        can be created with:
-          git archive --format=tar --prefix=systemd-222/ v222 | xz > systemd-222.tar.xz
 
         When systemd-hostnamed is used, it is strongly recommended to
         install nss-myhostname to ensure that, in a world of
@@ -190,9 +174,14 @@ USERS AND GROUPS:
         During runtime, the journal daemon requires the
         "systemd-journal" system group to exist. New journal files will
         be readable by this group (but not writable), which may be used
-        to grant specific users read access. In addition, system
-        groups "wheel" and "adm" will be given read-only access to
-        journal files using systemd-tmpfiles.service.
+        to grant specific users read access.
+
+        It is also recommended to grant read access to all journal
+        files to the system groups "wheel" and "adm" with a command
+        like the following in the post installation script of the
+        package:
+
+        # setfacl -nm g:wheel:rx,d:g:wheel:rx,g:adm:rx,d:g:adm:rx /var/log/journal/
 
         The journal gateway daemon requires the
         "systemd-journal-gateway" system user and group to
@@ -211,38 +200,6 @@ USERS AND GROUPS:
         Similarly, the kdbus dbus1 proxy daemon requires the
         "systemd-bus-proxy" system user and group to exist.
 
-NSS:
-        systemd ships with three NSS modules:
-
-        nss-myhostname resolves the local hostname to locally
-        configured IP addresses, as well as "localhost" to
-        127.0.0.1/::1.
-
-        nss-resolve enables DNS resolution via the systemd-resolved
-        DNS/LLMNR caching stub resolver "systemd-resolved".
-
-        nss-mymachines enables resolution of all local containers
-        registered with machined to their respective IP addresses.
-
-        To make use of these NSS modules, please add them to the
-        "hosts: " line in /etc/nsswitch.conf. The "resolve" module
-        should replace the glibc "dns" module in this file.
-
-        The three modules should be used in the following order:
-
-                hosts: files mymachines resolve myhostname
-
-SYSV INIT.D SCRIPTS:
-        When calling "systemctl enable/disable/is-enabled" on a unit which is a
-        SysV init.d script, it calls /usr/lib/systemd/systemd-sysv-install;
-        this needs to translate the action into the distribution specific
-        mechanism such as chkconfig or update-rc.d. Packagers need to provide
-        this script if you need this functionality (you don't if you disabled
-        SysV init support).
-
-        Please see src/systemctl/systemd-sysv-install.SKELETON for how this
-        needs to look like, and provide an implementation at the marked places.
-
 WARNINGS:
         systemd will warn you during boot if /etc/mtab is not a
         symlink to /proc/mounts. Please ensure that /etc/mtab is a
@@ -260,7 +217,7 @@ WARNINGS:
         supported anymore by the basic set of Linux OS components.
 
         systemd requires that the /run mount point exists. systemd also
-        requires that /var/run is a symlink to /run.
+        requires that /var/run is a a symlink to /run.
 
         For more information on this issue consult
         http://freedesktop.org/wiki/Software/systemd/separate-usr-is-broken
@@ -269,8 +226,3 @@ WARNINGS:
         (e.g. ./configure CPPFLAGS='... -DVALGRIND=1'). Otherwise,
         false positives will be triggered by code which violates
         some rules but is actually safe.
-
-        Currently, systemd-timesyncd defaults to use the Google NTP
-        servers if not specified otherwise at configure time. You
-        really should not ship an OS or device with this default
-        setting. See DISTRO_PORTING for details.

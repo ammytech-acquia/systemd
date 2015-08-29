@@ -33,7 +33,10 @@
 
  ***/
 
+#include <sys/time.h>
+#include <sys/types.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -45,7 +48,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
-#include "systemd/sd-journal.h"
+#include <systemd/sd-journal.h>
 
 #include "util.h"
 #include "fileio.h"
@@ -58,33 +61,46 @@
 #include "bootchart.h"
 #include "list.h"
 
+double graph_start;
+double log_start;
+struct ps_struct *ps_first;
+int pscount;
+int cpus;
+double interval;
+FILE *of = NULL;
+int overrun = 0;
 static int exiting = 0;
+int sysfd=-1;
 
 #define DEFAULT_SAMPLES_LEN 500
 #define DEFAULT_HZ 25.0
 #define DEFAULT_SCALE_X 100.0 /* 100px = 1sec */
 #define DEFAULT_SCALE_Y 20.0  /* 16px = 1 process bar */
-#define DEFAULT_INIT ROOTLIBEXECDIR "/systemd"
+#define DEFAULT_INIT "/sbin/init"
 #define DEFAULT_OUTPUT "/run/log"
 
 /* graph defaults */
 bool arg_entropy = false;
-bool arg_initcall = true;
+bool initcall = true;
 bool arg_relative = false;
 bool arg_filter = true;
 bool arg_show_cmdline = false;
 bool arg_show_cgroup = false;
 bool arg_pss = false;
-bool arg_percpu = false;
+int samples;
 int arg_samples_len = DEFAULT_SAMPLES_LEN; /* we record len+1 (1 start sample) */
 double arg_hz = DEFAULT_HZ;
 double arg_scale_x = DEFAULT_SCALE_X;
 double arg_scale_y = DEFAULT_SCALE_Y;
+static struct list_sample_data *sampledata;
+struct list_sample_data *head;
 
 char arg_init_path[PATH_MAX] = DEFAULT_INIT;
 char arg_output_path[PATH_MAX] = DEFAULT_OUTPUT;
 
 static void signal_handler(int sig) {
+        if (sig++)
+                sig--;
         exiting = 1;
 }
 
@@ -106,13 +122,19 @@ static void parse_conf(void) {
                 { "Bootchart", "ScaleX",           config_parse_double, 0, &arg_scale_x     },
                 { "Bootchart", "ScaleY",           config_parse_double, 0, &arg_scale_y     },
                 { "Bootchart", "ControlGroup",     config_parse_bool,   0, &arg_show_cgroup },
-                { "Bootchart", "PerCPU",           config_parse_bool,   0, &arg_percpu      },
                 { NULL, NULL, NULL, 0, NULL }
         };
+        _cleanup_fclose_ FILE *f;
+        int r;
 
-        config_parse_many(BOOTCHART_CONF,
-                          CONF_DIRS_NULSTR("systemd/bootchart.conf"),
-                          NULL, config_item_table_lookup, items, true, NULL);
+        f = fopen(BOOTCHART_CONF, "re");
+        if (!f)
+                return;
+
+        r = config_parse(NULL, BOOTCHART_CONF, f,
+                         NULL, config_item_table_lookup, (void*) items, true, false, NULL);
+        if (r < 0)
+                log_warning("Failed to parse configuration file: %s", strerror(-r));
 
         if (init != NULL)
                 strscpy(arg_init_path, sizeof(arg_init_path), init);
@@ -121,71 +143,63 @@ static void parse_conf(void) {
 }
 
 static void help(void) {
-        printf("Usage: %s [OPTIONS]\n\n"
-               "Options:\n"
-               "  -r --rel             Record time relative to recording\n"
-               "  -f --freq=FREQ       Sample frequency [%g]\n"
-               "  -n --samples=N       Stop sampling at [%d] samples\n"
-               "  -x --scale-x=N       Scale the graph horizontally [%g] \n"
-               "  -y --scale-y=N       Scale the graph vertically [%g] \n"
-               "  -p --pss             Enable PSS graph (CPU intensive)\n"
-               "  -e --entropy         Enable the entropy_avail graph\n"
-               "  -o --output=PATH     Path to output files [%s]\n"
-               "  -i --init=PATH       Path to init executable [%s]\n"
-               "  -F --no-filter       Disable filtering of unimportant or ephemeral processes\n"
-               "  -C --cmdline         Display full command lines with arguments\n"
-               "  -c --control-group   Display process control group\n"
-               "     --per-cpu         Draw each CPU utilization and wait bar also\n"
-               "  -h --help            Display this message\n\n"
-               "See bootchart.conf for more information.\n",
-               program_invocation_short_name,
-               DEFAULT_HZ,
-               DEFAULT_SAMPLES_LEN,
-               DEFAULT_SCALE_X,
-               DEFAULT_SCALE_Y,
-               DEFAULT_OUTPUT,
-               DEFAULT_INIT);
+        fprintf(stdout,
+                "Usage: %s [OPTIONS]\n\n"
+                "Options:\n"
+                "  -r, --rel             Record time relative to recording\n"
+                "  -f, --freq=FREQ       Sample frequency [%g]\n"
+                "  -n, --samples=N       Stop sampling at [%d] samples\n"
+                "  -x, --scale-x=N       Scale the graph horizontally [%g] \n"
+                "  -y, --scale-y=N       Scale the graph vertically [%g] \n"
+                "  -p, --pss             Enable PSS graph (CPU intensive)\n"
+                "  -e, --entropy         Enable the entropy_avail graph\n"
+                "  -o, --output=PATH     Path to output files [%s]\n"
+                "  -i, --init=PATH       Path to init executable [%s]\n"
+                "  -F, --no-filter       Disable filtering of unimportant or ephemeral processes\n"
+                "  -C, --cmdline         Display full command lines with arguments\n"
+                "  -c, --control-group   Display process control group\n"
+                "  -h, --help            Display this message\n\n"
+                "See bootchart.conf for more information.\n",
+                program_invocation_short_name,
+                DEFAULT_HZ,
+                DEFAULT_SAMPLES_LEN,
+                DEFAULT_SCALE_X,
+                DEFAULT_SCALE_Y,
+                DEFAULT_OUTPUT,
+                DEFAULT_INIT);
 }
 
-static int parse_argv(int argc, char *argv[]) {
-
-        enum {
-                ARG_PERCPU = 0x100,
+static int parse_args(int argc, char *argv[]) {
+        static struct option options[] = {
+                {"rel",       no_argument,        NULL,  'r'},
+                {"freq",      required_argument,  NULL,  'f'},
+                {"samples",   required_argument,  NULL,  'n'},
+                {"pss",       no_argument,        NULL,  'p'},
+                {"output",    required_argument,  NULL,  'o'},
+                {"init",      required_argument,  NULL,  'i'},
+                {"no-filter", no_argument,        NULL,  'F'},
+                {"cmdline",   no_argument,        NULL,  'C'},
+                {"control-group", no_argument,    NULL,  'c'},
+                {"help",      no_argument,        NULL,  'h'},
+                {"scale-x",   required_argument,  NULL,  'x'},
+                {"scale-y",   required_argument,  NULL,  'y'},
+                {"entropy",   no_argument,        NULL,  'e'},
+                {NULL, 0, NULL, 0}
         };
+        int c;
 
-        static const struct option options[] = {
-                {"rel",           no_argument,        NULL,  'r'       },
-                {"freq",          required_argument,  NULL,  'f'       },
-                {"samples",       required_argument,  NULL,  'n'       },
-                {"pss",           no_argument,        NULL,  'p'       },
-                {"output",        required_argument,  NULL,  'o'       },
-                {"init",          required_argument,  NULL,  'i'       },
-                {"no-filter",     no_argument,        NULL,  'F'       },
-                {"cmdline",       no_argument,        NULL,  'C'       },
-                {"control-group", no_argument,        NULL,  'c'       },
-                {"help",          no_argument,        NULL,  'h'       },
-                {"scale-x",       required_argument,  NULL,  'x'       },
-                {"scale-y",       required_argument,  NULL,  'y'       },
-                {"entropy",       no_argument,        NULL,  'e'       },
-                {"per-cpu",       no_argument,        NULL,  ARG_PERCPU},
-                {}
-        };
-        int c, r;
+        while ((c = getopt_long(argc, argv, "erpf:n:o:i:FCchx:y:", options, NULL)) >= 0) {
+                int r;
 
-        if (getpid() == 1)
-                opterr = 0;
-
-        while ((c = getopt_long(argc, argv, "erpf:n:o:i:FCchx:y:", options, NULL)) >= 0)
                 switch (c) {
-
                 case 'r':
                         arg_relative = true;
                         break;
                 case 'f':
                         r = safe_atod(optarg, &arg_hz);
                         if (r < 0)
-                                log_warning_errno(r, "failed to parse --freq/-f argument '%s': %m",
-                                                  optarg);
+                                log_warning("failed to parse --freq/-f argument '%s': %s",
+                                            optarg, strerror(-r));
                         break;
                 case 'F':
                         arg_filter = false;
@@ -199,8 +213,8 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'n':
                         r = safe_atoi(optarg, &arg_samples_len);
                         if (r < 0)
-                                log_warning_errno(r, "failed to parse --samples/-n argument '%s': %m",
-                                                  optarg);
+                                log_warning("failed to parse --samples/-n argument '%s': %s",
+                                            optarg, strerror(-r));
                         break;
                 case 'o':
                         path_kill_slashes(optarg);
@@ -216,76 +230,71 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'x':
                         r = safe_atod(optarg, &arg_scale_x);
                         if (r < 0)
-                                log_warning_errno(r, "failed to parse --scale-x/-x argument '%s': %m",
-                                                  optarg);
+                                log_warning("failed to parse --scale-x/-x argument '%s': %s",
+                                            optarg, strerror(-r));
                         break;
                 case 'y':
                         r = safe_atod(optarg, &arg_scale_y);
                         if (r < 0)
-                                log_warning_errno(r, "failed to parse --scale-y/-y argument '%s': %m",
-                                                  optarg);
+                                log_warning("failed to parse --scale-y/-y argument '%s': %s",
+                                            optarg, strerror(-r));
                         break;
                 case 'e':
                         arg_entropy = true;
                         break;
-                case ARG_PERCPU:
-                        arg_percpu = true;
-                        break;
                 case 'h':
                         help();
-                        return 0;
-                case '?':
-                        if (getpid() != 1)
-                                return -EINVAL;
-                        else
-                                return 0;
+                        exit (EXIT_SUCCESS);
                 default:
-                        assert_not_reached("Unhandled option code.");
+                        break;
                 }
+        }
 
-        if (arg_hz <= 0) {
-                log_error("Frequency needs to be > 0");
+        if (arg_hz <= 0.0) {
+                fprintf(stderr, "Error: Frequency needs to be > 0\n");
                 return -EINVAL;
         }
 
-        return 1;
+        return 0;
 }
 
-static int do_journal_append(char *file) {
-        _cleanup_free_ char *bootchart_message = NULL;
-        _cleanup_free_ char *bootchart_file = NULL;
-        _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
+static void do_journal_append(char *file) {
         struct iovec iovec[5];
-        int r, j = 0;
+        int r, f, j = 0;
         ssize_t n;
+        _cleanup_free_ char *bootchart_file = NULL, *bootchart_message = NULL,
+                *p = NULL;
 
         bootchart_file = strappend("BOOTCHART_FILE=", file);
-        if (!bootchart_file)
-                return log_oom();
+        if (bootchart_file)
+                IOVEC_SET_STRING(iovec[j++], bootchart_file);
 
-        IOVEC_SET_STRING(iovec[j++], bootchart_file);
         IOVEC_SET_STRING(iovec[j++], "MESSAGE_ID=9f26aa562cf440c2b16c773d0479b518");
         IOVEC_SET_STRING(iovec[j++], "PRIORITY=7");
         bootchart_message = strjoin("MESSAGE=Bootchart created: ", file, NULL);
-        if (!bootchart_message)
-                return log_oom();
+        if (bootchart_message)
+                IOVEC_SET_STRING(iovec[j++], bootchart_message);
 
-        IOVEC_SET_STRING(iovec[j++], bootchart_message);
-
-        p = malloc(10 + BOOTCHART_MAX);
-        if (!p)
-                return log_oom();
+        p = malloc(9 + BOOTCHART_MAX);
+        if (!p) {
+                log_oom();
+                return;
+        }
 
         memcpy(p, "BOOTCHART=", 10);
 
-        fd = open(file, O_RDONLY|O_CLOEXEC);
-        if (fd < 0)
-                return log_error_errno(errno, "Failed to open bootchart data \"%s\": %m", file);
-
-        n = loop_read(fd, p + 10, BOOTCHART_MAX, false);
-        if (n < 0)
-                return log_error_errno(n, "Failed to read bootchart data: %m");
+        f = open(file, O_RDONLY|O_CLOEXEC);
+        if (f < 0) {
+                log_error("Failed to read bootchart data: %m");
+                return;
+        }
+        n = loop_read(f, p + 10, BOOTCHART_MAX, false);
+        if (n < 0) {
+                log_error("Failed to read bootchart data: %s", strerror(-n));
+                close(f);
+                return;
+        }
+        close(f);
 
         iovec[j].iov_base = p;
         iovec[j].iov_len = 10 + n;
@@ -293,48 +302,31 @@ static int do_journal_append(char *file) {
 
         r = sd_journal_sendv(iovec, j);
         if (r < 0)
-                log_error_errno(r, "Failed to send bootchart: %m");
-
-        return 0;
+                log_error("Failed to send bootchart: %s", strerror(-r));
 }
 
 int main(int argc, char *argv[]) {
-        static struct list_sample_data *sampledata;
-        _cleanup_closedir_ DIR *proc = NULL;
         _cleanup_free_ char *build = NULL;
-        _cleanup_fclose_ FILE *of = NULL;
-        _cleanup_close_ int sysfd = -1;
-        struct ps_struct *ps_first;
-        double graph_start;
-        double log_start;
-        double interval;
-        char output_file[PATH_MAX];
-        char datestr[200];
-        int pscount = 0;
-        int n_cpus = 0;
-        int overrun = 0;
-        time_t t = 0;
-        int r, samples;
-        struct ps_struct *ps;
-        struct rlimit rlim;
-        struct list_sample_data *head;
         struct sigaction sig = {
                 .sa_handler = signal_handler,
         };
+        struct ps_struct *ps;
+        char output_file[PATH_MAX];
+        char datestr[200];
+        time_t t = 0;
+        int r;
+        struct rlimit rlim;
 
         parse_conf();
 
-        r = parse_argv(argc, argv);
+        r = parse_args(argc, argv);
         if (r < 0)
                 return EXIT_FAILURE;
-
-        if (r == 0)
-                return EXIT_SUCCESS;
 
         /*
          * If the kernel executed us through init=/usr/lib/systemd/systemd-bootchart, then
          * fork:
-         * - parent execs executable specified via init_path[] (/usr/lib/systemd/systemd by default) as pid=1
+         * - parent execs executable specified via init_path[] (/sbin/init by default) as pid=1
          * - child logs data
          */
         if (getpid() == 1) {
@@ -361,25 +353,7 @@ int main(int argc, char *argv[]) {
 
         interval = (1.0 / arg_hz) * 1000000000.0;
 
-        if (arg_relative)
-                graph_start = log_start = gettime_ns();
-        else {
-                struct timespec n;
-                double uptime;
-
-                clock_gettime(clock_boottime_or_monotonic(), &n);
-                uptime = (n.tv_sec + (n.tv_nsec / (double) NSEC_PER_SEC));
-
-                log_start = gettime_ns();
-                graph_start = log_start - uptime;
-        }
-
-        if (graph_start < 0.0) {
-                log_error("Failed to setup graph start time.\n\n"
-                          "The system uptime probably includes time that the system was suspended. "
-                          "Use --rel to bypass this issue.");
-                return EXIT_FAILURE;
-        }
+        log_uptime();
 
         LIST_HEAD_INIT(head);
 
@@ -387,17 +361,27 @@ int main(int argc, char *argv[]) {
         for (samples = 0; !exiting && samples < arg_samples_len; samples++) {
                 int res;
                 double sample_stop;
+                struct timespec req;
+                time_t newint_s;
+                long newint_ns;
                 double elapsed;
                 double timeleft;
 
                 sampledata = new0(struct list_sample_data, 1);
                 if (sampledata == NULL) {
-                        log_oom();
-                        return EXIT_FAILURE;
+                        log_error("Failed to allocate memory for a node: %m");
+                        return -1;
                 }
 
                 sampledata->sampletime = gettime_ns();
                 sampledata->counter = samples;
+
+                if (!of && (access(arg_output_path, R_OK|W_OK|X_OK) == 0)) {
+                        t = time(NULL);
+                        strftime(datestr, sizeof(datestr), "%Y%m%d-%H%M", localtime(&t));
+                        snprintf(output_file, PATH_MAX, "%s/bootchart-%s.svg", arg_output_path, datestr);
+                        of = fopen(output_file, "we");
+                }
 
                 if (sysfd < 0)
                         sysfd = open("/sys", O_RDONLY|O_CLOEXEC);
@@ -407,22 +391,19 @@ int main(int argc, char *argv[]) {
                                 parse_env_file("/usr/lib/os-release", NEWLINE, "PRETTY_NAME", &build, NULL);
                 }
 
-                if (proc)
-                        rewinddir(proc);
-                else
-                        proc = opendir("/proc");
-
                 /* wait for /proc to become available, discarding samples */
-                if (proc) {
-                        r = log_sample(proc, samples, ps_first, &sampledata, &pscount, &n_cpus);
-                        if (r < 0)
-                                return EXIT_FAILURE;
-                }
+                if (graph_start <= 0.0)
+                        log_uptime();
+                else
+                        log_sample(samples, &sampledata);
 
                 sample_stop = gettime_ns();
 
                 elapsed = (sample_stop - sampledata->sampletime) * 1000000000.0;
                 timeleft = interval - elapsed;
+
+                newint_s = (time_t)(timeleft / 1000000000.0);
+                newint_ns = (long)(timeleft - (newint_s * 1000000000.0));
 
                 /*
                  * check if we have not consumed our entire timeslice. If we
@@ -430,11 +411,9 @@ int main(int argc, char *argv[]) {
                  * we'll lose all the missed samples and overrun our total
                  * time
                  */
-                if (timeleft > 0) {
-                        struct timespec req;
-
-                        req.tv_sec = (time_t)(timeleft / 1000000000.0);
-                        req.tv_nsec = (long)(timeleft - (req.tv_sec * 1000000000.0));
+                if (newint_ns > 0 || newint_s > 0) {
+                        req.tv_sec = newint_s;
+                        req.tv_nsec = newint_ns;
 
                         res = nanosleep(&req, NULL);
                         if (res) {
@@ -442,13 +421,13 @@ int main(int argc, char *argv[]) {
                                         /* caught signal, probably HUP! */
                                         break;
                                 }
-                                log_error_errno(errno, "nanosleep() failed: %m");
-                                return EXIT_FAILURE;
+                                log_error("nanosleep() failed: %m");
+                                exit(EXIT_FAILURE);
                         }
                 } else {
                         overrun++;
                         /* calculate how many samples we lost and scrap them */
-                        arg_samples_len -= (int)(-timeleft / interval);
+                        arg_samples_len -= (int)(newint_ns / interval);
                 }
                 LIST_PREPEND(link, head, sampledata);
         }
@@ -457,42 +436,38 @@ int main(int argc, char *argv[]) {
         ps = ps_first;
         while (ps->next_ps) {
                 ps = ps->next_ps;
-                ps->schedstat = safe_close(ps->schedstat);
-                ps->sched = safe_close(ps->sched);
-                if (ps->smaps) {
+                if (ps->schedstat)
+                        close(ps->schedstat);
+                if (ps->sched)
+                        close(ps->sched);
+                if (ps->smaps)
                         fclose(ps->smaps);
-                        ps->smaps = NULL;
-                }
         }
 
         if (!of) {
                 t = time(NULL);
-                r = strftime(datestr, sizeof(datestr), "%Y%m%d-%H%M", localtime(&t));
-                assert_se(r > 0);
-
+                strftime(datestr, sizeof(datestr), "%Y%m%d-%H%M", localtime(&t));
                 snprintf(output_file, PATH_MAX, "%s/bootchart-%s.svg", arg_output_path, datestr);
                 of = fopen(output_file, "we");
         }
 
         if (!of) {
-                log_error("Error opening output file '%s': %m\n", output_file);
-                return EXIT_FAILURE;
+                fprintf(stderr, "opening output file '%s': %m\n", output_file);
+                exit (EXIT_FAILURE);
         }
 
-        r = svg_do(of, strna(build), head, ps_first,
-                   samples, pscount, n_cpus, graph_start,
-                   log_start, interval, overrun);
+        svg_do(build);
 
-        if (r < 0) {
-                log_error_errno(r, "Error generating svg file: %m");
-                return EXIT_FAILURE;
-        }
+        fprintf(stderr, "systemd-bootchart wrote %s\n", output_file);
 
-        log_info("systemd-bootchart wrote %s\n", output_file);
+        do_journal_append(output_file);
 
-        r = do_journal_append(output_file);
-        if (r < 0)
-                return EXIT_FAILURE;
+        if (of)
+                fclose(of);
+
+        closedir(proc);
+        if (sysfd >= 0)
+                close(sysfd);
 
         /* nitpic cleanups */
         ps = ps_first->next_ps;
@@ -512,7 +487,6 @@ int main(int argc, char *argv[]) {
                 free(old->sample);
                 free(old);
         }
-
         free(ps->cgroup);
         free(ps->sample);
         free(ps);
@@ -524,10 +498,9 @@ int main(int argc, char *argv[]) {
                 free(old_sampledata);
         }
         free(sampledata);
-
         /* don't complain when overrun once, happens most commonly on 1st sample */
         if (overrun > 1)
-                log_warning("systemd-bootchart: sample time overrun %i times\n", overrun);
+                fprintf(stderr, "systemd-boochart: Warning: sample time overrun %i times\n", overrun);
 
         return 0;
 }
