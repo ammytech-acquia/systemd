@@ -19,10 +19,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
-
 #include "log.h"
-#include "util.h"
 #include "macro.h"
 
 #include "bus-match.h"
@@ -32,9 +29,10 @@
 
 static bool mask[32];
 
-static int filter(sd_bus *b, sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        log_info("Ran %i", PTR_TO_INT(userdata));
-        mask[PTR_TO_INT(userdata)] = true;
+static int filter(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+        log_info("Ran %u", PTR_TO_UINT(userdata));
+        assert_se(PTR_TO_UINT(userdata) < ELEMENTSOF(mask));
+        mask[PTR_TO_UINT(userdata)] = true;
         return 0;
 }
 
@@ -79,15 +77,24 @@ static int match_add(sd_bus_slot *slots, struct bus_match_node *root, const char
         return r;
 }
 
+static void test_match_scope(const char *match, enum bus_match_scope scope) {
+        struct bus_match_component *components = NULL;
+        unsigned n_components = 0;
+
+        assert_se(bus_match_parse(match, &components, &n_components) >= 0);
+        assert_se(bus_match_get_scope(components, n_components) == scope);
+        bus_match_parse_free(components, n_components);
+}
+
 int main(int argc, char *argv[]) {
         struct bus_match_node root = {
                 .type = BUS_MATCH_ROOT,
         };
 
         _cleanup_bus_message_unref_ sd_bus_message *m = NULL;
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
         enum bus_match_node_type i;
-        sd_bus_slot slots[15];
+        sd_bus_slot slots[19];
         int r;
 
         r = sd_bus_open_system(&bus);
@@ -108,16 +115,20 @@ int main(int argc, char *argv[]) {
         assert_se(match_add(slots, &root, "arg1='two'", 12) >= 0);
         assert_se(match_add(slots, &root, "member='waldo',arg2path='/prefix/'", 13) >= 0);
         assert_se(match_add(slots, &root, "member=waldo,path='/foo/bar',arg3namespace='prefix'", 14) >= 0);
+        assert_se(match_add(slots, &root, "arg4has='pi'", 15) >= 0);
+        assert_se(match_add(slots, &root, "arg4has='pa'", 16) >= 0);
+        assert_se(match_add(slots, &root, "arg4has='po'", 17) >= 0);
+        assert_se(match_add(slots, &root, "arg4='pi'", 18) >= 0);
 
         bus_match_dump(&root, 0);
 
         assert_se(sd_bus_message_new_signal(bus, &m, "/foo/bar", "bar.x", "waldo") >= 0);
-        assert_se(sd_bus_message_append(m, "ssss", "one", "two", "/prefix/three", "prefix.four") >= 0);
+        assert_se(sd_bus_message_append(m, "ssssas", "one", "two", "/prefix/three", "prefix.four", 3, "pi", "pa", "po") >= 0);
         assert_se(bus_message_seal(m, 1, 0) >= 0);
 
         zero(mask);
         assert_se(bus_match_run(NULL, &root, m) == 0);
-        assert_se(mask_contains((unsigned[]) { 9, 8, 7, 5, 10, 12, 13, 14 }, 8));
+        assert_se(mask_contains((unsigned[]) { 9, 8, 7, 5, 10, 12, 13, 14, 15, 16, 17 }, 11));
 
         assert_se(bus_match_remove(&root, &slots[8].match_callback) >= 0);
         assert_se(bus_match_remove(&root, &slots[13].match_callback) >= 0);
@@ -126,7 +137,7 @@ int main(int argc, char *argv[]) {
 
         zero(mask);
         assert_se(bus_match_run(NULL, &root, m) == 0);
-        assert_se(mask_contains((unsigned[]) { 9, 5, 10, 12, 14, 7 }, 6));
+        assert_se(mask_contains((unsigned[]) { 9, 5, 10, 12, 14, 7, 15, 16, 17 }, 9));
 
         for (i = 0; i < _BUS_MATCH_NODE_TYPE_MAX; i++) {
                 char buf[32];
@@ -139,6 +150,13 @@ int main(int argc, char *argv[]) {
         }
 
         bus_match_free(&root);
+
+        test_match_scope("interface='foobar'", BUS_MATCH_GENERIC);
+        test_match_scope("", BUS_MATCH_GENERIC);
+        test_match_scope("interface='org.freedesktop.DBus.Local'", BUS_MATCH_LOCAL);
+        test_match_scope("sender='org.freedesktop.DBus.Local'", BUS_MATCH_LOCAL);
+        test_match_scope("member='gurke',path='/org/freedesktop/DBus/Local'", BUS_MATCH_LOCAL);
+        test_match_scope("arg2='piep',sender='org.freedesktop.DBus',member='waldo'", BUS_MATCH_DRIVER);
 
         return 0;
 }

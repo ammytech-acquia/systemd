@@ -25,7 +25,6 @@
 #include "cgroup-util.h"
 #include "path-util.h"
 #include "util.h"
-#include "log.h"
 
 int main(int argc, char*argv[]) {
         char *path;
@@ -57,30 +56,30 @@ int main(int argc, char*argv[]) {
         assert_se(path_equal(path, "/sys/fs/cgroup/systemd/test-b/test-d"));
         free(path);
 
-        assert_se(cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, "/test-a", false) > 0);
-        assert_se(cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, "/test-b", false) > 0);
-        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a", false) > 0);
-        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b", false) == 0);
+        assert_se(cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, "/test-a") > 0);
+        assert_se(cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, "/test-b") > 0);
+        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a") > 0);
+        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b") == 0);
 
         assert_se(cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a", 0, false, false, false, NULL) == 0);
         assert_se(cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b", 0, false, false, false, NULL) > 0);
 
         assert_se(cg_migrate_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b", SYSTEMD_CGROUP_CONTROLLER, "/test-a", false, false) > 0);
 
-        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a", false) == 0);
-        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b", false) > 0);
+        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a") == 0);
+        assert_se(cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b") > 0);
 
         assert_se(cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-a", 0, false, false, false, NULL) > 0);
         assert_se(cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, "/test-b", 0, false, false, false, NULL) == 0);
 
         cg_trim(SYSTEMD_CGROUP_CONTROLLER, "/", false);
 
-        assert_se(cg_delete(SYSTEMD_CGROUP_CONTROLLER, "/test-b") < 0);
-        assert_se(cg_delete(SYSTEMD_CGROUP_CONTROLLER, "/test-a") >= 0);
+        assert_se(cg_rmdir(SYSTEMD_CGROUP_CONTROLLER, "/test-b") < 0);
+        assert_se(cg_rmdir(SYSTEMD_CGROUP_CONTROLLER, "/test-a") >= 0);
 
         assert_se(cg_split_spec("foobar:/", &c, &p) == 0);
-        assert(streq(c, "foobar"));
-        assert(streq(p, "/"));
+        assert_se(streq(c, "foobar"));
+        assert_se(streq(p, "/"));
         free(c);
         free(p);
 
@@ -92,13 +91,13 @@ int main(int argc, char*argv[]) {
         assert_se(cg_split_spec("fo/obar:/", &c, &p) < 0);
 
         assert_se(cg_split_spec("/", &c, &p) >= 0);
-        assert(c == NULL);
-        assert(streq(p, "/"));
+        assert_se(c == NULL);
+        assert_se(streq(p, "/"));
         free(p);
 
         assert_se(cg_split_spec("foo", &c, &p) >= 0);
-        assert(streq(c, "foo"));
-        assert(p == NULL);
+        assert_se(streq(c, "foo"));
+        assert_se(p == NULL);
         free(c);
 
         return 0;

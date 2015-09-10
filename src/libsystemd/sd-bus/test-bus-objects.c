@@ -19,11 +19,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <unistd.h>
-#include <fcntl.h>
 
 #include "log.h"
 #include "util.h"
@@ -44,7 +41,7 @@ struct context {
         uint32_t automatic_integer_property;
 };
 
-static int something_handler(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int something_handler(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         struct context *c = userdata;
         const char *s;
         char *n = NULL;
@@ -70,7 +67,7 @@ static int something_handler(sd_bus *bus, sd_bus_message *m, void *userdata, sd_
         return 1;
 }
 
-static int exit_handler(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int exit_handler(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         struct context *c = userdata;
         int r;
 
@@ -132,10 +129,10 @@ static int value_handler(sd_bus *bus, const char *path, const char *interface, c
         return 1;
 }
 
-static int notify_test(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int notify_test(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         int r;
 
-        assert_se(sd_bus_emit_properties_changed(bus, m->path, "org.freedesktop.systemd.ValueTest", "Value", NULL) >= 0);
+        assert_se(sd_bus_emit_properties_changed(sd_bus_message_get_bus(m), m->path, "org.freedesktop.systemd.ValueTest", "Value", NULL) >= 0);
 
         r = sd_bus_reply_method_return(m, NULL);
         assert_se(r >= 0);
@@ -143,10 +140,10 @@ static int notify_test(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_er
         return 1;
 }
 
-static int notify_test2(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int notify_test2(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         int r;
 
-        assert_se(sd_bus_emit_properties_changed_strv(bus, m->path, "org.freedesktop.systemd.ValueTest", NULL) >= 0);
+        assert_se(sd_bus_emit_properties_changed_strv(sd_bus_message_get_bus(m), m->path, "org.freedesktop.systemd.ValueTest", NULL) >= 0);
 
         r = sd_bus_reply_method_return(m, NULL);
         assert_se(r >= 0);
@@ -154,10 +151,10 @@ static int notify_test2(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_e
         return 1;
 }
 
-static int emit_interfaces_added(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int emit_interfaces_added(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         int r;
 
-        assert_se(sd_bus_emit_interfaces_added(bus, m->path, "org.freedesktop.systemd.test", NULL) >= 0);
+        assert_se(sd_bus_emit_interfaces_added(sd_bus_message_get_bus(m), "/value/a/x", "org.freedesktop.systemd.ValueTest", NULL) >= 0);
 
         r = sd_bus_reply_method_return(m, NULL);
         assert_se(r >= 0);
@@ -165,10 +162,32 @@ static int emit_interfaces_added(sd_bus *bus, sd_bus_message *m, void *userdata,
         return 1;
 }
 
-static int emit_interfaces_removed(sd_bus *bus, sd_bus_message *m, void *userdata, sd_bus_error *error) {
+static int emit_interfaces_removed(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         int r;
 
-        assert_se(sd_bus_emit_interfaces_removed(bus, m->path, "org.freedesktop.systemd.test", NULL) >= 0);
+        assert_se(sd_bus_emit_interfaces_removed(sd_bus_message_get_bus(m), "/value/a/x", "org.freedesktop.systemd.ValueTest", NULL) >= 0);
+
+        r = sd_bus_reply_method_return(m, NULL);
+        assert_se(r >= 0);
+
+        return 1;
+}
+
+static int emit_object_added(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+        int r;
+
+        assert_se(sd_bus_emit_object_added(sd_bus_message_get_bus(m), "/value/a/x") >= 0);
+
+        r = sd_bus_reply_method_return(m, NULL);
+        assert_se(r >= 0);
+
+        return 1;
+}
+
+static int emit_object_removed(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+        int r;
+
+        assert_se(sd_bus_emit_object_removed(sd_bus_message_get_bus(m), "/value/a/x") >= 0);
 
         r = sd_bus_reply_method_return(m, NULL);
         assert_se(r >= 0);
@@ -186,6 +205,8 @@ static const sd_bus_vtable vtable[] = {
         SD_BUS_METHOD("NoOperation", NULL, NULL, NULL, 0),
         SD_BUS_METHOD("EmitInterfacesAdded", NULL, NULL, emit_interfaces_added, 0),
         SD_BUS_METHOD("EmitInterfacesRemoved", NULL, NULL, emit_interfaces_removed, 0),
+        SD_BUS_METHOD("EmitObjectAdded", NULL, NULL, emit_object_added, 0),
+        SD_BUS_METHOD("EmitObjectRemoved", NULL, NULL, emit_object_removed, 0),
         SD_BUS_VTABLE_END
 };
 
@@ -197,6 +218,7 @@ static const sd_bus_vtable vtable2[] = {
         SD_BUS_PROPERTY("Value2", "s", value_handler, 10, SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         SD_BUS_PROPERTY("Value3", "s", value_handler, 10, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Value4", "s", value_handler, 10, 0),
+        SD_BUS_PROPERTY("AnExplicitProperty", "s", NULL, offsetof(struct context, something), SD_BUS_VTABLE_PROPERTY_EXPLICIT|SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         SD_BUS_VTABLE_END
 };
 
@@ -204,6 +226,14 @@ static int enumerator_callback(sd_bus *bus, const char *path, void *userdata, ch
 
         if (object_path_startswith("/value", path))
                 assert_se(*nodes = strv_new("/value/a", "/value/b", "/value/c", NULL));
+
+        return 1;
+}
+
+static int enumerator2_callback(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error) {
+
+        if (object_path_startswith("/value/a", path))
+                assert_se(*nodes = strv_new("/value/a/x", "/value/a/y", "/value/a/z", NULL));
 
         return 1;
 }
@@ -226,7 +256,9 @@ static void *server(void *p) {
         assert_se(sd_bus_add_object_vtable(bus, NULL, "/foo", "org.freedesktop.systemd.test2", vtable, c) >= 0);
         assert_se(sd_bus_add_fallback_vtable(bus, NULL, "/value", "org.freedesktop.systemd.ValueTest", vtable2, NULL, UINT_TO_PTR(20)) >= 0);
         assert_se(sd_bus_add_node_enumerator(bus, NULL, "/value", enumerator_callback, NULL) >= 0);
+        assert_se(sd_bus_add_node_enumerator(bus, NULL, "/value/a", enumerator2_callback, NULL) >= 0);
         assert_se(sd_bus_add_object_manager(bus, NULL, "/value") >= 0);
+        assert_se(sd_bus_add_object_manager(bus, NULL, "/value/a") >= 0);
 
         assert_se(sd_bus_start(bus) >= 0);
 
@@ -237,14 +269,14 @@ static void *server(void *p) {
 
                 r = sd_bus_process(bus, NULL);
                 if (r < 0) {
-                        log_error("Failed to process requests: %s", strerror(-r));
+                        log_error_errno(r, "Failed to process requests: %m");
                         goto fail;
                 }
 
                 if (r == 0) {
                         r = sd_bus_wait(bus, (uint64_t) -1);
                         if (r < 0) {
-                                log_error("Failed to wait: %s", strerror(-r));
+                                log_error_errno(r, "Failed to wait: %m");
                                 goto fail;
                         }
 
@@ -385,7 +417,7 @@ static int client(struct context *c) {
         r = sd_bus_call_method(bus, "org.freedesktop.systemd.test", "/foo", "org.freedesktop.DBus.Properties", "GetAll", &error, &reply, "s", "");
         assert_se(r >= 0);
 
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;
@@ -403,7 +435,7 @@ static int client(struct context *c) {
         r = sd_bus_call_method(bus, "org.freedesktop.systemd.test", "/value", "org.freedesktop.DBus.ObjectManager", "GetManagedObjects", &error, &reply, "");
         assert_se(r >= 0);
 
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;
@@ -415,7 +447,7 @@ static int client(struct context *c) {
         assert_se(r > 0);
 
         assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.Properties", "PropertiesChanged"));
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;
@@ -427,7 +459,7 @@ static int client(struct context *c) {
         assert_se(r > 0);
 
         assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.Properties", "PropertiesChanged"));
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;
@@ -439,7 +471,7 @@ static int client(struct context *c) {
         assert_se(r > 0);
 
         assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.ObjectManager", "InterfacesAdded"));
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;
@@ -451,7 +483,31 @@ static int client(struct context *c) {
         assert_se(r > 0);
 
         assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.ObjectManager", "InterfacesRemoved"));
-        bus_message_dump(reply, stdout, true);
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+
+        sd_bus_message_unref(reply);
+        reply = NULL;
+
+        r = sd_bus_call_method(bus, "org.freedesktop.systemd.test", "/foo", "org.freedesktop.systemd.test", "EmitObjectAdded", &error, NULL, "");
+        assert_se(r >= 0);
+
+        r = sd_bus_process(bus, &reply);
+        assert_se(r > 0);
+
+        assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.ObjectManager", "InterfacesAdded"));
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
+
+        sd_bus_message_unref(reply);
+        reply = NULL;
+
+        r = sd_bus_call_method(bus, "org.freedesktop.systemd.test", "/foo", "org.freedesktop.systemd.test", "EmitObjectRemoved", &error, NULL, "");
+        assert_se(r >= 0);
+
+        r = sd_bus_process(bus, &reply);
+        assert_se(r > 0);
+
+        assert_se(sd_bus_message_is_signal(reply, "org.freedesktop.DBus.ObjectManager", "InterfacesRemoved"));
+        bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         sd_bus_message_unref(reply);
         reply = NULL;

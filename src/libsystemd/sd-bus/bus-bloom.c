@@ -48,6 +48,7 @@ static void bloom_add_data(
         uint8_t h[8];
         uint64_t m;
         unsigned w, i, c = 0;
+        unsigned hash_index;
 
         assert(size > 0);
         assert(k > 0);
@@ -65,13 +66,13 @@ static void bloom_add_data(
          * hash value for each 128 bits of hash key. */
         assert(k * w <= ELEMENTSOF(hash_keys) * 8);
 
-        for (i = 0; i < k; i++) {
+        for (i = 0, hash_index = 0; i < k; i++) {
                 uint64_t p = 0;
                 unsigned d;
 
                 for (d = 0; d < w; d++) {
                         if (c <= 0) {
-                                siphash24(h, data, n, hash_keys[i++].bytes);
+                                siphash24(h, data, n, hash_keys[hash_index++].bytes);
                                 c += 8;
                         }
 
@@ -115,11 +116,19 @@ void bloom_add_prefixes(uint64_t filter[], size_t size, unsigned k, const char *
         p = stpcpy(stpcpy(c, a), ":");
         strcpy(p, b);
 
+        bloom_add_data(filter, size, k, c, n);
+
         for (;;) {
                 char *e;
 
                 e = strrchr(p, sep);
-                if (!e || e == p)
+                if (!e)
+                        break;
+
+                *(e + 1) = 0;
+                bloom_add_data(filter, size, k, c, e - c + 1);
+
+                if (e == p)
                         break;
 
                 *e = 0;

@@ -10,16 +10,16 @@
  */
 
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "socket-util.h"
+#include "formats-util.h"
 #include "udev.h"
 
 /* wire protocol magic must match */
@@ -57,7 +57,7 @@ struct udev_ctrl {
         int refcount;
         struct udev *udev;
         int sock;
-        struct sockaddr_un saddr;
+        union sockaddr_union saddr;
         socklen_t addrlen;
         bool bound;
         bool cleanup_socket;
@@ -70,10 +70,10 @@ struct udev_ctrl_connection {
         int sock;
 };
 
-struct udev_ctrl *udev_ctrl_new_from_fd(struct udev *udev, int fd)
-{
+struct udev_ctrl *udev_ctrl_new_from_fd(struct udev *udev, int fd) {
         struct udev_ctrl *uctrl;
         const int on = 1;
+        int r;
 
         uctrl = new0(struct udev_ctrl, 1);
         if (uctrl == NULL)
@@ -84,7 +84,7 @@ struct udev_ctrl *udev_ctrl_new_from_fd(struct udev *udev, int fd)
         if (fd < 0) {
                 uctrl->sock = socket(AF_LOCAL, SOCK_SEQPACKET|SOCK_NONBLOCK|SOCK_CLOEXEC, 0);
                 if (uctrl->sock < 0) {
-                        log_error("error getting socket: %m");
+                        log_error_errno(errno, "error getting socket: %m");
                         udev_ctrl_unref(uctrl);
                         return NULL;
                 }
@@ -92,40 +92,45 @@ struct udev_ctrl *udev_ctrl_new_from_fd(struct udev *udev, int fd)
                 uctrl->bound = true;
                 uctrl->sock = fd;
         }
-        setsockopt(uctrl->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
 
-        uctrl->saddr.sun_family = AF_LOCAL;
-        strscpy(uctrl->saddr.sun_path, sizeof(uctrl->saddr.sun_path), "/run/udev/control");
-        uctrl->addrlen = offsetof(struct sockaddr_un, sun_path) + strlen(uctrl->saddr.sun_path);
+        /*
+         * FIXME: remove it as soon as we can depend on this:
+         *   http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=90c6bd34f884cd9cee21f1d152baf6c18bcac949
+         */
+        r = setsockopt(uctrl->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
+        if (r < 0)
+                log_warning_errno(errno, "could not set SO_PASSCRED: %m");
+
+        uctrl->saddr.un.sun_family = AF_LOCAL;
+        strscpy(uctrl->saddr.un.sun_path, sizeof(uctrl->saddr.un.sun_path), "/run/udev/control");
+        uctrl->addrlen = offsetof(struct sockaddr_un, sun_path) + strlen(uctrl->saddr.un.sun_path);
         return uctrl;
 }
 
-struct udev_ctrl *udev_ctrl_new(struct udev *udev)
-{
+struct udev_ctrl *udev_ctrl_new(struct udev *udev) {
         return udev_ctrl_new_from_fd(udev, -1);
 }
 
-int udev_ctrl_enable_receiving(struct udev_ctrl *uctrl)
-{
+int udev_ctrl_enable_receiving(struct udev_ctrl *uctrl) {
         int err;
 
         if (!uctrl->bound) {
-                err = bind(uctrl->sock, (struct sockaddr *)&uctrl->saddr, uctrl->addrlen);
+                err = bind(uctrl->sock, &uctrl->saddr.sa, uctrl->addrlen);
                 if (err < 0 && errno == EADDRINUSE) {
-                        unlink(uctrl->saddr.sun_path);
-                        err = bind(uctrl->sock, (struct sockaddr *)&uctrl->saddr, uctrl->addrlen);
+                        unlink(uctrl->saddr.un.sun_path);
+                        err = bind(uctrl->sock, &uctrl->saddr.sa, uctrl->addrlen);
                 }
 
                 if (err < 0) {
                         err = -errno;
-                        log_error("bind failed: %m");
+                        log_error_errno(errno, "bind failed: %m");
                         return err;
                 }
 
                 err = listen(uctrl->sock, 0);
                 if (err < 0) {
                         err = -errno;
-                        log_error("listen failed: %m");
+                        log_error_errno(errno, "listen failed: %m");
                         return err;
                 }
 
@@ -135,50 +140,42 @@ int udev_ctrl_enable_receiving(struct udev_ctrl *uctrl)
         return 0;
 }
 
-struct udev *udev_ctrl_get_udev(struct udev_ctrl *uctrl)
-{
+struct udev *udev_ctrl_get_udev(struct udev_ctrl *uctrl) {
         return uctrl->udev;
 }
 
-static struct udev_ctrl *udev_ctrl_ref(struct udev_ctrl *uctrl)
-{
-        if (uctrl == NULL)
-                return NULL;
-        uctrl->refcount++;
+static struct udev_ctrl *udev_ctrl_ref(struct udev_ctrl *uctrl) {
+        if (uctrl)
+                uctrl->refcount++;
+
         return uctrl;
 }
 
-struct udev_ctrl *udev_ctrl_unref(struct udev_ctrl *uctrl)
-{
-        if (uctrl == NULL)
-                return NULL;
-        uctrl->refcount--;
-        if (uctrl->refcount > 0)
-                return uctrl;
-        if (uctrl->sock >= 0)
-                close(uctrl->sock);
-        free(uctrl);
+struct udev_ctrl *udev_ctrl_unref(struct udev_ctrl *uctrl) {
+        if (uctrl && -- uctrl->refcount == 0) {
+                if (uctrl->sock >= 0)
+                        close(uctrl->sock);
+                free(uctrl);
+        }
+
         return NULL;
 }
 
-int udev_ctrl_cleanup(struct udev_ctrl *uctrl)
-{
+int udev_ctrl_cleanup(struct udev_ctrl *uctrl) {
         if (uctrl == NULL)
                 return 0;
         if (uctrl->cleanup_socket)
-                unlink(uctrl->saddr.sun_path);
+                unlink(uctrl->saddr.un.sun_path);
         return 0;
 }
 
-int udev_ctrl_get_fd(struct udev_ctrl *uctrl)
-{
+int udev_ctrl_get_fd(struct udev_ctrl *uctrl) {
         if (uctrl == NULL)
                 return -EINVAL;
         return uctrl->sock;
 }
 
-struct udev_ctrl_connection *udev_ctrl_get_connection(struct udev_ctrl *uctrl)
-{
+struct udev_ctrl_connection *udev_ctrl_get_connection(struct udev_ctrl *uctrl) {
         struct udev_ctrl_connection *conn;
         struct ucred ucred = {};
         const int on = 1;
@@ -193,23 +190,26 @@ struct udev_ctrl_connection *udev_ctrl_get_connection(struct udev_ctrl *uctrl)
         conn->sock = accept4(uctrl->sock, NULL, NULL, SOCK_CLOEXEC|SOCK_NONBLOCK);
         if (conn->sock < 0) {
                 if (errno != EINTR)
-                        log_error("unable to receive ctrl connection: %m");
+                        log_error_errno(errno, "unable to receive ctrl connection: %m");
                 goto err;
         }
 
         /* check peer credential of connection */
         r = getpeercred(conn->sock, &ucred);
         if (r < 0) {
-                log_error("unable to receive credentials of ctrl connection: %s", strerror(-r));
+                log_error_errno(r, "unable to receive credentials of ctrl connection: %m");
                 goto err;
         }
         if (ucred.uid > 0) {
-                log_error("sender uid=%i, message ignored", ucred.uid);
+                log_error("sender uid="UID_FMT", message ignored", ucred.uid);
                 goto err;
         }
 
         /* enable receiving of the sender credentials in the messages */
-        setsockopt(conn->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
+        r = setsockopt(conn->sock, SOL_SOCKET, SO_PASSCRED, &on, sizeof(on));
+        if (r < 0)
+                log_warning_errno(errno, "could not set SO_PASSCRED: %m");
+
         udev_ctrl_ref(uctrl);
         return conn;
 err:
@@ -219,30 +219,27 @@ err:
         return NULL;
 }
 
-struct udev_ctrl_connection *udev_ctrl_connection_ref(struct udev_ctrl_connection *conn)
-{
+struct udev_ctrl_connection *udev_ctrl_connection_ref(struct udev_ctrl_connection *conn) {
         if (conn == NULL)
                 return NULL;
         conn->refcount++;
         return conn;
 }
 
-struct udev_ctrl_connection *udev_ctrl_connection_unref(struct udev_ctrl_connection *conn)
-{
-        if (conn == NULL)
-                return NULL;
-        conn->refcount--;
-        if (conn->refcount > 0)
-                return conn;
-        if (conn->sock >= 0)
-                close(conn->sock);
-        udev_ctrl_unref(conn->uctrl);
-        free(conn);
+struct udev_ctrl_connection *udev_ctrl_connection_unref(struct udev_ctrl_connection *conn) {
+        if (conn && -- conn->refcount == 0) {
+                if (conn->sock >= 0)
+                        close(conn->sock);
+
+                udev_ctrl_unref(conn->uctrl);
+
+                free(conn);
+        }
+
         return NULL;
 }
 
-static int ctrl_send(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, int intval, const char *buf, int timeout)
-{
+static int ctrl_send(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, int intval, const char *buf, int timeout) {
         struct udev_ctrl_msg_wire ctrl_msg_wire;
         int err = 0;
 
@@ -257,7 +254,7 @@ static int ctrl_send(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, int 
                 ctrl_msg_wire.intval = intval;
 
         if (!uctrl->connected) {
-                if (connect(uctrl->sock, (struct sockaddr *)&uctrl->saddr, uctrl->addrlen) < 0) {
+                if (connect(uctrl->sock, &uctrl->saddr.sa, uctrl->addrlen) < 0) {
                         err = -errno;
                         goto out;
                 }
@@ -296,48 +293,39 @@ out:
         return err;
 }
 
-int udev_ctrl_send_set_log_level(struct udev_ctrl *uctrl, int priority, int timeout)
-{
+int udev_ctrl_send_set_log_level(struct udev_ctrl *uctrl, int priority, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_SET_LOG_LEVEL, priority, NULL, timeout);
 }
 
-int udev_ctrl_send_stop_exec_queue(struct udev_ctrl *uctrl, int timeout)
-{
+int udev_ctrl_send_stop_exec_queue(struct udev_ctrl *uctrl, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_STOP_EXEC_QUEUE, 0, NULL, timeout);
 }
 
-int udev_ctrl_send_start_exec_queue(struct udev_ctrl *uctrl, int timeout)
-{
+int udev_ctrl_send_start_exec_queue(struct udev_ctrl *uctrl, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_START_EXEC_QUEUE, 0, NULL, timeout);
 }
 
-int udev_ctrl_send_reload(struct udev_ctrl *uctrl, int timeout)
-{
+int udev_ctrl_send_reload(struct udev_ctrl *uctrl, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_RELOAD, 0, NULL, timeout);
 }
 
-int udev_ctrl_send_set_env(struct udev_ctrl *uctrl, const char *key, int timeout)
-{
+int udev_ctrl_send_set_env(struct udev_ctrl *uctrl, const char *key, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_SET_ENV, 0, key, timeout);
 }
 
-int udev_ctrl_send_set_children_max(struct udev_ctrl *uctrl, int count, int timeout)
-{
+int udev_ctrl_send_set_children_max(struct udev_ctrl *uctrl, int count, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_SET_CHILDREN_MAX, count, NULL, timeout);
 }
 
-int udev_ctrl_send_ping(struct udev_ctrl *uctrl, int timeout)
-{
+int udev_ctrl_send_ping(struct udev_ctrl *uctrl, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_PING, 0, NULL, timeout);
 }
 
-int udev_ctrl_send_exit(struct udev_ctrl *uctrl, int timeout)
-{
+int udev_ctrl_send_exit(struct udev_ctrl *uctrl, int timeout) {
         return ctrl_send(uctrl, UDEV_CTRL_EXIT, 0, NULL, timeout);
 }
 
-struct udev_ctrl_msg *udev_ctrl_receive_msg(struct udev_ctrl_connection *conn)
-{
+struct udev_ctrl_msg *udev_ctrl_receive_msg(struct udev_ctrl_connection *conn) {
         struct udev_ctrl_msg *uctrl_msg;
         ssize_t size;
         struct cmsghdr *cmsg;
@@ -376,7 +364,7 @@ struct udev_ctrl_msg *udev_ctrl_receive_msg(struct udev_ctrl_connection *conn)
                         goto err;
                 } else {
                         if (!(pfd[0].revents & POLLIN)) {
-                                log_error("ctrl connection error: %m");
+                                log_error_errno(errno, "ctrl connection error: %m");
                                 goto err;
                         }
                 }
@@ -389,19 +377,23 @@ struct udev_ctrl_msg *udev_ctrl_receive_msg(struct udev_ctrl_connection *conn)
 
         size = recvmsg(conn->sock, &smsg, 0);
         if (size <  0) {
-                log_error("unable to receive ctrl message: %m");
+                log_error_errno(errno, "unable to receive ctrl message: %m");
                 goto err;
         }
+
+        cmsg_close_all(&smsg);
+
         cmsg = CMSG_FIRSTHDR(&smsg);
-        cred = (struct ucred *) CMSG_DATA(cmsg);
 
         if (cmsg == NULL || cmsg->cmsg_type != SCM_CREDENTIALS) {
                 log_error("no sender credentials received, message ignored");
                 goto err;
         }
 
+        cred = (struct ucred *) CMSG_DATA(cmsg);
+
         if (cred->uid != 0) {
-                log_error("sender uid=%i, message ignored", cred->uid);
+                log_error("sender uid="UID_FMT", message ignored", cred->uid);
                 goto err;
         }
 
@@ -416,69 +408,58 @@ err:
         return NULL;
 }
 
-struct udev_ctrl_msg *udev_ctrl_msg_unref(struct udev_ctrl_msg *ctrl_msg)
-{
-        if (ctrl_msg == NULL)
-                return NULL;
-        ctrl_msg->refcount--;
-        if (ctrl_msg->refcount > 0)
-                return ctrl_msg;
-        udev_ctrl_connection_unref(ctrl_msg->conn);
-        free(ctrl_msg);
+struct udev_ctrl_msg *udev_ctrl_msg_unref(struct udev_ctrl_msg *ctrl_msg) {
+        if (ctrl_msg && -- ctrl_msg->refcount == 0) {
+                udev_ctrl_connection_unref(ctrl_msg->conn);
+                free(ctrl_msg);
+        }
+
         return NULL;
 }
 
-int udev_ctrl_get_set_log_level(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_set_log_level(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_SET_LOG_LEVEL)
                 return ctrl_msg->ctrl_msg_wire.intval;
         return -1;
 }
 
-int udev_ctrl_get_stop_exec_queue(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_stop_exec_queue(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_STOP_EXEC_QUEUE)
                 return 1;
         return -1;
 }
 
-int udev_ctrl_get_start_exec_queue(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_start_exec_queue(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_START_EXEC_QUEUE)
                 return 1;
         return -1;
 }
 
-int udev_ctrl_get_reload(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_reload(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_RELOAD)
                 return 1;
         return -1;
 }
 
-const char *udev_ctrl_get_set_env(struct udev_ctrl_msg *ctrl_msg)
-{
+const char *udev_ctrl_get_set_env(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_SET_ENV)
                 return ctrl_msg->ctrl_msg_wire.buf;
         return NULL;
 }
 
-int udev_ctrl_get_set_children_max(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_set_children_max(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_SET_CHILDREN_MAX)
                 return ctrl_msg->ctrl_msg_wire.intval;
         return -1;
 }
 
-int udev_ctrl_get_ping(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_ping(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_PING)
                 return 1;
         return -1;
 }
 
-int udev_ctrl_get_exit(struct udev_ctrl_msg *ctrl_msg)
-{
+int udev_ctrl_get_exit(struct udev_ctrl_msg *ctrl_msg) {
         if (ctrl_msg->ctrl_msg_wire.type == UDEV_CTRL_EXIT)
                 return 1;
         return -1;

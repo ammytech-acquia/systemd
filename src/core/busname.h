@@ -24,7 +24,6 @@
 typedef struct BusName BusName;
 typedef struct BusNamePolicy BusNamePolicy;
 
-#include "unit.h"
 
 typedef enum BusNameState {
         BUSNAME_DEAD,
@@ -51,30 +50,6 @@ typedef enum BusNameResult {
         _BUSNAME_RESULT_INVALID = -1
 } BusNameResult;
 
-typedef enum BusNamePolicyType {
-        BUSNAME_POLICY_TYPE_USER,
-        BUSNAME_POLICY_TYPE_GROUP,
-        _BUSNAME_POLICY_TYPE_MAX,
-        _BUSNAME_POLICY_TYPE_INVALID = -1
-} BusNamePolicyType;
-
-typedef enum BusNamePolicyAccess {
-        BUSNAME_POLICY_ACCESS_SEE,
-        BUSNAME_POLICY_ACCESS_TALK,
-        BUSNAME_POLICY_ACCESS_OWN,
-        _BUSNAME_POLICY_ACCESS_MAX,
-        _BUSNAME_POLICY_ACCESS_INVALID = -1
-} BusNamePolicyAccess;
-
-struct BusNamePolicy {
-        BusNamePolicyType type;
-        BusNamePolicyAccess access;
-
-        char *name;
-
-        LIST_FIELDS(BusNamePolicy, policy);
-};
-
 struct BusName {
         Unit meta;
 
@@ -97,7 +72,7 @@ struct BusName {
         pid_t control_pid;
 
         LIST_HEAD(BusNamePolicy, policy);
-        BusNamePolicyAccess policy_world;
+        BusPolicyAccess policy_world;
 };
 
 extern const UnitVTable busname_vtable;
@@ -107,6 +82,3 @@ BusNameState busname_state_from_string(const char *s) _pure_;
 
 const char* busname_result_to_string(BusNameResult i) _const_;
 BusNameResult busname_result_from_string(const char *s) _pure_;
-
-const char* busname_policy_access_to_string(BusNamePolicyAccess i) _const_;
-BusNamePolicyAccess busname_policy_access_from_string(const char *s) _pure_;

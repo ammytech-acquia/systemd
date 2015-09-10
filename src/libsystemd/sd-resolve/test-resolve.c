@@ -21,15 +21,11 @@
 ***/
 
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <netinet/in.h>
-#include <arpa/nameser.h>
 #include <resolv.h>
-#include <assert.h>
-#include <signal.h>
 #include <errno.h>
 
 #include "socket-util.h"
@@ -40,17 +36,17 @@
 static int getaddrinfo_handler(sd_resolve_query *q, int ret, const struct addrinfo *ai, void *userdata) {
         const struct addrinfo *i;
 
-        assert(q);
+        assert_se(q);
 
         if (ret != 0) {
-                log_error("getaddrinfo error: %s %i\n", gai_strerror(ret), ret);
+                log_error("getaddrinfo error: %s %i", gai_strerror(ret), ret);
                 return 0;
         }
 
         for (i = ai; i; i = i->ai_next) {
                 _cleanup_free_ char *addr = NULL;
 
-                assert_se(sockaddr_pretty(i->ai_addr, i->ai_addrlen, false, &addr) == 0);
+                assert_se(sockaddr_pretty(i->ai_addr, i->ai_addrlen, false, true, &addr) == 0);
                 puts(addr);
         }
 
@@ -60,10 +56,10 @@ static int getaddrinfo_handler(sd_resolve_query *q, int ret, const struct addrin
 }
 
 static int getnameinfo_handler(sd_resolve_query *q, int ret, const char *host, const char *serv, void *userdata) {
-        assert(q);
+        assert_se(q);
 
         if (ret != 0) {
-                log_error("getnameinfo error: %s %i\n", gai_strerror(ret), ret);
+                log_error("getnameinfo error: %s %i", gai_strerror(ret), ret);
                 return 0;
         }
 
@@ -71,59 +67,8 @@ static int getnameinfo_handler(sd_resolve_query *q, int ret, const char *host, c
         return 0;
 }
 
-static int res_handler(sd_resolve_query *q, int ret, unsigned char *answer, void *userdata) {
-        int qdcount, ancount, len;
-        const unsigned char *pos = answer + sizeof(HEADER);
-        unsigned char *end = answer + ret;
-        HEADER *head = (HEADER *) answer;
-        char name[256];
-        assert(q);
-
-        if (ret < 0) {
-                log_error("res_query() error: %s %i\n", strerror(errno), errno);
-                return 0;
-        }
-
-        if (ret == 0) {
-                log_error("No reply for SRV lookup\n");
-                return 0;
-        }
-
-        qdcount = ntohs(head->qdcount);
-        ancount = ntohs(head->ancount);
-
-        printf("%d answers for srv lookup:\n", ancount);
-
-        /* Ignore the questions */
-        while (qdcount-- > 0 && (len = dn_expand(answer, end, pos, name, 255)) >= 0) {
-                assert(len >= 0);
-                pos += len + QFIXEDSZ;
-        }
-
-        /* Parse the answers */
-        while (ancount-- > 0 && (len = dn_expand(answer, end, pos, name, 255)) >= 0) {
-                /* Ignore the initial string */
-                uint16_t pref, weight, port;
-                assert(len >= 0);
-                pos += len;
-                /* Ignore type, ttl, class and dlen */
-                pos += 10;
-
-                GETSHORT(pref, pos);
-                GETSHORT(weight, pos);
-                GETSHORT(port, pos);
-                len = dn_expand(answer, end, pos, name, 255);
-                printf("\tpreference: %2d weight: %2d port: %d host: %s\n",
-                       pref, weight, port, name);
-
-                pos += len;
-        }
-
-        return 0;
-}
-
 int main(int argc, char *argv[]) {
-        _cleanup_resolve_query_unref_ sd_resolve_query *q1 = NULL, *q2 = NULL, *q3 = NULL;
+        _cleanup_resolve_query_unref_ sd_resolve_query *q1 = NULL, *q2 = NULL;
         _cleanup_resolve_unref_ sd_resolve *resolve = NULL;
         int r = 0;
 
@@ -146,27 +91,21 @@ int main(int argc, char *argv[]) {
         /* Make a name -> address query */
         r = sd_resolve_getaddrinfo(resolve, &q1, argc >= 2 ? argv[1] : "www.heise.de", NULL, &hints, getaddrinfo_handler, NULL);
         if (r < 0)
-                log_error("sd_resolve_getaddrinfo(): %s\n", strerror(-r));
+                log_error_errno(r, "sd_resolve_getaddrinfo(): %m");
 
         /* Make an address -> name query */
         sa.sin_addr.s_addr = inet_addr(argc >= 3 ? argv[2] : "193.99.144.71");
         r = sd_resolve_getnameinfo(resolve, &q2, (struct sockaddr*) &sa, sizeof(sa), 0, SD_RESOLVE_GET_BOTH, getnameinfo_handler, NULL);
         if (r < 0)
-                log_error("sd_resolve_getnameinfo(): %s\n", strerror(-r));
+                log_error_errno(r, "sd_resolve_getnameinfo(): %m");
 
-        /* Make a res_query() call */
-        r = sd_resolve_res_query(resolve, &q3, "_xmpp-client._tcp.gmail.com", C_IN, T_SRV, res_handler, NULL);
-        if (r < 0)
-                log_error("sd_resolve_res_query(): %s\n", strerror(-r));
-
-        /* Wait until the three queries are completed */
+        /* Wait until the two queries are completed */
         while (sd_resolve_query_is_done(q1) == 0 ||
-               sd_resolve_query_is_done(q2) == 0 ||
-               sd_resolve_query_is_done(q3) == 0) {
+               sd_resolve_query_is_done(q2) == 0) {
 
                 r = sd_resolve_wait(resolve, (uint64_t) -1);
                 if (r < 0) {
-                        log_error("sd_resolve_wait(): %s\n", strerror(-r));
+                        log_error_errno(r, "sd_resolve_wait(): %m");
                         assert_not_reached("sd_resolve_wait() failed");
                 }
         }

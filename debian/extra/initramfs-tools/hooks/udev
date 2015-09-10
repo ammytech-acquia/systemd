@@ -1,0 +1,48 @@
+#!/bin/sh -e
+
+PREREQS=""
+
+prereqs() { echo "$PREREQS"; }
+
+case "$1" in
+    prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+mkdir -p $DESTDIR/lib/systemd
+copy_exec /lib/systemd/systemd-udevd      /lib/systemd
+copy_exec /bin/udevadm    /bin
+
+# copy compat symlink
+cp -a /sbin/udevadm $DESTDIR/sbin/udevadm
+
+mkdir -p $DESTDIR/etc/udev
+cp -p /etc/udev/udev.conf $DESTDIR/etc/udev/
+
+# copy .link files containing interface naming definitions
+mkdir -p $DESTDIR/lib/systemd/network/
+find /lib/systemd/network -name '*.link' -execdir cp -pt $DESTDIR/lib/systemd/network/ '{}' +
+if [ -d /etc/systemd/network ]; then
+  find /etc/systemd/network -name '*.link' -execdir cp -pt $DESTDIR/lib/systemd/network/ '{}' +
+fi
+
+mkdir -p $DESTDIR/lib/udev/rules.d/
+for rules in 50-firmware.rules 50-udev-default.rules 60-persistent-storage.rules \
+	70-persistent-net.rules  75-net-description.rules 80-net-setup-link.rules \
+	61-persistent-storage-android.rules 80-drivers.rules; do
+  if   [ -e /etc/udev/rules.d/$rules ]; then
+    cp -p /etc/udev/rules.d/$rules $DESTDIR/lib/udev/rules.d/
+  elif [ -e /lib/udev/rules.d/$rules ]; then
+    cp -p /lib/udev/rules.d/$rules $DESTDIR/lib/udev/rules.d/
+  fi
+done
+
+cp /lib/udev/hotplug.functions $DESTDIR/lib/udev/
+for program in ata_id scsi_id; do
+  copy_exec /lib/udev/$program /lib/udev
+done
+copy_exec /sbin/blkid /sbin

@@ -22,26 +22,27 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include <systemd/sd-journal.h>
-
-#include "journal-file.h"
-#include "journal-internal.h"
+#include "sd-journal.h"
 #include "util.h"
 #include "log.h"
+#include "macro.h"
+#include "rm-rf.h"
+#include "journal-file.h"
+#include "journal-internal.h"
 
 #define N_ENTRIES 200
 
 static void verify_contents(sd_journal *j, unsigned skip) {
         unsigned i;
 
-        assert(j);
+        assert_se(j);
 
         i = 0;
         SD_JOURNAL_FOREACH(j) {
                 const void *d;
                 char *k, *c;
                 size_t l;
-                unsigned u;
+                unsigned u = 0;
 
                 assert_se(sd_journal_get_cursor(j, &k) >= 0);
                 printf("cursor: %s\n", k);
@@ -79,6 +80,7 @@ int main(int argc, char *argv[]) {
         char *z;
         const void *data;
         size_t l;
+        dual_timestamp previous_ts = DUAL_TIMESTAMP_NULL;
 
         /* journal_file_open requires a valid machine id */
         if (access("/etc/machine-id", F_OK) != 0)
@@ -99,6 +101,14 @@ int main(int argc, char *argv[]) {
                 struct iovec iovec[2];
 
                 dual_timestamp_get(&ts);
+
+                if (ts.monotonic <= previous_ts.monotonic)
+                        ts.monotonic = previous_ts.monotonic + 1;
+
+                if (ts.realtime <= previous_ts.realtime)
+                        ts.realtime = previous_ts.realtime + 1;
+
+                previous_ts = ts;
 
                 assert_se(asprintf(&p, "NUMBER=%u", i) >= 0);
                 iovec[0].iov_base = p;
@@ -179,7 +189,7 @@ int main(int argc, char *argv[]) {
         SD_JOURNAL_FOREACH_UNIQUE(j, data, l)
                 printf("%.*s\n", (int) l, (const char*) data);
 
-        assert_se(rm_rf_dangerous(t, false, true, false) >= 0);
+        assert_se(rm_rf(t, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
 
         return 0;
 }

@@ -5,7 +5,7 @@
 /***
   This file is part of systemd.
 
-  Copyright (C) 2014 Intel Corporation. All rights reserved.
+  Copyright (C) 2014-2015 Intel Corporation. All rights reserved.
 
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
@@ -38,7 +38,7 @@ struct DHCP6Address {
                 struct in6_addr address;
                 be32_t lifetime_preferred;
                 be32_t lifetime_valid;
-        } _packed_;
+        } iaaddr _packed_;
 };
 
 struct DHCP6IA {
@@ -56,7 +56,7 @@ struct DHCP6IA {
 
 typedef struct DHCP6IA DHCP6IA;
 
-#define log_dhcp6_client(p, fmt, ...) log_meta(LOG_DEBUG, __FILE__, __LINE__, __func__, "DHCPv6 CLIENT: " fmt, ##__VA_ARGS__)
+#define log_dhcp6_client(p, fmt, ...) log_internal(LOG_DEBUG, 0, __FILE__, __LINE__, __func__, "DHCPv6 CLIENT: " fmt, ##__VA_ARGS__)
 
 int dhcp_network_icmp6_bind_router_solicitation(int index);
 int dhcp_network_icmp6_send_router_solicitation(int s, const struct ether_addr *ether_addr);
@@ -68,6 +68,11 @@ int dhcp6_option_parse(uint8_t **buf, size_t *buflen, uint16_t *optcode,
                        size_t *optlen, uint8_t **optvalue);
 int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
                           DHCP6IA *ia);
+int dhcp6_option_parse_ip6addrs(uint8_t *optval, uint16_t optlen,
+                                struct in6_addr **addrs, size_t count,
+                                size_t *allocated);
+int dhcp6_option_parse_domainname(const uint8_t *optval, uint16_t optlen,
+                                  char ***str_arr);
 
 int dhcp6_network_bind_udp_socket(int index, struct in6_addr *address);
 int dhcp6_network_send_udp_socket(int s, struct in6_addr *address,

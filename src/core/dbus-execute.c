@@ -31,11 +31,12 @@
 #include "strv.h"
 #include "fileio.h"
 #include "execute.h"
-#include "dbus-execute.h"
 #include "capability.h"
 #include "env-util.h"
 #include "af-list.h"
 #include "namespace.h"
+#include "path-util.h"
+#include "dbus-execute.h"
 
 #ifdef HAVE_SECCOMP
 #include "seccomp-util.h"
@@ -44,6 +45,8 @@
 BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_exec_output, exec_output, ExecOutput);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_input, exec_input, ExecInput);
+
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_utmp_mode, exec_utmp_mode, ExecUtmpMode);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_protect_home, protect_home, ProtectHome);
 static BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_protect_system, protect_system, ProtectSystem);
@@ -300,7 +303,7 @@ static int property_get_timer_slack_nsec(
         assert(reply);
         assert(c);
 
-        if (c->timer_slack_nsec != (nsec_t) -1)
+        if (c->timer_slack_nsec != NSEC_INFINITY)
                 u = (uint64_t) c->timer_slack_nsec;
         else
                 u = (uint64_t) prctl(PR_GET_TIMERSLACK);
@@ -508,6 +511,24 @@ static int property_get_apparmor_profile(
         return sd_bus_message_append(reply, "(bs)", c->apparmor_profile_ignore, c->apparmor_profile);
 }
 
+static int property_get_smack_process_label(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        ExecContext *c = userdata;
+
+        assert(bus);
+        assert(reply);
+        assert(c);
+
+        return sd_bus_message_append(reply, "(bs)", c->smack_process_label_ignore, c->smack_process_label);
+}
+
 static int property_get_personality(
                 sd_bus *bus,
                 const char *path,
@@ -634,8 +655,10 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("ProtectSystem", "s", bus_property_get_protect_system, offsetof(ExecContext, protect_system), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SameProcessGroup", "b", bus_property_get_bool, offsetof(ExecContext, same_pgrp), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("UtmpIdentifier", "s", NULL, offsetof(ExecContext, utmp_id), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("UtmpMode", "s", property_get_exec_utmp_mode, offsetof(ExecContext, utmp_mode), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SELinuxContext", "(bs)", property_get_selinux_context, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("AppArmorProfile", "(bs)", property_get_apparmor_profile, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("SmackProcessLabel", "(bs)", property_get_smack_process_label, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("IgnoreSIGPIPE", "b", bus_property_get_bool, offsetof(ExecContext, ignore_sigpipe), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("NoNewPrivileges", "b", bus_property_get_bool, offsetof(ExecContext, no_new_privileges), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SystemCallFilter", "(bas)", property_get_syscall_filter, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -822,6 +845,193 @@ int bus_exec_context_set_transient_property(
                 if (mode != UNIT_CHECK) {
                         c->nice = n;
                         unit_write_drop_in_private_format(u, mode, name, "Nice=%i\n", n);
+                }
+
+                return 1;
+
+        } else if (streq(name, "TTYPath")) {
+                const char *tty;
+
+                r = sd_bus_message_read(message, "s", &tty);
+                if (r < 0)
+                        return r;
+
+                if (!path_is_absolute(tty))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "TTY device not absolute path");
+
+                if (mode != UNIT_CHECK) {
+                        char *t;
+
+                        t = strdup(tty);
+                        if (!t)
+                                return -ENOMEM;
+
+                        free(c->tty_path);
+                        c->tty_path = t;
+
+                        unit_write_drop_in_private_format(u, mode, name, "TTYPath=%s\n", tty);
+                }
+
+                return 1;
+
+        } else if (streq(name, "StandardInput")) {
+                const char *s;
+                ExecInput p;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                p = exec_input_from_string(s);
+                if (p < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid standard input name");
+
+                if (mode != UNIT_CHECK) {
+                        c->std_input = p;
+
+                        unit_write_drop_in_private_format(u, mode, name, "StandardInput=%s\n", exec_input_to_string(p));
+                }
+
+                return 1;
+
+
+        } else if (streq(name, "StandardOutput")) {
+                const char *s;
+                ExecOutput p;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                p = exec_output_from_string(s);
+                if (p < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid standard output name");
+
+                if (mode != UNIT_CHECK) {
+                        c->std_output = p;
+
+                        unit_write_drop_in_private_format(u, mode, name, "StandardOutput=%s\n", exec_output_to_string(p));
+                }
+
+                return 1;
+
+        } else if (streq(name, "StandardError")) {
+                const char *s;
+                ExecOutput p;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                p = exec_output_from_string(s);
+                if (p < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid standard error name");
+
+                if (mode != UNIT_CHECK) {
+                        c->std_error = p;
+
+                        unit_write_drop_in_private_format(u, mode, name, "StandardError=%s\n", exec_output_to_string(p));
+                }
+
+                return 1;
+
+        } else if (streq(name, "IgnoreSIGPIPE")) {
+                int b;
+
+                r = sd_bus_message_read(message, "b", &b);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        c->ignore_sigpipe = b;
+
+                        unit_write_drop_in_private_format(u, mode, name, "IgnoreSIGPIPE=%s\n", yes_no(b));
+                }
+
+                return 1;
+
+        } else if (streq(name, "TTYVHangup")) {
+                int b;
+
+                r = sd_bus_message_read(message, "b", &b);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        c->tty_vhangup = b;
+
+                        unit_write_drop_in_private_format(u, mode, name, "TTYVHangup=%s\n", yes_no(b));
+                }
+
+                return 1;
+
+        } else if (streq(name, "TTYReset")) {
+                int b;
+
+                r = sd_bus_message_read(message, "b", &b);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        c->tty_reset = b;
+
+                        unit_write_drop_in_private_format(u, mode, name, "TTYReset=%s\n", yes_no(b));
+                }
+
+                return 1;
+
+        } else if (streq(name, "UtmpIdentifier")) {
+                const char *id;
+
+                r = sd_bus_message_read(message, "s", &id);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        if (isempty(id))
+                                c->utmp_id = mfree(c->utmp_id);
+                        else if (free_and_strdup(&c->utmp_id, id) < 0)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "UtmpIdentifier=%s\n", strempty(id));
+                }
+
+                return 1;
+
+        } else if (streq(name, "UtmpMode")) {
+                const char *s;
+                ExecUtmpMode m;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                m = exec_utmp_mode_from_string(s);
+                if (m < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid utmp mode");
+
+                if (mode != UNIT_CHECK) {
+                        c->utmp_mode = m;
+
+                        unit_write_drop_in_private_format(u, mode, name, "UtmpMode=%s\n", exec_utmp_mode_to_string(m));
+                }
+
+                return 1;
+
+        } else if (streq(name, "PAMName")) {
+                const char *n;
+
+                r = sd_bus_message_read(message, "s", &n);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        if (isempty(n))
+                                c->pam_name = mfree(c->pam_name);
+                        else if (free_and_strdup(&c->pam_name, n) < 0)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "PAMName=%s\n", strempty(n));
                 }
 
                 return 1;

@@ -29,7 +29,7 @@
 #include "log.h"
 
 static int watchdog_fd = -1;
-static usec_t watchdog_timeout = (usec_t) -1;
+static usec_t watchdog_timeout = USEC_INFINITY;
 
 static int update_timeout(void) {
         int r;
@@ -37,27 +37,23 @@ static int update_timeout(void) {
         if (watchdog_fd < 0)
                 return 0;
 
-        if (watchdog_timeout == (usec_t) -1)
+        if (watchdog_timeout == USEC_INFINITY)
                 return 0;
         else if (watchdog_timeout == 0) {
                 int flags;
 
                 flags = WDIOS_DISABLECARD;
                 r = ioctl(watchdog_fd, WDIOC_SETOPTIONS, &flags);
-                if (r < 0) {
-                        log_warning("Failed to disable hardware watchdog: %m");
-                        return -errno;
-                }
+                if (r < 0)
+                        return log_warning_errno(errno, "Failed to disable hardware watchdog: %m");
         } else {
                 int sec, flags;
                 char buf[FORMAT_TIMESPAN_MAX];
 
                 sec = (int) ((watchdog_timeout + USEC_PER_SEC - 1) / USEC_PER_SEC);
                 r = ioctl(watchdog_fd, WDIOC_SETTIMEOUT, &sec);
-                if (r < 0) {
-                        log_warning("Failed to set timeout to %is: %m", sec);
-                        return -errno;
-                }
+                if (r < 0)
+                        return log_warning_errno(errno, "Failed to set timeout to %is: %m", sec);
 
                 watchdog_timeout = (usec_t) sec * USEC_PER_SEC;
                 log_info("Set hardware watchdog to %s.", format_timespan(buf, sizeof(buf), watchdog_timeout, 0));
@@ -65,15 +61,16 @@ static int update_timeout(void) {
                 flags = WDIOS_ENABLECARD;
                 r = ioctl(watchdog_fd, WDIOC_SETOPTIONS, &flags);
                 if (r < 0) {
-                        log_warning("Failed to enable hardware watchdog: %m");
-                        return -errno;
+                        /* ENOTTY means the watchdog is always enabled so we're fine */
+                        log_full(errno == ENOTTY ? LOG_DEBUG : LOG_WARNING,
+                                 "Failed to enable hardware watchdog: %m");
+                        if (errno != ENOTTY)
+                                return -errno;
                 }
 
                 r = ioctl(watchdog_fd, WDIOC_KEEPALIVE, 0);
-                if (r < 0) {
-                        log_warning("Failed to ping hardware watchdog: %m");
-                        return -errno;
-                }
+                if (r < 0)
+                        return log_warning_errno(errno, "Failed to ping hardware watchdog: %m");
         }
 
         return 0;
@@ -104,7 +101,7 @@ int watchdog_set_timeout(usec_t *usec) {
 
         /* If we didn't open the watchdog yet and didn't get any
          * explicit timeout value set, don't do anything */
-        if (watchdog_fd < 0 && watchdog_timeout == (usec_t) -1)
+        if (watchdog_fd < 0 && watchdog_timeout == USEC_INFINITY)
                 return 0;
 
         if (watchdog_fd < 0)
@@ -127,10 +124,8 @@ int watchdog_ping(void) {
         }
 
         r = ioctl(watchdog_fd, WDIOC_KEEPALIVE, 0);
-        if (r < 0) {
-                log_warning("Failed to ping hardware watchdog: %m");
-                return -errno;
-        }
+        if (r < 0)
+                return log_warning_errno(errno, "Failed to ping hardware watchdog: %m");
 
         return 0;
 }
@@ -148,7 +143,7 @@ void watchdog_close(bool disarm) {
                 flags = WDIOS_DISABLECARD;
                 r = ioctl(watchdog_fd, WDIOC_SETOPTIONS, &flags);
                 if (r < 0)
-                        log_warning("Failed to disable hardware watchdog: %m");
+                        log_warning_errno(errno, "Failed to disable hardware watchdog: %m");
 
                 /* To be sure, use magic close logic, too */
                 for (;;) {
@@ -158,7 +153,7 @@ void watchdog_close(bool disarm) {
                                 break;
 
                         if (errno != EINTR) {
-                                log_error("Failed to disarm watchdog timer: %m");
+                                log_error_errno(errno, "Failed to disarm watchdog timer: %m");
                                 break;
                         }
                 }

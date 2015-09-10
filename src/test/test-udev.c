@@ -19,26 +19,18 @@
 ***/
 
 #include <stdio.h>
-#include <stddef.h>
 #include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <ctype.h>
 #include <errno.h>
 #include <unistd.h>
-#include <syslog.h>
-#include <grp.h>
 #include <sched.h>
 #include <sys/mount.h>
 #include <sys/signalfd.h>
 
 #include "missing.h"
+#include "selinux-util.h"
+#include "signal-util.h"
 #include "udev.h"
 #include "udev-util.h"
-
-void udev_main_log(struct udev *udev, int priority,
-                   const char *file, int line, const char *fn,
-                   const char *format, va_list args) {}
 
 static int fake_filesystems(void) {
         static const struct fakefs {
@@ -80,7 +72,6 @@ out:
         return err;
 }
 
-
 int main(int argc, char *argv[]) {
         _cleanup_udev_unref_ struct udev *udev = NULL;
         _cleanup_udev_event_unref_ struct udev_event *event = NULL;
@@ -89,7 +80,6 @@ int main(int argc, char *argv[]) {
         char syspath[UTIL_PATH_SIZE];
         const char *devpath;
         const char *action;
-        sigset_t mask, sigmask_orig;
         int err;
 
         err = fake_filesystems();
@@ -101,9 +91,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
 
         log_debug("version %s", VERSION);
-        label_init("/dev");
-
-        sigprocmask(SIG_SETMASK, NULL, &sigmask_orig);
+        mac_selinux_init("/dev");
 
         action = argv[1];
         if (action == NULL) {
@@ -120,22 +108,15 @@ int main(int argc, char *argv[]) {
         rules = udev_rules_new(udev, 1);
 
         strscpyl(syspath, sizeof(syspath), "/sys", devpath, NULL);
-        dev = udev_device_new_from_syspath(udev, syspath);
+        dev = udev_device_new_from_synthetic_event(udev, syspath, action);
         if (dev == NULL) {
                 log_debug("unknown device '%s'", devpath);
                 goto out;
         }
 
-        udev_device_set_action(dev, action);
         event = udev_event_new(dev);
 
-        sigfillset(&mask);
-        sigprocmask(SIG_SETMASK, &mask, &sigmask_orig);
-        event->fd_signal = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-        if (event->fd_signal < 0) {
-                fprintf(stderr, "error creating signalfd\n");
-                goto out;
-        }
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGHUP, SIGCHLD, -1) >= 0);
 
         /* do what devtmpfs usually provides us */
         if (udev_device_get_devnode(dev) != NULL) {
@@ -151,16 +132,18 @@ int main(int argc, char *argv[]) {
                         mknod(udev_device_get_devnode(dev), mode, udev_device_get_devnum(dev));
                 } else {
                         unlink(udev_device_get_devnode(dev));
-                        util_delete_path(udev, udev_device_get_devnode(dev));
+                        rmdir_parents(udev_device_get_devnode(dev), "/");
                 }
         }
 
-        udev_event_execute_rules(event, rules, &sigmask_orig);
-        udev_event_execute_run(event, NULL);
+        udev_event_execute_rules(event,
+                                 3 * USEC_PER_SEC, USEC_PER_SEC,
+                                 NULL,
+                                 rules);
+        udev_event_execute_run(event,
+                               3 * USEC_PER_SEC, USEC_PER_SEC);
 out:
-        if (event != NULL && event->fd_signal >= 0)
-                close(event->fd_signal);
-        label_finish();
+        mac_selinux_finish();
 
         return err ? EXIT_FAILURE : EXIT_SUCCESS;
 }

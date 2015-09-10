@@ -19,21 +19,18 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/vt.h>
 #include <string.h>
 
-#include "sd-id128.h"
 #include "sd-messages.h"
 #include "logind-seat.h"
 #include "logind-acl.h"
 #include "util.h"
 #include "mkdir.h"
-#include "path-util.h"
+#include "formats-util.h"
+#include "terminal-util.h"
 
 Seat *seat_new(Manager *m, const char *id) {
         Seat *s;
@@ -96,11 +93,11 @@ int seat_save(Seat *s) {
 
         r = mkdir_safe_label("/run/systemd/seats", 0755, 0, 0);
         if (r < 0)
-                goto finish;
+                goto fail;
 
         r = fopen_temporary(s->state_file, &f, &temp_path);
         if (r < 0)
-                goto finish;
+                goto fail;
 
         fchmod(fileno(f), 0644);
 
@@ -144,19 +141,24 @@ int seat_save(Seat *s) {
                                 i->sessions_by_seat_next ? ' ' : '\n');
         }
 
-        fflush(f);
+        r = fflush_and_check(f);
+        if (r < 0)
+                goto fail;
 
-        if (ferror(f) || rename(temp_path, s->state_file) < 0) {
+        if (rename(temp_path, s->state_file) < 0) {
                 r = -errno;
-                unlink(s->state_file);
-                unlink(temp_path);
+                goto fail;
         }
 
-finish:
-        if (r < 0)
-                log_error("Failed to save seat data %s: %s", s->state_file, strerror(-r));
+        return 0;
 
-        return r;
+fail:
+        (void) unlink(s->state_file);
+
+        if (temp_path)
+                (void) unlink(temp_path);
+
+        return log_error_errno(r, "Failed to save seat data %s: %m", s->state_file);
 }
 
 int seat_load(Seat *s) {
@@ -201,7 +203,7 @@ int seat_preallocate_vts(Seat *s) {
 
                 q = vt_allocate(i);
                 if (q < 0) {
-                        log_error("Failed to preallocate VT %i: %s", i, strerror(-q));
+                        log_error_errno(q, "Failed to preallocate VT %u: %m", i);
                         r = q;
                 }
         }
@@ -221,7 +223,7 @@ int seat_apply_acls(Seat *s, Session *old_active) {
                             !!s->active, s->active ? s->active->user->uid : 0);
 
         if (r < 0)
-                log_error("Failed to apply ACLs: %s", strerror(-r));
+                log_error_errno(r, "Failed to apply ACLs: %m");
 
         return r;
 }
@@ -272,11 +274,16 @@ int seat_set_active(Seat *s, Session *session) {
 int seat_switch_to(Seat *s, unsigned int num) {
         /* Public session positions skip 0 (there is only F1-F12). Maybe it
          * will get reassigned in the future, so return error for now. */
-        if (!num)
+        if (num == 0)
                 return -EINVAL;
 
-        if (num >= s->position_count || !s->positions[num])
+        if (num >= s->position_count || !s->positions[num]) {
+                /* allow switching to unused VTs to trigger auto-activate */
+                if (seat_has_vts(s) && num < 64)
+                        return chvt(num);
+
                 return -EINVAL;
+        }
 
         return session_activate(s->positions[num]);
 }
@@ -284,12 +291,12 @@ int seat_switch_to(Seat *s, unsigned int num) {
 int seat_switch_to_next(Seat *s) {
         unsigned int start, i;
 
-        if (!s->position_count)
+        if (s->position_count == 0)
                 return -EINVAL;
 
         start = 1;
-        if (s->active && s->active->pos > 0)
-                start = s->active->pos;
+        if (s->active && s->active->position > 0)
+                start = s->active->position;
 
         for (i = start + 1; i < s->position_count; ++i)
                 if (s->positions[i])
@@ -305,12 +312,12 @@ int seat_switch_to_next(Seat *s) {
 int seat_switch_to_previous(Seat *s) {
         unsigned int start, i;
 
-        if (!s->position_count)
+        if (s->position_count == 0)
                 return -EINVAL;
 
         start = 1;
-        if (s->active && s->active->pos > 0)
-                start = s->active->pos;
+        if (s->active && s->active->position > 0)
+                start = s->active->position;
 
         for (i = start - 1; i > 0; --i)
                 if (s->positions[i])
@@ -335,11 +342,23 @@ int seat_active_vt_changed(Seat *s, unsigned int vtnr) {
 
         log_debug("VT changed to %u", vtnr);
 
+        /* we might have earlier closing sessions on the same VT, so try to
+         * find a running one first */
         LIST_FOREACH(sessions_by_seat, i, s->sessions)
-                if (i->vtnr == vtnr) {
+                if (i->vtnr == vtnr && !i->stopping) {
                         new_active = i;
                         break;
                 }
+
+        if (!new_active) {
+                /* no running one? then we can't decide which one is the
+                 * active one, let the first one win */
+                LIST_FOREACH(sessions_by_seat, i, s->sessions)
+                        if (i->vtnr == vtnr) {
+                                new_active = i;
+                                break;
+                        }
+        }
 
         r = seat_set_active(s, new_active);
         manager_spawn_autovt(s->manager, vtnr);
@@ -395,9 +414,9 @@ int seat_start(Seat *s) {
                 return 0;
 
         log_struct(LOG_INFO,
-                   MESSAGE_ID(SD_MESSAGE_SEAT_START),
+                   LOG_MESSAGE_ID(SD_MESSAGE_SEAT_START),
                    "SEAT_ID=%s", s->id,
-                   "MESSAGE=New seat %s.", s->id,
+                   LOG_MESSAGE("New seat %s.", s->id),
                    NULL);
 
         /* Initialize VT magic stuff */
@@ -423,9 +442,9 @@ int seat_stop(Seat *s, bool force) {
 
         if (s->started)
                 log_struct(LOG_INFO,
-                           MESSAGE_ID(SD_MESSAGE_SEAT_STOP),
+                           LOG_MESSAGE_ID(SD_MESSAGE_SEAT_STOP),
                            "SEAT_ID=%s", s->id,
-                           "MESSAGE=Removed seat %s.", s->id,
+                           LOG_MESSAGE("Removed seat %s.", s->id),
                            NULL);
 
         seat_stop_sessions(s, force);
@@ -458,21 +477,21 @@ int seat_stop_sessions(Seat *s, bool force) {
 
 void seat_evict_position(Seat *s, Session *session) {
         Session *iter;
-        unsigned int pos = session->pos;
+        unsigned int pos = session->position;
 
-        session->pos = 0;
+        session->position = 0;
 
-        if (!pos)
+        if (pos == 0)
                 return;
 
         if (pos < s->position_count && s->positions[pos] == session) {
                 s->positions[pos] = NULL;
 
                 /* There might be another session claiming the same
-                 * position (eg., during gdm->session transition), so lets look
+                 * position (eg., during gdm->session transition), so let's look
                  * for it and set it on the free slot. */
                 LIST_FOREACH(sessions_by_seat, iter, s->sessions) {
-                        if (iter->pos == pos) {
+                        if (iter->position == pos && session_get_state(iter) != SESSION_CLOSING) {
                                 s->positions[pos] = iter;
                                 break;
                         }
@@ -490,15 +509,15 @@ void seat_claim_position(Seat *s, Session *session, unsigned int pos) {
 
         seat_evict_position(s, session);
 
-        session->pos = pos;
-        if (pos > 0 && !s->positions[pos])
+        session->position = pos;
+        if (pos > 0)
                 s->positions[pos] = session;
 }
 
 static void seat_assign_position(Seat *s, Session *session) {
         unsigned int pos;
 
-        if (session->pos > 0)
+        if (session->position > 0)
                 return;
 
         for (pos = 1; pos < s->position_count; ++pos)
@@ -585,7 +604,7 @@ bool seat_can_graphical(Seat *s) {
 int seat_get_idle_hint(Seat *s, dual_timestamp *t) {
         Session *session;
         bool idle_hint = true;
-        dual_timestamp ts = { 0, 0 };
+        dual_timestamp ts = DUAL_TIMESTAMP_NULL;
 
         assert(s);
 

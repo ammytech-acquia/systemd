@@ -23,7 +23,6 @@
 
 #include <stdbool.h>
 
-#include "busname.h"
 #include "sd-bus.h"
 
 #define KDBUS_ITEM_NEXT(item) \
@@ -34,6 +33,11 @@
              ((uint8_t *)(part) < (uint8_t *)(head) + (head)->size) &&  \
                 ((uint8_t *) part >= (uint8_t *) head);                 \
              part = KDBUS_ITEM_NEXT(part))
+#define KDBUS_FOREACH(iter, first, _size)                               \
+        for (iter = (first);                                            \
+             ((uint8_t *)(iter) < (uint8_t *)(first) + (_size)) &&      \
+               ((uint8_t *)(iter) >= (uint8_t *)(first));               \
+             iter = (void*)(((uint8_t *)iter) + ALIGN8((iter)->size)))
 
 #define KDBUS_ITEM_HEADER_SIZE offsetof(struct kdbus_item, data)
 #define KDBUS_ITEM_SIZE(s) ALIGN8((s) + KDBUS_ITEM_HEADER_SIZE)
@@ -65,12 +69,10 @@ int bus_kernel_take_fd(sd_bus *b);
 int bus_kernel_write_message(sd_bus *bus, sd_bus_message *m, bool hint_sync_call);
 int bus_kernel_read_message(sd_bus *bus, bool hint_priority, int64_t priority);
 
-int bus_kernel_open_bus_fd(const char *bus);
-int bus_kernel_make_starter(int fd, const char *name, bool activating, bool accept_fd, BusNamePolicy *policy, BusNamePolicyAccess world_policy);
+int bus_kernel_open_bus_fd(const char *bus, char **path);
 
 int bus_kernel_create_bus(const char *name, bool world, char **s);
-int bus_kernel_create_domain(const char *name, char **s);
-int bus_kernel_create_monitor(const char *bus);
+int bus_kernel_create_endpoint(const char *bus_name, const char *ep_name, char **path);
 
 int bus_kernel_pop_memfd(sd_bus *bus, void **address, size_t *mapped, size_t *allocated);
 void bus_kernel_push_memfd(sd_bus *bus, int fd, void *address, size_t mapped, size_t allocated);
@@ -79,9 +81,15 @@ void bus_kernel_flush_memfd(sd_bus *bus);
 
 int bus_kernel_parse_unique_name(const char *s, uint64_t *id);
 
-int kdbus_translate_request_name_flags(uint64_t sd_bus_flags, uint64_t *kdbus_flags);
-int kdbus_translate_attach_flags(uint64_t sd_bus_flags, uint64_t *kdbus_flags);
+uint64_t request_name_flags_to_kdbus(uint64_t sd_bus_flags);
+uint64_t attach_flags_to_kdbus(uint64_t sd_bus_flags);
 
 int bus_kernel_try_close(sd_bus *bus);
 
 int bus_kernel_drop_one(int fd);
+
+int bus_kernel_realize_attach_flags(sd_bus *bus);
+
+int bus_kernel_get_bus_name(sd_bus *bus, char **name);
+
+int bus_kernel_cmd_free(sd_bus *bus, uint64_t offset);

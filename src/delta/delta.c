@@ -21,10 +21,10 @@
 ***/
 
 #include <errno.h>
-#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <sys/prctl.h>
 
 #include "hashmap.h"
 #include "util.h"
@@ -33,6 +33,9 @@
 #include "pager.h"
 #include "build.h"
 #include "strv.h"
+#include "process-util.h"
+#include "terminal-util.h"
+#include "signal-util.h"
 
 static const char prefixes[] =
         "/etc\0"
@@ -123,7 +126,7 @@ static int notify_override_redirected(const char *top, const char *bottom) {
         if (!(arg_flags & SHOW_REDIRECTED))
                 return 0;
 
-        printf("%s%s%s   %s %s %s\n",
+        printf("%s%s%s %s %s %s\n",
                ansi_highlight(), "[REDIRECTED]", ansi_highlight_off(),
                top, draw_special_char(DRAW_ARROW), bottom);
         return 1;
@@ -185,17 +188,20 @@ static int found_override(const char *top, const char *bottom) {
         fflush(stdout);
 
         pid = fork();
-        if (pid < 0) {
-                log_error("Failed to fork off diff: %m");
-                return -errno;
-        } else if (pid == 0) {
+        if (pid < 0)
+                return log_error_errno(errno, "Failed to fork off diff: %m");
+        else if (pid == 0) {
+
+                (void) reset_all_signal_handlers();
+                (void) reset_signal_mask();
+                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
+
                 execlp("diff", "diff", "-us", "--", bottom, top, NULL);
-                log_error("Failed to execute diff: %m");
-                _exit(1);
+                log_error_errno(errno, "Failed to execute diff: %m");
+                _exit(EXIT_FAILURE);
         }
 
-        wait_for_terminate(pid, NULL);
-
+        wait_for_terminate_and_warn("diff", pid, false);
         putchar('\n');
 
         return k;
@@ -227,10 +233,8 @@ static int enumerate_dir_d(Hashmap *top, Hashmap *bottom, Hashmap *drops, const 
         *c = 0;
 
         r = get_files_in_directory(path, &list);
-        if (r < 0){
-                log_error("Failed to enumerate %s: %s", path, strerror(-r));
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to enumerate %s: %m", path);
 
         STRV_FOREACH(file, list) {
                 Hashmap *h;
@@ -268,7 +272,7 @@ static int enumerate_dir_d(Hashmap *top, Hashmap *bottom, Hashmap *drops, const 
 
                 h = hashmap_get(drops, unit);
                 if (!h) {
-                        h = hashmap_new(string_hash_func, string_compare_func);
+                        h = hashmap_new(&string_hash_ops);
                         if (!h)
                                 return -ENOMEM;
                         hashmap_put(drops, unit, h);
@@ -308,7 +312,7 @@ static int enumerate_dir(Hashmap *top, Hashmap *bottom, Hashmap *drops, const ch
                 if (errno == ENOENT)
                         return 0;
 
-                log_error("Failed to open %s: %m", path);
+                log_error_errno(errno, "Failed to open %s: %m", path);
                 return -errno;
         }
 
@@ -372,9 +376,9 @@ static int process_suffix(const char *suffix, const char *onlyprefix) {
 
         dropins = nulstr_contains(have_dropins, suffix);
 
-        top = hashmap_new(string_hash_func, string_compare_func);
-        bottom = hashmap_new(string_hash_func, string_compare_func);
-        drops = hashmap_new(string_hash_func, string_compare_func);
+        top = hashmap_new(&string_hash_ops);
+        bottom = hashmap_new(&string_hash_ops);
+        drops = hashmap_new(&string_hash_ops);
         if (!top || !bottom || !drops) {
                 r = -ENOMEM;
                 goto finish;
@@ -473,38 +477,35 @@ static int process_suffix_chop(const char *arg) {
         return -EINVAL;
 }
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...] [SUFFIX...]\n\n"
                "Find overridden configuration files.\n\n"
                "  -h --help           Show this help\n"
                "     --version        Show package version\n"
                "     --no-pager       Do not pipe output into a pager\n"
                "     --diff[=1|0]     Show a diff when overridden files differ\n"
-               "  -t --type=LIST...   Only display a selected set of override types\n",
-               program_invocation_short_name);
-
-        return 0;
+               "  -t --type=LIST...   Only display a selected set of override types\n"
+               , program_invocation_short_name);
 }
 
 static int parse_flags(const char *flag_str, int flags) {
-        char *w, *state;
+        const char *word, *state;
         size_t l;
 
-        FOREACH_WORD(w, l, flag_str, state) {
-                if (strneq("masked", w, l))
+        FOREACH_WORD_SEPARATOR(word, l, flag_str, ",", state) {
+                if (strneq("masked", word, l))
                         flags |= SHOW_MASKED;
-                else if (strneq ("equivalent", w, l))
+                else if (strneq ("equivalent", word, l))
                         flags |= SHOW_EQUIVALENT;
-                else if (strneq("redirected", w, l))
+                else if (strneq("redirected", word, l))
                         flags |= SHOW_REDIRECTED;
-                else if (strneq("overridden", w, l))
+                else if (strneq("overridden", word, l))
                         flags |= SHOW_OVERRIDDEN;
-                else if (strneq("unchanged", w, l))
+                else if (strneq("unchanged", word, l))
                         flags |= SHOW_UNCHANGED;
-                else if (strneq("extended", w, l))
+                else if (strneq("extended", word, l))
                         flags |= SHOW_EXTENDED;
-                else if (strneq("default", w, l))
+                else if (strneq("default", word, l))
                         flags |= SHOW_DEFAULTS;
                 else
                         return -EINVAL;
@@ -534,7 +535,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 1);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "ht:", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "ht:", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -585,7 +586,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         return 1;
 }

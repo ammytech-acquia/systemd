@@ -20,8 +20,6 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <netinet/if_ether.h>
-#include <assert.h>
 #include <errno.h>
 
 #include "sd-event.h"
@@ -29,6 +27,14 @@
 
 #include "sd-dhcp-server.h"
 #include "dhcp-server-internal.h"
+
+static void test_pool(struct in_addr *address, unsigned size, int ret) {
+        _cleanup_dhcp_server_unref_ sd_dhcp_server *server = NULL;
+
+        assert_se(sd_dhcp_server_new(&server, 1) >= 0);
+
+        assert_se(sd_dhcp_server_configure_pool(server, address, 8, 0, size) == ret);
+}
 
 static int test_basic(sd_event *event) {
         _cleanup_dhcp_server_unref_ sd_dhcp_server *server = NULL;
@@ -56,14 +62,14 @@ static int test_basic(sd_event *event) {
         assert_se(!sd_dhcp_server_unref(server));
 
         assert_se(sd_dhcp_server_start(server) == -EUNATCH);
-        assert_se(sd_dhcp_server_set_address(server, &address_any) == -EINVAL);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo) >= 0);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo) == -EBUSY);
 
-        assert_se(sd_dhcp_server_set_lease_pool(server, &address_any, 1) == -EINVAL);
-        assert_se(sd_dhcp_server_set_lease_pool(server, &address_lo, 0) == -EINVAL);
-        assert_se(sd_dhcp_server_set_lease_pool(server, &address_lo, 1) >= 0);
-        assert_se(sd_dhcp_server_set_lease_pool(server, &address_lo, 1) == -EBUSY);
+        assert_se(sd_dhcp_server_configure_pool(server, &address_any, 28, 0, 0) == -EINVAL);
+        assert_se(sd_dhcp_server_configure_pool(server, &address_lo, 38, 0, 0) == -ERANGE);
+        assert_se(sd_dhcp_server_configure_pool(server, &address_lo, 8, 0, 0) >= 0);
+        assert_se(sd_dhcp_server_configure_pool(server, &address_lo, 8, 0, 0) == -EBUSY);
+
+        test_pool(&address_any, 1, -EINVAL);
+        test_pool(&address_lo, 1, 0);
 
         r = sd_dhcp_server_start(server);
 
@@ -120,12 +126,10 @@ static void test_message_handler(void) {
         };
 
         assert_se(sd_dhcp_server_new(&server, 1) >= 0);
-        assert_se(sd_dhcp_server_set_address(server, &address_lo) >= 0);
+        assert_se(sd_dhcp_server_configure_pool(server, &address_lo, 8, 0, 0) >= 0);
         assert_se(sd_dhcp_server_attach_event(server, NULL, 0) >= 0);
         assert_se(sd_dhcp_server_start(server) >= 0);
 
-        assert_se(dhcp_server_handle_message(server, (DHCPMessage*)&test, sizeof(test)) == 0);
-        assert_se(sd_dhcp_server_set_lease_pool(server, &address_lo, 10) >= 0);
         assert_se(dhcp_server_handle_message(server, (DHCPMessage*)&test, sizeof(test)) == DHCP_OFFER);
 
         test.end = 0;

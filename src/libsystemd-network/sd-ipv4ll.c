@@ -26,7 +26,7 @@
 #include "util.h"
 #include "siphash24.h"
 #include "list.h"
-#include "refcnt.h"
+#include "random-util.h"
 
 #include "ipv4ll-internal.h"
 #include "sd-ipv4ll.h"
@@ -67,7 +67,7 @@ typedef enum IPv4LLState {
 } IPv4LLState;
 
 struct sd_ipv4ll {
-        RefCount n_ref;
+        unsigned n_ref;
 
         IPv4LLState state;
         int index;
@@ -186,8 +186,7 @@ static void ipv4ll_set_next_wakeup(sd_ipv4ll *ll, int sec, int random_sec) {
         if (random_sec)
                 next_timeout += random_u32() % (random_sec * USEC_PER_SEC);
 
-        if (sd_event_now(ll->event, CLOCK_MONOTONIC, &time_now) < 0)
-                time_now = now(CLOCK_MONOTONIC);
+        assert_se(sd_event_now(ll->event, clock_boottime_or_monotonic(), &time_now) >= 0);
 
         ll->next_wakeup = time_now + next_timeout;
         ll->next_wakeup_valid = 1;
@@ -289,7 +288,7 @@ static void ipv4ll_run_state_machine(sd_ipv4ll *ll, IPv4LLTrigger trigger, void 
 
                         if (ipv4ll_arp_conflict(ll, in_packet)) {
 
-                                r = sd_event_now(ll->event, CLOCK_MONOTONIC, &time_now);
+                                r = sd_event_now(ll->event, clock_boottime_or_monotonic(), &time_now);
                                 if (r < 0)
                                         goto out;
 
@@ -344,12 +343,16 @@ static void ipv4ll_run_state_machine(sd_ipv4ll *ll, IPv4LLTrigger trigger, void 
 
         if (ll->next_wakeup_valid) {
                 ll->timer = sd_event_source_unref(ll->timer);
-                r = sd_event_add_time(ll->event, &ll->timer, CLOCK_MONOTONIC,
+                r = sd_event_add_time(ll->event, &ll->timer, clock_boottime_or_monotonic(),
                                       ll->next_wakeup, 0, ipv4ll_timer, ll);
                 if (r < 0)
                         goto out;
 
                 r = sd_event_source_set_priority(ll->timer, ll->event_priority);
+                if (r < 0)
+                        goto out;
+
+                r = sd_event_source_set_description(ll->timer, "ipv4ll-timer");
                 if (r < 0)
                         goto out;
         }
@@ -503,7 +506,7 @@ error:
 }
 
 bool sd_ipv4ll_is_running(sd_ipv4ll *ll) {
-        assert_return(ll, -EINVAL);
+        assert_return(ll, false);
 
         return !IN_SET(ll->state, IPV4LL_STATE_INIT, IPV4LL_STATE_STOPPED);
 }
@@ -560,17 +563,24 @@ int sd_ipv4ll_start (sd_ipv4ll *ll) {
         if (r < 0)
                 goto out;
 
+        r = sd_event_source_set_description(ll->receive_message, "ipv4ll-receive-message");
+        if (r < 0)
+                goto out;
+
         r = sd_event_add_time(ll->event,
                               &ll->timer,
-                              CLOCK_MONOTONIC,
-                              now(CLOCK_MONOTONIC), 0,
+                              clock_boottime_or_monotonic(),
+                              now(clock_boottime_or_monotonic()), 0,
                               ipv4ll_timer, ll);
 
         if (r < 0)
                 goto out;
 
         r = sd_event_source_set_priority(ll->timer, ll->event_priority);
+        if (r < 0)
+                goto out;
 
+        r = sd_event_source_set_description(ll->timer, "ipv4ll-timer");
 out:
         if (r < 0)
                 ipv4ll_stop(ll, IPV4LL_EVENT_STOP);
@@ -587,30 +597,39 @@ int sd_ipv4ll_stop(sd_ipv4ll *ll) {
 }
 
 sd_ipv4ll *sd_ipv4ll_ref(sd_ipv4ll *ll) {
-        if (ll)
-                assert_se(REFCNT_INC(ll->n_ref) >= 2);
+
+        if (!ll)
+                return NULL;
+
+        assert(ll->n_ref >= 1);
+        ll->n_ref++;
 
         return ll;
 }
 
 sd_ipv4ll *sd_ipv4ll_unref(sd_ipv4ll *ll) {
-        if (ll && REFCNT_DEC(ll->n_ref) <= 0) {
-                ll->receive_message =
-                        sd_event_source_unref(ll->receive_message);
-                ll->fd = safe_close(ll->fd);
 
-                ll->timer = sd_event_source_unref(ll->timer);
-
-                sd_ipv4ll_detach_event(ll);
-
-                free(ll->random_data);
-                free(ll->random_data_state);
-                free(ll);
-
+        if (!ll)
                 return NULL;
-        }
 
-        return ll;
+        assert(ll->n_ref >= 1);
+        ll->n_ref--;
+
+        if (ll->n_ref > 0)
+                return ll;
+
+        ll->receive_message = sd_event_source_unref(ll->receive_message);
+        ll->fd = safe_close(ll->fd);
+
+        ll->timer = sd_event_source_unref(ll->timer);
+
+        sd_ipv4ll_detach_event(ll);
+
+        free(ll->random_data);
+        free(ll->random_data_state);
+        free(ll);
+
+        return NULL;
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_ipv4ll*, sd_ipv4ll_unref);
@@ -625,7 +644,7 @@ int sd_ipv4ll_new(sd_ipv4ll **ret) {
         if (!ll)
                 return -ENOMEM;
 
-        ll->n_ref = REFCNT_INIT;
+        ll->n_ref = 1;
         ll->state = IPV4LL_STATE_INIT;
         ll->index = -1;
         ll->fd = -1;

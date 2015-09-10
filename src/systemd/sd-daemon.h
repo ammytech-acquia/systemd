@@ -168,7 +168,7 @@ int sd_is_mq(int fd, const char *path);
                   value daemons should send is "READY=1".
 
      STATUS=...   Passes a single-line status string back to systemd
-                  that describes the daemon state. This is free-from
+                  that describes the daemon state. This is free-form
                   and can be used for various purposes: general state
                   feedback, fsck-like programs could pass completion
                   percentages and failing programs could pass a human
@@ -189,6 +189,12 @@ int sd_is_mq(int fd, const char *path);
                   regular intervals. A watchdog framework can use the
                   timestamps to detect failed services. Also see
                   sd_watchdog_enabled() below.
+
+     FDSTORE=1    Store the file descriptors passed along with the
+                  message in the per-service file descriptor store,
+                  and pass them to the main process again on next
+                  invocation. This variable is only supported with
+                  sd_pid_notify_with_fds().
 
   Daemons can choose to send additional variables. However, it is
   recommended to prefix variable names not listed above with X_.
@@ -241,6 +247,13 @@ int sd_pid_notify(pid_t pid, int unset_environment, const char *state);
   process, if the appropriate permissions are available.
 */
 int sd_pid_notifyf(pid_t pid, int unset_environment, const char *format, ...) _sd_printf_(3,4);
+
+/*
+  Similar to sd_pid_notify(), but also passes the specified fd array
+  to the service manager for storage. This is particularly useful for
+  FDSTORE=1 messages.
+*/
+int sd_pid_notify_with_fds(pid_t pid, int unset_environment, const char *state, const int *fds, unsigned n_fds);
 
 /*
   Returns > 0 if the system was booted with systemd. Returns < 0 on

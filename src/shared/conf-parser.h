@@ -65,7 +65,7 @@ typedef const ConfigPerfItem* (*ConfigPerfItemLookup)(const char *section_and_lv
 
 /* Prototype for a generic high-level lookup function */
 typedef int (*ConfigItemLookup)(
-                void *table,
+                const void *table,
                 const char *section,
                 const char *lvalue,
                 ConfigParserCallback *func,
@@ -75,32 +75,43 @@ typedef int (*ConfigItemLookup)(
 
 /* Linear table search implementation of ConfigItemLookup, based on
  * ConfigTableItem arrays */
-int config_item_table_lookup(void *table, const char *section, const char *lvalue, ConfigParserCallback *func, int *ltype, void **data, void *userdata);
+int config_item_table_lookup(const void *table, const char *section, const char *lvalue, ConfigParserCallback *func, int *ltype, void **data, void *userdata);
 
 /* gperf implementation of ConfigItemLookup, based on gperf
  * ConfigPerfItem tables */
-int config_item_perf_lookup(void *table, const char *section, const char *lvalue, ConfigParserCallback *func, int *ltype, void **data, void *userdata);
+int config_item_perf_lookup(const void *table, const char *section, const char *lvalue, ConfigParserCallback *func, int *ltype, void **data, void *userdata);
 
 int config_parse(const char *unit,
                  const char *filename,
                  FILE *f,
                  const char *sections,  /* nulstr */
                  ConfigItemLookup lookup,
-                 void *table,
+                 const void *table,
                  bool relaxed,
                  bool allow_include,
+                 bool warn,
                  void *userdata);
+
+int config_parse_many(const char *conf_file,      /* possibly NULL */
+                      const char *conf_file_dirs, /* nulstr */
+                      const char *sections,       /* nulstr */
+                      ConfigItemLookup lookup,
+                      const void *table,
+                      bool relaxed,
+                      void *userdata);
 
 /* Generic parsers */
 int config_parse_int(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_unsigned(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_long(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_uint32(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_uint64(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_double(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line,  const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_iec_size(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_si_size(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_iec_off(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_bool(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_tristate(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_string(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_path(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_strv(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
@@ -109,23 +120,15 @@ int config_parse_nsec(const char *unit, const char *filename, unsigned line, con
 int config_parse_mode(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_log_facility(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_log_level(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_signal(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_personality(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 
-int log_syntax_internal(const char *unit, int level,
-                        const char *file, unsigned line, const char *func,
-                        const char *config_file, unsigned config_line,
-                        int error, const char *format, ...) _printf_(9, 10);
-
-#define log_syntax(unit, level, config_file, config_line, error, ...)   \
-        log_syntax_internal(unit, level,                                \
-                            __FILE__, __LINE__, __func__,               \
-                            config_file, config_line,                   \
-                            error, __VA_ARGS__)
-
-#define log_invalid_utf8(unit, level, config_file, config_line, error, rvalue) { \
-        _cleanup_free_ char *__p = utf8_escape_invalid(rvalue);                  \
-        log_syntax(unit, level, config_file, config_line, error,                 \
-                   "String is not UTF-8 clean, ignoring assignment: %s", __p);   \
-        }
+#define log_invalid_utf8(unit, level, config_file, config_line, error, rvalue) \
+        do {                                                            \
+                _cleanup_free_ char *_p = utf8_escape_invalid(rvalue);  \
+                log_syntax(unit, level, config_file, config_line, error, \
+                           "String is not UTF-8 clean, ignoring assignment: %s", strna(_p)); \
+        } while(false)
 
 #define DEFINE_CONFIG_PARSE_ENUM(function,name,type,msg)                \
         int function(const char *unit,                                  \
@@ -168,8 +171,9 @@ int log_syntax_internal(const char *unit, int level,
                      void *data,                                               \
                      void *userdata) {                                         \
                                                                                \
-                type **enums = data, *xs, x, *ys;                              \
-                char *w, *state;                                               \
+                type **enums = data, x, *ys;                                   \
+                _cleanup_free_ type *xs = NULL;                                \
+                const char *word, *state;                                      \
                 size_t l, i = 0;                                               \
                                                                                \
                 assert(filename);                                              \
@@ -178,12 +182,16 @@ int log_syntax_internal(const char *unit, int level,
                 assert(data);                                                  \
                                                                                \
                 xs = new0(type, 1);                                            \
+                if(!xs)                                                        \
+                        return -ENOMEM;                                        \
+                                                                               \
                 *xs = invalid;                                                 \
                                                                                \
-                FOREACH_WORD(w, l, rvalue, state) {                            \
+                FOREACH_WORD(word, l, rvalue, state) {                         \
                         _cleanup_free_ char *en = NULL;                        \
+                        type *new_xs;                                          \
                                                                                \
-                        en = strndup(w, l);                                    \
+                        en = strndup(word, l);                                 \
                         if (!en)                                               \
                                 return -ENOMEM;                                \
                                                                                \
@@ -207,13 +215,18 @@ int log_syntax_internal(const char *unit, int level,
                                 continue;                                      \
                                                                                \
                         *(xs + i) = x;                                         \
-                        xs = realloc(xs, (++i + 1) * sizeof(type));            \
-                        if (!xs)                                               \
+                        new_xs = realloc(xs, (++i + 1) * sizeof(type));        \
+                        if (new_xs)                                            \
+                                xs = new_xs;                                   \
+                        else                                                   \
                                 return -ENOMEM;                                \
+                                                                               \
                         *(xs + i) = invalid;                                   \
                 }                                                              \
                                                                                \
                 free(*enums);                                                  \
                 *enums = xs;                                                   \
+                xs = NULL;                                                     \
+                                                                               \
                 return 0;                                                      \
         }

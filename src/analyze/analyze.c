@@ -24,23 +24,21 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <locale.h>
-#include <sys/utsname.h>
-#include <fnmatch.h>
 
 #include "sd-bus.h"
 #include "bus-util.h"
 #include "bus-error.h"
-#include "install.h"
 #include "log.h"
 #include "build.h"
 #include "util.h"
 #include "strxcpyx.h"
-#include "fileio.h"
 #include "strv.h"
 #include "unit-name.h"
 #include "special.h"
 #include "hashmap.h"
 #include "pager.h"
+#include "analyze-verify.h"
+#include "terminal-util.h"
 
 #define SCALE_X (0.1 / 1000.0)   /* pixels per us */
 #define SCALE_Y (20.0)
@@ -74,6 +72,7 @@ static bool arg_no_pager = false;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static char *arg_host = NULL;
 static bool arg_user = false;
+static bool arg_man = true;
 
 struct boot_times {
         usec_t firmware_time;
@@ -89,6 +88,18 @@ struct boot_times {
         usec_t generators_finish_time;
         usec_t unitsload_start_time;
         usec_t unitsload_finish_time;
+
+        /*
+         * If we're analyzing the user instance, all timestamps will be offset
+         * by its own start-up timestamp, which may be arbitrarily big.
+         * With "plot", this causes arbitrarily wide output SVG files which almost
+         * completely consist of empty space. Thus we cancel out this offset.
+         *
+         * This offset is subtracted from times above by acquire_boot_times(),
+         * but it still needs to be subtracted from unit-specific timestamps
+         * (so it is stored here for reference).
+         */
+        usec_t reverse_offset;
 };
 
 struct unit_times {
@@ -189,94 +200,13 @@ static void free_unit_times(struct unit_times *t, unsigned n) {
         free(t);
 }
 
-static int acquire_time_data(sd_bus *bus, struct unit_times **out) {
-        _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
-        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        int r, c = 0;
-        struct unit_times *unit_times = NULL;
-        size_t size = 0;
-        UnitInfo u;
+static void subtract_timestamp(usec_t *a, usec_t b) {
+        assert(a);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "ListUnits",
-                        &error, &reply,
-                        NULL);
-        if (r < 0) {
-                log_error("Failed to list units: %s", bus_error_message(&error, -r));
-                goto fail;
+        if (*a > 0) {
+                assert(*a >= b);
+                *a -= b;
         }
-
-        r = sd_bus_message_enter_container(reply, SD_BUS_TYPE_ARRAY, "(ssssssouso)");
-        if (r < 0) {
-                bus_log_parse_error(r);
-                goto fail;
-        }
-
-        while ((r = bus_parse_unit_info(reply, &u)) > 0) {
-                struct unit_times *t;
-
-                if (!GREEDY_REALLOC(unit_times, size, c+1)) {
-                        r = log_oom();
-                        goto fail;
-                }
-
-                t = unit_times+c;
-                t->name = NULL;
-
-                assert_cc(sizeof(usec_t) == sizeof(uint64_t));
-
-                if (bus_get_uint64_property(bus, u.unit_path,
-                                            "org.freedesktop.systemd1.Unit",
-                                            "InactiveExitTimestampMonotonic",
-                                            &t->activating) < 0 ||
-                    bus_get_uint64_property(bus, u.unit_path,
-                                            "org.freedesktop.systemd1.Unit",
-                                            "ActiveEnterTimestampMonotonic",
-                                            &t->activated) < 0 ||
-                    bus_get_uint64_property(bus, u.unit_path,
-                                            "org.freedesktop.systemd1.Unit",
-                                            "ActiveExitTimestampMonotonic",
-                                            &t->deactivating) < 0 ||
-                    bus_get_uint64_property(bus, u.unit_path,
-                                            "org.freedesktop.systemd1.Unit",
-                                            "InactiveEnterTimestampMonotonic",
-                                            &t->deactivated) < 0) {
-                        r = -EIO;
-                        goto fail;
-                }
-
-                if (t->activated >= t->activating)
-                        t->time = t->activated - t->activating;
-                else if (t->deactivated >= t->activating)
-                        t->time = t->deactivated - t->activating;
-                else
-                        t->time = 0;
-
-                if (t->activating == 0)
-                        continue;
-
-                t->name = strdup(u.id);
-                if (t->name == NULL) {
-                        r = log_oom();
-                        goto fail;
-                }
-                c++;
-        }
-        if (r < 0) {
-                bus_log_parse_error(r);
-                goto fail;
-        }
-
-        *out = unit_times;
-        return c;
-
-fail:
-        free_unit_times(unit_times, (unsigned) c);
-        return r;
 }
 
 static int acquire_boot_times(sd_bus *bus, struct boot_times **bt) {
@@ -355,10 +285,30 @@ static int acquire_boot_times(sd_bus *bus, struct boot_times **bt) {
                 return -EINPROGRESS;
         }
 
-        if (times.initrd_time)
-                times.kernel_done_time = times.initrd_time;
-        else
-                times.kernel_done_time = times.userspace_time;
+        if (arg_user) {
+                /*
+                 * User-instance-specific timestamps processing
+                 * (see comment to reverse_offset in struct boot_times).
+                 */
+                times.reverse_offset = times.userspace_time;
+
+                times.firmware_time = times.loader_time = times.kernel_time = times.initrd_time = times.userspace_time = 0;
+                subtract_timestamp(&times.finish_time, times.reverse_offset);
+
+                subtract_timestamp(&times.security_start_time, times.reverse_offset);
+                subtract_timestamp(&times.security_finish_time, times.reverse_offset);
+
+                subtract_timestamp(&times.generators_start_time, times.reverse_offset);
+                subtract_timestamp(&times.generators_finish_time, times.reverse_offset);
+
+                subtract_timestamp(&times.unitsload_start_time, times.reverse_offset);
+                subtract_timestamp(&times.unitsload_finish_time, times.reverse_offset);
+        } else {
+                if (times.initrd_time)
+                        times.kernel_done_time = times.initrd_time;
+                else
+                        times.kernel_done_time = times.userspace_time;
+        }
 
         cached = true;
 
@@ -376,6 +326,107 @@ static void free_host_info(struct host_info *hi) {
         free(hi->virtualization);
         free(hi->architecture);
         free(hi);
+}
+
+static int acquire_time_data(sd_bus *bus, struct unit_times **out) {
+        _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
+        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
+        int r, c = 0;
+        struct boot_times *boot_times = NULL;
+        struct unit_times *unit_times = NULL;
+        size_t size = 0;
+        UnitInfo u;
+
+        r = acquire_boot_times(bus, &boot_times);
+        if (r < 0)
+                goto fail;
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "ListUnits",
+                        &error, &reply,
+                        NULL);
+        if (r < 0) {
+                log_error("Failed to list units: %s", bus_error_message(&error, -r));
+                goto fail;
+        }
+
+        r = sd_bus_message_enter_container(reply, SD_BUS_TYPE_ARRAY, "(ssssssouso)");
+        if (r < 0) {
+                bus_log_parse_error(r);
+                goto fail;
+        }
+
+        while ((r = bus_parse_unit_info(reply, &u)) > 0) {
+                struct unit_times *t;
+
+                if (!GREEDY_REALLOC(unit_times, size, c+1)) {
+                        r = log_oom();
+                        goto fail;
+                }
+
+                t = unit_times+c;
+                t->name = NULL;
+
+                assert_cc(sizeof(usec_t) == sizeof(uint64_t));
+
+                if (bus_get_uint64_property(bus, u.unit_path,
+                                            "org.freedesktop.systemd1.Unit",
+                                            "InactiveExitTimestampMonotonic",
+                                            &t->activating) < 0 ||
+                    bus_get_uint64_property(bus, u.unit_path,
+                                            "org.freedesktop.systemd1.Unit",
+                                            "ActiveEnterTimestampMonotonic",
+                                            &t->activated) < 0 ||
+                    bus_get_uint64_property(bus, u.unit_path,
+                                            "org.freedesktop.systemd1.Unit",
+                                            "ActiveExitTimestampMonotonic",
+                                            &t->deactivating) < 0 ||
+                    bus_get_uint64_property(bus, u.unit_path,
+                                            "org.freedesktop.systemd1.Unit",
+                                            "InactiveEnterTimestampMonotonic",
+                                            &t->deactivated) < 0) {
+                        r = -EIO;
+                        goto fail;
+                }
+
+                subtract_timestamp(&t->activating, boot_times->reverse_offset);
+                subtract_timestamp(&t->activated, boot_times->reverse_offset);
+                subtract_timestamp(&t->deactivating, boot_times->reverse_offset);
+                subtract_timestamp(&t->deactivated, boot_times->reverse_offset);
+
+                if (t->activated >= t->activating)
+                        t->time = t->activated - t->activating;
+                else if (t->deactivated >= t->activating)
+                        t->time = t->deactivated - t->activating;
+                else
+                        t->time = 0;
+
+                if (t->activating == 0)
+                        continue;
+
+                t->name = strdup(u.id);
+                if (t->name == NULL) {
+                        r = log_oom();
+                        goto fail;
+                }
+                c++;
+        }
+        if (r < 0) {
+                bus_log_parse_error(r);
+                goto fail;
+        }
+
+        *out = unit_times;
+        return c;
+
+fail:
+        if (unit_times)
+                free_unit_times(unit_times, (unsigned) c);
+        return r;
 }
 
 static int acquire_host_info(sd_bus *bus, struct host_info **hi) {
@@ -450,10 +501,7 @@ static int pretty_boot_time(sd_bus *bus, char **_buf) {
                 size = strpcpyf(&ptr, size, "%s (initrd) + ", format_timespan(ts, sizeof(ts), t->userspace_time - t->initrd_time, USEC_PER_MSEC));
 
         size = strpcpyf(&ptr, size, "%s (userspace) ", format_timespan(ts, sizeof(ts), t->finish_time - t->userspace_time, USEC_PER_MSEC));
-        if (t->kernel_time > 0)
-                strpcpyf(&ptr, size, "= %s", format_timespan(ts, sizeof(ts), t->firmware_time + t->finish_time, USEC_PER_MSEC));
-        else
-                strpcpyf(&ptr, size, "= %s", format_timespan(ts, sizeof(ts), t->finish_time - t->userspace_time, USEC_PER_MSEC));
+        strpcpyf(&ptr, size, "= %s", format_timespan(ts, sizeof(ts), t->firmware_time + t->finish_time, USEC_PER_MSEC));
 
         ptr = strdup(buf);
         if (!ptr)
@@ -845,7 +893,8 @@ static int list_dependencies(sd_bus *bus, const char *name) {
         char ts[FORMAT_TIMESPAN_MAX];
         struct unit_times *times;
         int r;
-        const char *path, *id;
+        const char *id;
+        _cleanup_free_ char *path = NULL;
         _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         struct boot_times *boot;
@@ -903,7 +952,7 @@ static int analyze_critical_chain(sd_bus *bus, char *names[]) {
         if (n <= 0)
                 return n;
 
-        h = hashmap_new(string_hash_func, string_compare_func);
+        h = hashmap_new(&string_hash_ops);
         if (!h)
                 return -ENOMEM;
 
@@ -971,56 +1020,35 @@ static int graph_one_property(sd_bus *bus, const UnitInfo *u, const char* prop, 
         _cleanup_strv_free_ char **units = NULL;
         char **unit;
         int r;
+        bool match_patterns;
 
         assert(u);
         assert(prop);
         assert(color);
+
+        match_patterns = strv_fnmatch(patterns, u->id, 0);
+
+        if (!strv_isempty(arg_dot_from_patterns) &&
+            !match_patterns &&
+            !strv_fnmatch(arg_dot_from_patterns, u->id, 0))
+                        return 0;
 
         r = bus_get_unit_property_strv(bus, u->unit_path, prop, &units);
         if (r < 0)
                 return r;
 
         STRV_FOREACH(unit, units) {
-                char **p;
-                bool match_found;
+                bool match_patterns2;
 
-                if (!strv_isempty(arg_dot_from_patterns)) {
-                        match_found = false;
+                match_patterns2 = strv_fnmatch(patterns, *unit, 0);
 
-                        STRV_FOREACH(p, arg_dot_from_patterns)
-                                if (fnmatch(*p, u->id, 0) == 0) {
-                                        match_found = true;
-                                        break;
-                                }
+                if (!strv_isempty(arg_dot_to_patterns) &&
+                    !match_patterns2 &&
+                    !strv_fnmatch(arg_dot_to_patterns, *unit, 0))
+                        continue;
 
-                        if (!match_found)
-                                continue;
-                }
-
-                if (!strv_isempty(arg_dot_to_patterns)) {
-                        match_found = false;
-
-                        STRV_FOREACH(p, arg_dot_to_patterns)
-                                if (fnmatch(*p, *unit, 0) == 0) {
-                                        match_found = true;
-                                        break;
-                                }
-
-                        if (!match_found)
-                                continue;
-                }
-
-                if (!strv_isempty(patterns)) {
-                        match_found = false;
-
-                        STRV_FOREACH(p, patterns)
-                                if (fnmatch(*p, u->id, 0) == 0 || fnmatch(*p, *unit, 0) == 0) {
-                                        match_found = true;
-                                        break;
-                                }
-                        if (!match_found)
-                                continue;
-                }
+                if (!strv_isempty(patterns) && !match_patterns && !match_patterns2)
+                        continue;
 
                 printf("\t\"%s\"->\"%s\" [color=\"%s\"];\n", u->id, *unit, color);
         }
@@ -1064,11 +1092,58 @@ static int graph_one(sd_bus *bus, const UnitInfo *u, char *patterns[]) {
         return 0;
 }
 
+static int expand_patterns(sd_bus *bus, char **patterns, char ***ret) {
+        _cleanup_strv_free_ char **expanded_patterns = NULL;
+        char **pattern;
+        int r;
+
+        STRV_FOREACH(pattern, patterns) {
+                _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
+                _cleanup_free_ char *unit = NULL, *unit_id = NULL;
+
+                if (strv_extend(&expanded_patterns, *pattern) < 0)
+                        return log_oom();
+
+                if (string_is_glob(*pattern))
+                        continue;
+
+                unit = unit_dbus_path_from_name(*pattern);
+                if (!unit)
+                        return log_oom();
+
+                r = sd_bus_get_property_string(
+                                bus,
+                                "org.freedesktop.systemd1",
+                                unit,
+                                "org.freedesktop.systemd1.Unit",
+                                "Id",
+                                &error,
+                                &unit_id);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get ID: %s", bus_error_message(&error, r));
+
+                if (!streq(*pattern, unit_id)) {
+                        if (strv_extend(&expanded_patterns, unit_id) < 0)
+                                return log_oom();
+                }
+        }
+
+        *ret = expanded_patterns;
+        expanded_patterns = NULL; /* do not free */
+
+        return 0;
+}
+
 static int dot(sd_bus *bus, char* patterns[]) {
         _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_strv_free_ char **expanded_patterns = NULL;
         int r;
         UnitInfo u;
+
+        r = expand_patterns(bus, patterns, &expanded_patterns);
+        if (r < 0)
+                return r;
 
         r = sd_bus_call_method(
                         bus,
@@ -1092,7 +1167,7 @@ static int dot(sd_bus *bus, char* patterns[]) {
 
         while ((r = bus_parse_unit_info(reply, &u)) > 0) {
 
-                r = graph_one(bus, &u, patterns);
+                r = graph_one(bus, &u, expanded_patterns);
                 if (r < 0)
                         return r;
         }
@@ -1178,43 +1253,40 @@ static int set_log_level(sd_bus *bus, char **args) {
         return 0;
 }
 
-static int help(void) {
+static void help(void) {
 
         pager_open_if_enabled();
 
         printf("%s [OPTIONS...] {COMMAND} ...\n\n"
-               "Process systemd profiling information.\n\n"
+               "Profile systemd, show unit dependencies, check unit files.\n\n"
                "  -h --help               Show this help\n"
                "     --version            Show package version\n"
                "     --no-pager           Do not pipe output into a pager\n"
-               "     --system             Connect to system manager\n"
-               "     --user               Connect to user manager\n"
+               "     --system             Operate on system systemd instance\n"
+               "     --user               Operate on user systemd instance\n"
                "  -H --host=[USER@]HOST   Operate on remote host\n"
                "  -M --machine=CONTAINER  Operate on local container\n"
-               "     --order              When generating a dependency graph, show only order\n"
-               "     --require            When generating a dependency graph, show only requirement\n"
-               "     --from-pattern=GLOB, --to-pattern=GLOB\n"
-               "                          When generating a dependency graph, filter only origins\n"
-               "                          or destinations, respectively\n"
-               "     --fuzz=TIMESPAN      When printing the tree of the critical chain, print also\n"
-               "                          services, which finished TIMESPAN earlier, than the\n"
-               "                          latest in the branch. The unit of TIMESPAN is seconds\n"
-               "                          unless specified with a different unit, i.e. 50ms\n\n"
+               "     --order              Show only order in the graph\n"
+               "     --require            Show only requirement in the graph\n"
+               "     --from-pattern=GLOB  Show only origins in the graph\n"
+               "     --to-pattern=GLOB    Show only destinations in the graph\n"
+               "     --fuzz=SECONDS       Also print also services which finished SECONDS\n"
+               "                          earlier than the latest in the branch\n"
+               "     --man[=BOOL]         Do [not] check for existence of man pages\n\n"
                "Commands:\n"
-               "  time                    Print time spent in the kernel before reaching userspace\n"
+               "  time                    Print time spent in the kernel\n"
                "  blame                   Print list of running units ordered by time to init\n"
                "  critical-chain          Print a tree of the time critical chain of units\n"
                "  plot                    Output SVG graphic showing service initialization\n"
                "  dot                     Output dependency graph in dot(1) format\n"
                "  set-log-level LEVEL     Set logging threshold for systemd\n"
-               "  dump                    Output state serialization of service manager\n",
-               program_invocation_short_name);
+               "  dump                    Output state serialization of service manager\n"
+               "  verify FILE...          Check unit files for correctness\n"
+               , program_invocation_short_name);
 
         /* When updating this list, including descriptions, apply
-         * changes to shell-completion/bash/systemd and
-         * shell-completion/systemd-zsh-completion.zsh too. */
-
-        return 0;
+         * changes to shell-completion/bash/systemd-analyze and
+         * shell-completion/zsh/_systemd-analyze too. */
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -1227,7 +1299,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_DOT_FROM_PATTERN,
                 ARG_DOT_TO_PATTERN,
                 ARG_FUZZ,
-                ARG_NO_PAGER
+                ARG_NO_PAGER,
+                ARG_MAN,
         };
 
         static const struct option options[] = {
@@ -1241,6 +1314,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "to-pattern",   required_argument, NULL, ARG_DOT_TO_PATTERN   },
                 { "fuzz",         required_argument, NULL, ARG_FUZZ             },
                 { "no-pager",     no_argument,       NULL, ARG_NO_PAGER         },
+                { "man",          optional_argument, NULL, ARG_MAN              },
                 { "host",         required_argument, NULL, 'H'                  },
                 { "machine",      required_argument, NULL, 'M'                  },
                 {}
@@ -1251,12 +1325,12 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0) {
-
+        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0)
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
                         puts(PACKAGE_STRING);
@@ -1307,23 +1381,35 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'M':
-                        arg_transport = BUS_TRANSPORT_CONTAINER;
+                        arg_transport = BUS_TRANSPORT_MACHINE;
                         arg_host = optarg;
+                        break;
+
+                case ARG_MAN:
+                        if (optarg) {
+                                r = parse_boolean(optarg);
+                                if (r < 0) {
+                                        log_error("Failed to parse --man= argument.");
+                                        return -EINVAL;
+                                }
+
+                                arg_man = !!r;
+                        } else
+                                arg_man = true;
+
                         break;
 
                 case '?':
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached("Unhandled option code.");
                 }
-        }
 
-        return 1;
+        return 1; /* work to do */
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -1335,28 +1421,36 @@ int main(int argc, char *argv[]) {
         if (r <= 0)
                 goto finish;
 
-        r = bus_open_transport_systemd(arg_transport, arg_host, arg_user, &bus);
-        if (r < 0) {
-                log_error("Failed to create bus connection: %s", strerror(-r));
-                goto finish;
-        }
+        if (streq_ptr(argv[optind], "verify"))
+                r = verify_units(argv+optind+1,
+                                 arg_user ? MANAGER_USER : MANAGER_SYSTEM,
+                                 arg_man);
+        else {
+                _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
 
-        if (!argv[optind] || streq(argv[optind], "time"))
-                r = analyze_time(bus);
-        else if (streq(argv[optind], "blame"))
-                r = analyze_blame(bus);
-        else if (streq(argv[optind], "critical-chain"))
-                r = analyze_critical_chain(bus, argv+optind+1);
-        else if (streq(argv[optind], "plot"))
-                r = analyze_plot(bus);
-        else if (streq(argv[optind], "dot"))
-                r = dot(bus, argv+optind+1);
-        else if (streq(argv[optind], "dump"))
-                r = dump(bus, argv+optind+1);
-        else if (streq(argv[optind], "set-log-level"))
-                r = set_log_level(bus, argv+optind+1);
-        else
-                log_error("Unknown operation '%s'.", argv[optind]);
+                r = bus_open_transport_systemd(arg_transport, arg_host, arg_user, &bus);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to create bus connection: %m");
+                        goto finish;
+                }
+
+                if (!argv[optind] || streq(argv[optind], "time"))
+                        r = analyze_time(bus);
+                else if (streq(argv[optind], "blame"))
+                        r = analyze_blame(bus);
+                else if (streq(argv[optind], "critical-chain"))
+                        r = analyze_critical_chain(bus, argv+optind+1);
+                else if (streq(argv[optind], "plot"))
+                        r = analyze_plot(bus);
+                else if (streq(argv[optind], "dot"))
+                        r = dot(bus, argv+optind+1);
+                else if (streq(argv[optind], "dump"))
+                        r = dump(bus, argv+optind+1);
+                else if (streq(argv[optind], "set-log-level"))
+                        r = set_log_level(bus, argv+optind+1);
+                else
+                        log_error("Unknown operation '%s'.", argv[optind]);
+        }
 
 finish:
         pager_close();

@@ -17,23 +17,29 @@
  */
 
 #include <stdlib.h>
-#include <string.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <unistd.h>
 #include <errno.h>
-#include <ctype.h>
-#include <fcntl.h>
 #include <signal.h>
-#include <syslog.h>
 #include <getopt.h>
 #include <sys/signalfd.h>
 
 #include "udev.h"
 #include "udev-util.h"
 
-static int adm_test(struct udev *udev, int argc, char *argv[])
-{
+static void help(void) {
+
+        printf("%s test OPTIONS <syspath>\n\n"
+               "Test an event run.\n"
+               "  -h --help                            Show this help\n"
+               "     --version                         Show package version\n"
+               "  -a --action=ACTION                   Set action string\n"
+               "  -N --resolve-names=early|late|never  When to resolve names\n"
+               , program_invocation_short_name);
+}
+
+static int adm_test(struct udev *udev, int argc, char *argv[]) {
         int resolve_names = 1;
         char filename[UTIL_PATH_SIZE];
         const char *action = "add";
@@ -73,11 +79,7 @@ static int adm_test(struct udev *udev, int argc, char *argv[])
                         }
                         break;
                 case 'h':
-                        printf("Usage: udevadm test OPTIONS <syspath>\n"
-                               "  -a,--action=ACTION                  set action string\n"
-                               "  -N,--resolve-names=early|late|never when to resolve names\n"
-                               "  -h,--help                           print this help string\n"
-                               "\n");
+                        help();
                         exit(EXIT_SUCCESS);
                 case '?':
                         exit(EXIT_FAILURE);
@@ -115,30 +117,25 @@ static int adm_test(struct udev *udev, int argc, char *argv[])
                 strscpy(filename, sizeof(filename), syspath);
         util_remove_trailing_chars(filename, '/');
 
-        dev = udev_device_new_from_syspath(udev, filename);
+        dev = udev_device_new_from_synthetic_event(udev, filename, action);
         if (dev == NULL) {
                 fprintf(stderr, "unable to open device '%s'\n", filename);
                 rc = 4;
                 goto out;
         }
 
-        /* skip reading of db, but read kernel parameters */
+        /* don't read info from the db */
         udev_device_set_info_loaded(dev);
-        udev_device_read_uevent_file(dev);
 
-        udev_device_set_action(dev, action);
         event = udev_event_new(dev);
 
         sigfillset(&mask);
         sigprocmask(SIG_SETMASK, &mask, &sigmask_orig);
-        event->fd_signal = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-        if (event->fd_signal < 0) {
-                fprintf(stderr, "error creating signalfd\n");
-                rc = 5;
-                goto out;
-        }
 
-        udev_event_execute_rules(event, rules, &sigmask_orig);
+        udev_event_execute_rules(event,
+                                 60 * USEC_PER_SEC, 20 * USEC_PER_SEC,
+                                 NULL,
+                                 rules);
 
         udev_list_entry_foreach(entry, udev_device_get_properties_list_entry(dev))
                 printf("%s=%s\n", udev_list_entry_get_name(entry), udev_list_entry_get_value(entry));
@@ -150,8 +147,6 @@ static int adm_test(struct udev *udev, int argc, char *argv[])
                 printf("run: '%s'\n", program);
         }
 out:
-        if (event != NULL && event->fd_signal >= 0)
-                close(event->fd_signal);
         udev_builtin_exit(udev);
         return rc;
 }
@@ -159,6 +154,6 @@ out:
 const struct udevadm_cmd udevadm_test = {
         .name = "test",
         .cmd = adm_test,
-        .help = "test an event run",
+        .help = "Test an event run",
         .debug = true,
 };

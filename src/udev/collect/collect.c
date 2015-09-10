@@ -20,18 +20,10 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <stddef.h>
-#include <unistd.h>
-#include <signal.h>
-#include <fcntl.h>
 #include <errno.h>
-#include <string.h>
 #include <getopt.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
-#include "libudev.h"
 #include "libudev-private.h"
 #include "macro.h"
 
@@ -68,15 +60,19 @@ noreturn static void sig_alrm(int signo)
 
 static void usage(void)
 {
-        printf("usage: collect [--add|--remove] [--debug] <checkpoint> <id> <idlist>\n"
-               "\n"
+        printf("%s [options] <checkpoint> <id> <idlist>\n\n"
+               "Collect variables across events.\n\n"
+               "  -h --help        Print this message\n"
+               "  -a --add         Add ID <id> to the list <idlist>\n"
+               "  -r --remove      Remove ID <id> from the list <idlist>\n"
+               "  -d --debug       Debug to stderr\n\n"
                "  Adds ID <id> to the list governed by <checkpoint>.\n"
                "  <id> must be part of the list <idlist>.\n"
                "  If all IDs given by <idlist> are listed (ie collect has been\n"
                "  invoked for each ID in <idlist>) collect returns 0, the\n"
                "  number of missing IDs otherwise.\n"
-               "  On error a negative number is returned.\n"
-               "\n");
+               "  On error a negative number is returned.\n\n"
+               , program_invocation_short_name);
 }
 
 /*
@@ -86,12 +82,12 @@ static void usage(void)
  */
 static int prepare(char *dir, char *filename)
 {
-        struct stat statbuf;
         char buf[512];
-        int fd;
+        int r, fd;
 
-        if (stat(dir, &statbuf) < 0)
-                mkdir(dir, 0700);
+        r = mkdir(dir, 0700);
+        if (r < 0 && errno != EEXIST)
+                return -errno;
 
         snprintf(buf, sizeof(buf), "%s/%s", dir, filename);
 
@@ -153,7 +149,7 @@ static int checkout(int fd)
                         if (!ptr && word < (buf + len)) {
                                 bufsize = bufsize << 1;
                                 if (debug)
-                                        fprintf(stderr, "ID overflow, restarting with size %zi\n", bufsize);
+                                        fprintf(stderr, "ID overflow, restarting with size %zu\n", bufsize);
                                 free(buf);
                                 lseek(fd, 0, SEEK_SET);
                                 goto restart;
@@ -254,7 +250,7 @@ static void reject(char *us)
  * kickout
  *
  * Remove all IDs in the internal list which are not part
- * of the list passed via the commandline.
+ * of the list passed via the command line.
  */
 static void kickout(void)
 {

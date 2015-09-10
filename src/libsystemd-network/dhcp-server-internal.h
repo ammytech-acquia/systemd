@@ -20,11 +20,12 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#pragma once
+
 #include "sd-event.h"
 #include "sd-dhcp-server.h"
 
 #include "hashmap.h"
-#include "refcnt.h"
 #include "util.h"
 #include "log.h"
 
@@ -32,18 +33,20 @@
 
 typedef struct DHCPClientId {
         size_t length;
-        uint8_t *data;
+        void *data;
 } DHCPClientId;
 
 typedef struct DHCPLease {
         DHCPClientId client_id;
 
         be32_t address;
+        be32_t gateway;
+        uint8_t chaddr[16];
         usec_t expiration;
 } DHCPLease;
 
 struct sd_dhcp_server {
-        RefCount n_ref;
+        unsigned n_ref;
 
         sd_event *event;
         int event_priority;
@@ -51,14 +54,23 @@ struct sd_dhcp_server {
         int fd;
         int fd_raw;
 
-        int index;
+        int ifindex;
         be32_t address;
-        be32_t pool_start;
-        size_t pool_size;
-        size_t next_offer;
+        be32_t netmask;
+        be32_t subnet;
+        uint32_t pool_offset;
+        uint32_t pool_size;
+
+        char *timezone;
+
+        struct in_addr *ntp, *dns;
+        unsigned n_ntp, n_dns;
 
         Hashmap *leases_by_client_id;
         DHCPLease **bound_leases;
+        DHCPLease invalid_lease;
+
+        uint32_t max_lease_time, default_lease_time;
 };
 
 typedef struct DHCPRequest {
@@ -70,13 +82,13 @@ typedef struct DHCPRequest {
         size_t max_optlen;
         be32_t server_id;
         be32_t requested_ip;
-        int lifetime;
+        uint32_t lifetime;
 } DHCPRequest;
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_dhcp_server*, sd_dhcp_server_unref);
 #define _cleanup_dhcp_server_unref_ _cleanup_(sd_dhcp_server_unrefp)
 
-#define log_dhcp_server(client, fmt, ...) log_meta(LOG_DEBUG, __FILE__, __LINE__, __func__, "DHCP SERVER: " fmt, ##__VA_ARGS__)
+#define log_dhcp_server(client, fmt, ...) log_internal(LOG_DEBUG, 0, __FILE__, __LINE__, __func__, "DHCP SERVER: " fmt, ##__VA_ARGS__)
 
 int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
                                size_t length);

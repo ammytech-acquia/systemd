@@ -20,16 +20,14 @@
 ***/
 
 #include <errno.h>
-#include <signal.h>
-#include <unistd.h>
 
-#include "unit.h"
-#include "slice.h"
-#include "load-fragment.h"
 #include "log.h"
-#include "dbus-slice.h"
+#include "strv.h"
 #include "special.h"
 #include "unit-name.h"
+#include "unit.h"
+#include "slice.h"
+#include "dbus-slice.h"
 
 static const UnitActiveState state_translation_table[_SLICE_STATE_MAX] = {
         [SLICE_DEAD] = UNIT_INACTIVE,
@@ -96,27 +94,28 @@ static int slice_add_default_dependencies(Slice *s) {
         return 0;
 }
 
+
 static int slice_verify(Slice *s) {
+        _cleanup_free_ char *parent = NULL;
+        int r;
+
         assert(s);
 
         if (UNIT(s)->load_state != UNIT_LOADED)
                 return 0;
 
-        if (UNIT_DEREF(UNIT(s)->slice)) {
-                char *a, *dash;
+        if (!slice_name_is_valid(UNIT(s)->id)) {
+                log_unit_error(UNIT(s), "Slice name %s is not valid. Refusing.", UNIT(s)->id);
+                return -EINVAL;
+        }
 
-                a = strdupa(UNIT(s)->id);
-                dash = strrchr(a, '-');
-                if (dash)
-                        strcpy(dash, ".slice");
-                else
-                        a = (char*) SPECIAL_ROOT_SLICE;
+        r = slice_build_parent_slice(UNIT(s)->id, &parent);
+        if (r < 0)
+                return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
 
-                if (!unit_has_name(UNIT_DEREF(UNIT(s)->slice), a)) {
-                        log_error_unit(UNIT(s)->id,
-                                       "%s located outside its parent slice. Refusing.", UNIT(s)->id);
-                        return -EINVAL;
-                }
+        if (parent ? !unit_has_name(UNIT_DEREF(UNIT(s)->slice), parent) : UNIT_ISSET(UNIT(s)->slice)) {
+                log_unit_error(UNIT(s), "Located outside of parent slice. Refusing.");
+                return -EINVAL;
         }
 
         return 0;
@@ -184,10 +183,11 @@ static int slice_start(Unit *u) {
         assert(t);
         assert(t->state == SLICE_DEAD);
 
-        unit_realize_cgroup(u);
+        (void) unit_realize_cgroup(u);
+        (void) unit_reset_cpu_usage(u);
 
         slice_set_state(t, SLICE_ACTIVE);
-        return 0;
+        return 1;
 }
 
 static int slice_stop(Unit *u) {
@@ -200,7 +200,7 @@ static int slice_stop(Unit *u) {
          * unit_notify() will do that for us anyway. */
 
         slice_set_state(t, SLICE_DEAD);
-        return 0;
+        return 1;
 }
 
 static int slice_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
@@ -253,6 +253,40 @@ _pure_ static const char *slice_sub_state_to_string(Unit *u) {
         return slice_state_to_string(SLICE(u)->state);
 }
 
+static int slice_enumerate(Manager *m) {
+        Unit *u;
+        int r;
+
+        assert(m);
+
+        u = manager_get_unit(m, SPECIAL_ROOT_SLICE);
+        if (!u) {
+                u = unit_new(m, sizeof(Slice));
+                if (!u)
+                        return log_oom();
+
+                r = unit_add_name(u, SPECIAL_ROOT_SLICE);
+                if (r < 0) {
+                        unit_free(u);
+                        return log_error_errno(r, "Failed to add -.slice name");
+                }
+        }
+
+        u->default_dependencies = false;
+        u->no_gc = true;
+        SLICE(u)->deserialized_state = SLICE_ACTIVE;
+
+        if (!u->description)
+                u->description = strdup("Root Slice");
+        if (!u->documentation)
+                (void) strv_extend(&u->documentation, "man:systemd.special(7)");
+
+        unit_add_to_load_queue(u);
+        unit_add_to_dbus_queue(u);
+
+        return 0;
+}
+
 static const char* const slice_state_table[_SLICE_STATE_MAX] = {
         [SLICE_DEAD] = "dead",
         [SLICE_ACTIVE] = "active"
@@ -290,15 +324,15 @@ const UnitVTable slice_vtable = {
         .active_state = slice_active_state,
         .sub_state_to_string = slice_sub_state_to_string,
 
-        .bus_interface = "org.freedesktop.systemd1.Slice",
         .bus_vtable = bus_slice_vtable,
         .bus_set_property = bus_slice_set_property,
         .bus_commit_properties = bus_slice_commit_properties,
 
+        .enumerate = slice_enumerate,
+
         .status_message_formats = {
                 .finished_start_job = {
                         [JOB_DONE]       = "Created slice %s.",
-                        [JOB_DEPENDENCY] = "Dependency failed for %s.",
                 },
                 .finished_stop_job = {
                         [JOB_DONE]       = "Removed slice %s.",

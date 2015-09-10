@@ -25,9 +25,11 @@
 #include <unistd.h>
 
 #include "util.h"
-#include "def.h"
 #include "killall.h"
 #include "set.h"
+#include "formats-util.h"
+#include "process-util.h"
+#include "terminal-util.h"
 
 #define TIMEOUT_USEC (10 * USEC_PER_SEC)
 
@@ -102,11 +104,11 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
                                 if (errno == ECHILD)
                                         break;
 
-                                log_error("waitpid() failed: %m");
+                                log_error_errno(errno, "waitpid() failed: %m");
                                 return;
                         }
 
-                        set_remove(pids, ULONG_TO_PTR(pid));
+                        (void) set_remove(pids, PID_TO_PTR(pid));
                 }
 
                 /* Now explicitly check who might be remaining, who
@@ -115,7 +117,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
 
                         /* We misuse getpgid as a check whether a
                          * process still exists. */
-                        if (getpgid((pid_t) PTR_TO_ULONG(p)) >= 0)
+                        if (getpgid(PTR_TO_PID(p)) >= 0)
                                 continue;
 
                         if (errno != ESRCH)
@@ -136,7 +138,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
                 if (k != SIGCHLD) {
 
                         if (k < 0 && errno != EAGAIN) {
-                                log_error("sigtimedwait() failed: %m");
+                                log_error_errno(errno, "sigtimedwait() failed: %m");
                                 return;
                         }
 
@@ -156,6 +158,7 @@ static int killall(int sig, Set *pids, bool send_sighup) {
 
         while ((d = readdir(dir))) {
                 pid_t pid;
+                int r;
 
                 if (d->d_type != DT_DIR &&
                     d->d_type != DT_UNKNOWN)
@@ -175,10 +178,13 @@ static int killall(int sig, Set *pids, bool send_sighup) {
                 }
 
                 if (kill(pid, sig) >= 0) {
-                        if (pids)
-                                set_put(pids, ULONG_TO_PTR(pid));
+                        if (pids) {
+                                r = set_put(pids, PID_TO_PTR(pid));
+                                if (r < 0)
+                                        log_oom();
+                        }
                 } else if (errno != ENOENT)
-                        log_warning("Could not kill %d: %m", pid);
+                        log_warning_errno(errno, "Could not kill %d: %m", pid);
 
                 if (send_sighup) {
                         /* Optionally, also send a SIGHUP signal, but
@@ -205,19 +211,19 @@ void broadcast_signal(int sig, bool wait_for_exit, bool send_sighup) {
         _cleanup_set_free_ Set *pids = NULL;
 
         if (wait_for_exit)
-                pids = set_new(trivial_hash_func, trivial_compare_func);
+                pids = set_new(NULL);
 
         assert_se(sigemptyset(&mask) == 0);
         assert_se(sigaddset(&mask, SIGCHLD) == 0);
         assert_se(sigprocmask(SIG_BLOCK, &mask, &oldmask) == 0);
 
         if (kill(-1, SIGSTOP) < 0 && errno != ESRCH)
-                log_warning("kill(-1, SIGSTOP) failed: %m");
+                log_warning_errno(errno, "kill(-1, SIGSTOP) failed: %m");
 
         killall(sig, pids, send_sighup);
 
         if (kill(-1, SIGCONT) < 0 && errno != ESRCH)
-                log_warning("kill(-1, SIGCONT) failed: %m");
+                log_warning_errno(errno, "kill(-1, SIGCONT) failed: %m");
 
         if (wait_for_exit)
                 wait_for_children(pids, &mask);

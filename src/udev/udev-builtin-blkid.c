@@ -20,8 +20,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
-#include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -34,8 +32,7 @@
 #include "efivars.h"
 #include "udev.h"
 
-static void print_property(struct udev_device *dev, bool test, const char *name, const char *value)
-{
+static void print_property(struct udev_device *dev, bool test, const char *name, const char *value) {
         char s[256];
 
         s[0] = '\0';
@@ -146,6 +143,11 @@ static int find_gpt_root(struct udev_device *dev, blkid_probe pr, bool test) {
 
                 if (sd_id128_equal(type, GPT_ESP)) {
                         sd_id128_t id, esp;
+                        unsigned long long flags;
+
+                        flags = blkid_partition_get_flags(pp);
+                        if (flags & GPT_FLAG_NO_AUTO)
+                                continue;
 
                         /* We found an ESP, let's see if it matches
                          * the ESP we booted from. */
@@ -182,8 +184,7 @@ static int find_gpt_root(struct udev_device *dev, blkid_probe pr, bool test) {
         return 0;
 }
 
-static int probe_superblocks(blkid_probe pr)
-{
+static int probe_superblocks(blkid_probe pr) {
         struct stat st;
         int rc;
 
@@ -215,8 +216,7 @@ static int probe_superblocks(blkid_probe pr)
         return blkid_do_safeprobe(pr);
 }
 
-static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool test)
-{
+static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool test) {
         const char *root_partition;
         int64_t offset = 0;
         bool noraid = false;
@@ -224,6 +224,7 @@ static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool t
         blkid_probe pr;
         const char *data;
         const char *name;
+        const char *prtype = NULL;
         int nvals;
         int i;
         int err = 0;
@@ -259,14 +260,15 @@ static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool t
         blkid_probe_set_superblocks_flags(pr,
                 BLKID_SUBLKS_LABEL | BLKID_SUBLKS_UUID |
                 BLKID_SUBLKS_TYPE | BLKID_SUBLKS_SECTYPE |
-                BLKID_SUBLKS_USAGE | BLKID_SUBLKS_VERSION);
+                BLKID_SUBLKS_USAGE | BLKID_SUBLKS_VERSION |
+                BLKID_SUBLKS_BADCSUM);
 
         if (noraid)
                 blkid_probe_filter_superblocks_usage(pr, BLKID_FLTR_NOTIN, BLKID_USAGE_RAID);
 
         fd = open(udev_device_get_devnode(dev), O_RDONLY|O_CLOEXEC);
         if (fd < 0) {
-                fprintf(stderr, "error: %s: %m\n", udev_device_get_devnode(dev));
+                err = log_debug_errno(errno, "Failure opening block device %s: %m", udev_device_get_devnode(dev));
                 goto out;
         }
 
@@ -274,13 +276,22 @@ static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool t
         if (err < 0)
                 goto out;
 
-        log_debug("probe %s %sraid offset=%"PRIu64,
+        log_debug("probe %s %sraid offset=%"PRIi64,
                   udev_device_get_devnode(dev),
                   noraid ? "no" : "", offset);
 
         err = probe_superblocks(pr);
         if (err < 0)
                 goto out;
+        if (blkid_probe_has_value(pr, "SBBADCSUM")) {
+                if (!blkid_probe_lookup_value(pr, "TYPE", &prtype, NULL))
+                        log_warning("incorrect %s checksum on %s",
+                                    prtype, udev_device_get_devnode(dev));
+                else
+                        log_warning("incorrect checksum on %s",
+                                    udev_device_get_devnode(dev));
+                goto out;
+        }
 
         /* If we are a partition then our parent passed on the root
          * partition UUID to us */
@@ -317,6 +328,6 @@ out:
 const struct udev_builtin udev_builtin_blkid = {
         .name = "blkid",
         .cmd = builtin_blkid,
-        .help = "filesystem and partition probing",
+        .help = "Filesystem and partition probing",
         .run_once = true,
 };
