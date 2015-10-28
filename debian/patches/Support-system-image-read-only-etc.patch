@@ -11,14 +11,14 @@ Forwarded: OMGno, this is a rather nasty hack until we fix system-image to get a
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
  src/hostname/hostnamed.c | 27 +++++++++++++++++++++++----
- src/timedate/timedated.c | 35 +++++++++++++++++++++++++++--------
- 2 files changed, 50 insertions(+), 12 deletions(-)
+ src/timedate/timedated.c | 31 +++++++++++++++++++++++++------
+ 2 files changed, 48 insertions(+), 10 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index a78516c..5c711f4 100644
+index dd508ae..ff514af 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -76,6 +76,25 @@ static void context_free(Context *c) {
+@@ -74,6 +74,25 @@ static void context_free(Context *c) {
          bus_verify_polkit_async_registry_free(c->polkit_registry);
  }
  
@@ -44,7 +44,7 @@ index a78516c..5c711f4 100644
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -300,12 +319,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -297,12 +316,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -59,7 +59,7 @@ index a78516c..5c711f4 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -351,13 +370,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -348,13 +367,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -76,11 +76,11 @@ index a78516c..5c711f4 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 552a2f9..b637910 100644
+index dcd8a38..8edcd60 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -155,13 +155,32 @@ static int symlink_or_copy_atomic(const char *from, const char *to) {
-         return r;
+@@ -176,6 +176,25 @@ static int context_read_data(Context *c) {
+         return 0;
  }
  
 +/* Hack for Ubuntu phone: check if path is an existing symlink to
@@ -102,27 +102,10 @@ index 552a2f9..b637910 100644
 +        return result;
 +}
 +
- static int context_read_data(Context *c) {
-         _cleanup_free_ char *t = NULL;
-         int r;
- 
-         assert(c);
- 
--        r = readlink_malloc("/etc/localtime", &t);
-+        r = readlink_malloc(writable_filename("/etc/localtime"), &t);
-         if (r < 0) {
-                 if (r == -EINVAL)
-                         log_debug("/etc/localtime should be a symbolic link to a time zone data file in /usr/share/zoneinfo/.");
-@@ -183,7 +202,7 @@ static int context_read_data(Context *c) {
-                 }
-         }
- 
--        r = read_one_line_file("/etc/timezone", &c->zone);
-+        r = read_one_line_file(writable_filename("/etc/timezone"), &c->zone);
-         if (r < 0) {
-                 if (r != -ENOENT)
-                         log_warning("Failed to read /etc/timezone: %s", strerror(-r));
-@@ -207,10 +226,10 @@ static int context_write_data_timezone(Context *c) {
+ static int context_write_data_timezone(Context *c) {
+         _cleanup_free_ char *p = NULL;
+         int r = 0;
+@@ -184,10 +203,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -135,7 +118,7 @@ index 552a2f9..b637910 100644
                          r = -errno;
  
                  return r;
-@@ -220,12 +239,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -197,12 +216,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -151,7 +134,7 @@ index 552a2f9..b637910 100644
                  if (r < 0)
                          return r;
          }
-@@ -277,7 +296,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -254,7 +273,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

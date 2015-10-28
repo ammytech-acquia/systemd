@@ -1,25 +1,106 @@
-systemd (225-1ubuntu9) wily; urgency=medium
+systemd (227-2ubuntu1) xenial; urgency=medium
 
-  * debian/tests/logind: Ignore non-zero exit code of shutdown -c in the new
-    "scheduled shutdown" check. This sometimes happens, fails the test, and
-    isn't terribly important. Ignore the exit code for now.
+  * Merge with Debian unstable. Remaining Ubuntu changes:
+    - Hack to support system-image read-only /etc, and modify files in
+      /etc/writable/ instead.
+    - Simpler udev maintainer scripts (all platforms must support udev, no
+      debconf).
+    - initramfs init-bottom: If LVM is installed, settle udev,
+      otherwise we get missing LV symlinks. Workaround for LP #1185394.
+    - Add debian/udev.lvm2.init: Dummy SysV init script to satisfy insserv
+      dependencies to "lvm2" which is handled with udev rules in Ubuntu.
+    - Add debian/udev.lvm2.service to avoid running the dummy lvm2 init
+      script.
+    - Provide shutdown fallback for upstart. (LP: #1370329)
+    - debian/extra/ifup@.service: Additionally run for "auto" class. We don't
+      really support "allow-hotplug" in Ubuntu at the moment, so we need to
+      deal with "auto" devices appearing after "/etc/init.d/networking start"
+      already ran. (LP: #1374521)
+    - ifup@.service: Drop dependency on networking.service (i. e.
+      /etc/init.d/networking), and merely ensure that /run/network exists.
+      This avoids unnecessary dependencies/waiting during boot and dependency
+      cycles if hooks wait for other interfaces to come up (like ifenslave
+      with bonding interfaces). (LP: #1414544)
+    - Add Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch: In
+      Ubuntu we currently keep the setting whether the RTC is in local or UTC
+      time in /etc/default/rcS "UTC=yes|no", instead of /etc/adjtime.
+      (LP: #1377258)
+    - networkd: Change IPForward= default to "kernel". This keeps
+      compatibility with lots of packages which expect to be able to
+      enable global forwarding in /proc/sys/net/ipv4/ip_forward.
+      (LP: #1500992)
+    - Put session scopes into all cgroup controllers. This makes unprivileged
+      user LXC containers work under systemd. (LP: #1346734)
+    - Don't attempt to migrate pid 1 itself when migrating cgroups for started
+      units; works around some not yet understood cgproxy/systemd interaction.
+      This particularly unbreaks cgproxy in LXC. (LP: #1491557)
+    - Lower Breaks: to plymouth version which has the udev inotify fix in
+      Ubuntu.
+    - Change systemd-sysv's conflicts to upstart-sysv. (LP: #1422681)
+    - Don't build new systemd-journal-remote package and drop
+      libmicrohttpd-dev. This is blocked by the MIR (LP #1488341).
+    - Build using libseccomp on all architectures (See Debian #800818)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 15 Oct 2015 13:34:18 +0200
+    Upgrade fixes, keep until 16.04 LTS release:
+    - systemd Conflicts/Replaces/Provides systemd-services.
+    - Remove obsolete systemd-logind upstart job.
+    - Clean up obsolete /etc/udev/rules.d/README.
+    - systemd.postinst: Migrate mountall specific fstab options to standard
+      util-linux "nofail" option.
+    - systemctl: Don't forward telinit u to upstart. This works around
+      upstart's Restart() always reexec'ing /sbin/init on Restart(), even if
+      that changes to point to systemd during the upgrade. This avoids running
+      systemd during a dist-upgrade. (LP: #1430479)
 
-systemd (225-1ubuntu8) wily; urgency=medium
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 28 Oct 2015 09:46:04 +0100
 
-  * logind: Fix another crash when setting wall messages on timed shutdown.
-    (LP: #1495178)
+systemd (227-3) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
   * debian/tests/logind: Add tests for scheduled shutdown with and without
     wall message.
+  * Import upstream fix for not unmounting system mounts (#801361) and drop
+    our revert patch.
+  * debian/tests/boot-smoke: Apply check for failed unmounts only to user
+    systemd processes, i. e. not to pid 1.
+  * Drop Fix-usr-remount-failure-for-split-usr.patch. Jessie has a new enough
+    initramfs-tools already, and this was just an error message, not breaking
+    the boot.
+  * Drop debian-fixup.service in favor of using a tmpfiles.d clause, which is
+    faster.
+  * Drop Order-remote-fs.target-after-local-fs.target.patch. It's mostly
+    academic and only applies to the already known-broken situation that rcS
+    init.d scripts depend on $remote_fs.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 15 Oct 2015 08:10:36 +0200
+  [ Michael Biebl ]
+  * Drop dependency on udev from the systemd package. We don't need udev
+    within a container, so this allows us to trim down the footprint by not
+    installing the udev package.
 
-systemd (225-1ubuntu7) wily; urgency=medium
+ -- Martin Pitt <mpitt@debian.org>  Tue, 13 Oct 2015 11:03:21 +0200
 
-  * Don't restart logind on upgrades any more. This kills X.org (#798097)
-    while logind doesn't save/restore its open fds (issue #1163), and also
-    gets confused about being idle in between (LP: #1473800)
+systemd (227-2) unstable; urgency=medium
+
+  * Revert "sd_pid_notify_with_fds: fix computing msg_controllen", it causes
+    connection errors from various services on boot. (Closes: #801354)
+  * debian/tests/boot-smoke: Check for failed unmounts. This reproduces
+    #801361 (but not in a minimal VM, just in a desktop one).
+  * Revert "core: add a "Requires=" dependency between units and the
+    slices they are located in". This causes user systemd instances to try and
+    unmount system mounts (and succeed if you login as root).
+    (Closes: #801361)
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 09 Oct 2015 12:34:27 +0200
+
+systemd (227-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Bump watchdog timeout for shipped units to 3 min. (Closes: #776460)
+    - gpt-auto-generator: Check fstab for /boot entries. (Closes: #797326)
+    - Fix group of RuntimeDirectory dirs. (Closes: #798391)
+    - Support %i (and other macros) in RuntimeDirectory. (Closes: #799324)
+    - Bump util-linux/libmount-dev dependencies to >= 2.27.
+  * debian/libsystemd0.symbols: Add new symbols for this release.
   * debian/extra/initramfs-tools/hooks/udev: Copy all
     /etc/udev/rules.d/*.rules rules which are not merely overriding the one in
     /lib/, not just 70-persistent-net.rules.  They might contain network names
@@ -29,68 +110,63 @@ systemd (225-1ubuntu7) wily; urgency=medium
     interfaces, but contains the safeguard for NFS or other network file
     systems. Isolating emergency.target still keeps working as before as well,
     as this also stops networking.service. (Closes: #761909, LP: #1492546)
-  * networkd: Change IPForward= default to "kernel". This keeps compatibility
-    with lots of packages which expect to be able to enable global forwarding
-    in /proc/sys/net/ipv4/ip_forward. (LP: #1500992)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 05 Oct 2015 15:53:26 +0200
+ -- Martin Pitt <mpitt@debian.org>  Thu, 08 Oct 2015 11:34:35 +0200
 
-systemd (225-1ubuntu6) wily; urgency=medium
+systemd (226-4) unstable; urgency=medium
 
-  * Build using libseccomp on all architectures.
-
- -- Matthias Klose <doko@ubuntu.com>  Sat, 03 Oct 2015 21:06:07 +0200
-
-systemd (225-1ubuntu5) wily; urgency=medium
-
-  * Add microphone mute keymap for Dell Precision. (LP: #1494135)
-  * Fix logind crash when setting wall messages (on timed shutdown).
-    (LP: #1495178)
-  * udev.postinst: Actually call upgrade_fixes(), so that the "disable
-    persistent names on upgrades" quirk actually runs.
+  * debian/tests/logind: Be more verbose on failures.
   * Revert networkd calling if-{up,post-down}.d/ scripts. About half of the
     existing hooks are not relevant or even actively detrimental when running
     with networkd. For the relevant ones, a lot of them should be fixed in the
     projects themselves (using IP_FREEBIND etc.). (Closes: #798625)
   * Add systemd-networkd-resolvconf-update.{path,service} units to send DNS
     server updates from networkd to resolvconf, if installed and enabled.
+  * Don't restart logind on upgrades any more. This kills X.org (#798097)
+    while logind doesn't save/restore its open fds (issue #1163), and also
+    gets confused about being idle in between (LP: #1473800)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 30 Sep 2015 15:37:09 +0200
+ -- Martin Pitt <mpitt@debian.org>  Fri, 02 Oct 2015 13:44:28 +0200
 
-systemd (225-1ubuntu4) wily; urgency=medium
+systemd (226-3) unstable; urgency=medium
 
-  * Rename 01-mac-for-usb.link to 90-mac-for-usb.link so that it becomes
-    easier to override.
-  * debian-fixup.service just has one purpose now (make /etc/mtab a symlink),
-    so drop the debian/extra/debian-fixup shell script and put the ln command
-    directly into debian-fixup.service. Update the description.
-  * Rework networkd ifupdown integration: Drop networkd-if-up.d@.service and
-    its invocation from net.agent again. It does not work when restarting
-    networkd and requires too much overhead. Instead, add a suid root helper
-    systemd-networkd-dispatcher which calls run-parts, and patch networkd to
-    run the wrapper at the appropriate time.
-  * debian/tests/networkd: Check that /etc/resolv.conf gets the DHCP's
-    nameserver in case it is a symlink (i. e. dynamically managed by
-    systemd-resolved or resolvconf).
-  * systemd-networkd-dispatcher: Also pass on the DNS server list to if-up.d/
-    as $IF_DNS_NAMESERVERS, so that resolvconf or similar programs work as
-    expected.
-  * Fix shutdown with specifying a time.
+  [ Martin Pitt ]
+  * README.Debian: Fix "other" typo. Thanks Salvatore Bonaccorso.
+    (Closes: #798737)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 09 Sep 2015 17:08:50 +0200
+  [ Michael Biebl ]
+  * Stop building the compat library packages and drop them for good.
+  * Update debian/copyright.
 
-systemd (225-1ubuntu3) wily; urgency=medium
+ -- Michael Biebl <biebl@debian.org>  Sat, 19 Sep 2015 19:06:51 +0200
 
+systemd (226-2) unstable; urgency=medium
+
+  * debian/udev.init: Mount /dev file system with nosuid. (LP: #1450960)
+  * udev.postinst: udev 226 introduced predictable interface names for virtio.
+    Create /etc/systemd/network/50-virtio-kernel-names.link on upgrade to
+    disable this, to avoid changing e. g. "eth0" to "ens3" in QEMU instances
+    and similar environments. (Closes: #799034)
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 15 Sep 2015 15:21:09 +0200
+
+systemd (226-1) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * New upstream release:
+    - Fix scheduled shutdown to not shut down immediately. (Closes: #797763)
+    - Fix description of CPE_NAME in os-release(5). (Closes: #797768)
+  * debian/libsystemd0.symbols: Add new symbols from this release.
   * Enable libseccomp support for mips64, mips64el, and x32. (Closes: #797403)
   * debian/tests/networkd: Add hotplug tests.
   * Make networkd call if-up.d/ scripts when it brings up interfaces, to
     become compatible with ifupdown and NetworkManager for packages shipping
     hooks. (LP: #1492129)
-    - Add debian/extra/units/networkd-if-up.d@.service: Wait for a particular
-      interface to be up, and call if-up.d/ for it if it is managed by
-      networkd. Correspondingly, call if-post-down.d/ scripts when stopping.
-    - debian/extra/udev-helpers/net.agent: Start/stop
-      networkd-if-up.d@.service when interfaces appear/go away.
+    - Add debian/extra/systemd-networkd-dispatcher.c: suid root wrapper for
+      calling if-up.d/ or if-post-down.d/ hook scripts. Install it as
+      root:systemd-networkd 4754 so that only networkd can run it.
+    - Add networkd-call-systemd-networkd-dispatcher-when-links.patch: Call the
+      above wrapper when links go up/down.
     - debian/tests/networkd: Verify that if-up.d/ and if-post-down.d/ scripts
       get run for a networkd managed interface.
     - Note that if-pre-up.d/ and if-down.d/ scripts are *not* being called, as
@@ -112,70 +188,27 @@ systemd (225-1ubuntu3) wily; urgency=medium
     journal, and suggest to uninstall system-log-daemon to avoid duplicate
     logging.
   * debian/README.Debian: Add documentation about networkd integration.
+  * Rename 01-mac-for-usb.link to 90-mac-for-usb.link so that it becomes
+    easier to override.
+  * debian-fixup.service just has one purpose now (make /etc/mtab a symlink),
+    so drop the debian/extra/debian-fixup shell script and put the ln command
+    directly into debian-fixup.service. Update the description.
+  * debian/tests/networkd: Check that /etc/resolv.conf gets the DHCP's
+    nameserver in case it is a symlink (i. e. dynamically managed by
+    systemd-resolved or resolvconf).
+  * systemd-networkd-dispatcher: Also pass on the DNS server list to if-up.d/
+    as $IF_DNS_NAMESERVERS, so that resolvconf or similar programs work as
+    expected.
+  * Drop debian/systemd-journal-remote.postrm: Removing system users is
+    potentially dangerous (there might be a leftover process after purging).
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 09 Sep 2015 07:56:03 +0200
+  [ Michael Biebl ]
+  * Drop libsystemd-login-dev. All reverse dependencies have been updated to
+    use libsystemd-dev directly.
+  * Update build instructions to use "gbp clone" instead of "gbp-clone" as all
+    gbp-* commands have been removed from git-buildpackage.
 
-systemd (225-1ubuntu2) wily; urgency=medium
-
-  * Ignore init when doing cg_migrate_everywhere.  Otherwise, inside a
-    container using lxcfs, init can get trapped in the slice, and there's
-    simply no reason to do this in the first place. (LP: #1491557)
-
- -- Serge Hallyn <serge.hallyn@ubuntu.com>  Wed, 02 Sep 2015 10:58:51 -0500
-
-systemd (225-1ubuntu1) wily; urgency=medium
-
-  * Merge with Debian unstable (FFE: LP: #1489702). Remaining Ubuntu changes:
-    - Hack to support system-image read-only /etc, and modify files in
-      /etc/writable/ instead.
-    - Keep our much simpler udev maintainer scripts (all platforms must
-      support udev, no debconf).
-    - initramfs init-bottom: If LVM is installed, settle udev,
-      otherwise we get missing LV symlinks. Workaround for LP #1185394.
-    - Add debian/udev.lvm2.init: Dummy SysV init script to satisfy insserv
-      dependencies to "lvm2" which is handled with udev rules in Ubuntu.
-    - Add debian/udev.lvm2.service to avoid running the dummy lvm2 init
-      script.
-    - Provide shutdown fallback for upstart. (LP: #1370329)
-    - debian/extra/ifup@.service: Additionally run for "auto" class. We don't
-      really support "allow-hotplug" in Ubuntu at the moment, so we need to
-      deal with "auto" devices appearing after "/etc/init.d/networking start"
-      already ran. (LP: #1374521)
-    - ifup@.service: Drop dependency on networking.service (i. e.
-      /etc/init.d/networking), and merely ensure that /run/network exists.
-      This avoids unnecessary dependencies/waiting during boot and dependency
-      cycles if hooks wait for other interfaces to come up (like ifenslave
-      with bonding interfaces). (LP: #1414544)
-    - Add Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch: In
-      Ubuntu we currently keep the setting whether the RTC is in local or UTC
-      time in /etc/default/rcS "UTC=yes|no", instead of /etc/adjtime.
-      (LP: #1377258)
-    - Put session scopes into all cgroup controllers. This makes unprivileged
-      user LXC containers work under systemd. (LP: #1346734)
-    - systemctl: Don't forward telinit u to upstart. This works around
-      upstart's Restart() always reexec'ing /sbin/init on Restart(), even if
-      that changes to point to systemd during the upgrade. This avoids running
-      systemd during a dist-upgrade. (LP: #1430479)
-    - Drop hwdb-update dependency from udev-trigger.service, which got
-      introduced in v219-stable. This causes udev and plymouth to start too
-      late and isn't really needed in Ubuntu yet as we don't support stateless
-      systems yet and handle hwdb.bin updates through dpkg triggers. This can
-      be dropped again with initramfs-tools 0.117.
-    - Lower Breaks: to plymouth version which has the udev inotify fix in
-      Ubuntu.
-    - Change systemd-sysv's conflicts to upstart-sysv. (LP: #1422681)
-    - Don't build new systemd-journal-remote package and drop
-      libmicrohttpd-dev. This is blocked by the MIR (LP #1488341) and feature
-      freeze.
-
-    Upgrade fixes, keep until 16.04 LTS release:
-    - systemd Conflicts/Replaces/Provides systemd-services.
-    - Remove obsolete systemd-logind upstart job.
-    - Clean up obsolete /etc/udev/rules.d/README.
-    - systemd.postinst: Migrate mountall specific fstab options to standard
-      util-linux "nofail" option.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 01 Sep 2015 14:19:33 +0200
+ -- Martin Pitt <mpitt@debian.org>  Thu, 10 Sep 2015 16:53:53 +0200
 
 systemd (225-1) unstable; urgency=medium
 

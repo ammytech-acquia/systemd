@@ -28,11 +28,11 @@ Forwarded: https://github.com/systemd/systemd/pull/1056
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index e00fe3f..4aca341 100644
+index 4a7f546..3050680 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
-@@ -1857,7 +1857,7 @@ int cg_migrate_everywhere(CGroupControllerMask supported, const char *from, cons
-         int r;
+@@ -1968,7 +1968,7 @@ int cg_migrate_everywhere(CGroupMask supported, const char *from, const char *to
+         int r = 0, unified;
  
          if (!path_equal(from, to))  {
 -                r = cg_migrate_recursive(SYSTEMD_CGROUP_CONTROLLER, from, SYSTEMD_CGROUP_CONTROLLER, to, false, true);
@@ -40,12 +40,12 @@ index e00fe3f..4aca341 100644
                  if (r < 0)
                          return r;
          }
-@@ -1872,7 +1872,7 @@ int cg_migrate_everywhere(CGroupControllerMask supported, const char *from, cons
-                         if (!p)
-                                 p = to;
+@@ -1992,7 +1992,7 @@ int cg_migrate_everywhere(CGroupMask supported, const char *from, const char *to
+                 if (!p)
+                         p = to;
  
--                        cg_migrate_recursive_fallback(SYSTEMD_CGROUP_CONTROLLER, to, n, p, false, false);
-+                        cg_migrate_recursive_fallback(SYSTEMD_CGROUP_CONTROLLER, to, n, p, true, false);
-                 }
+-                (void) cg_migrate_recursive_fallback(SYSTEMD_CGROUP_CONTROLLER, to, cgroup_controller_to_string(c), p, false, false);
++                (void) cg_migrate_recursive_fallback(SYSTEMD_CGROUP_CONTROLLER, to, cgroup_controller_to_string(c), p, true, false);
+         }
  
-                 bit <<= 1;
+         return 0;
