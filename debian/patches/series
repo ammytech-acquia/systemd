@@ -1,8 +1,7 @@
 ## Cherry-picked from upstream
-login-fix-NULL-deref-on-wall_message.patch
-logind-make-scope-of-wall-message-handling-smaller.patch
-logind-when-parsing-a-boolean-via-sd-bus-the-type-mu.patch
-Add-microphone-mute-keymap-for-Dell-Precision.patch
+core-ignore-.slice-and-init.scope-when-isolating.patch
+sd-daemon-simply-code-simplification.patch
+sd-daemon-wipe-out-memory-before-using-CMSG_NXTHDR.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
@@ -16,7 +15,6 @@ Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 Fix-up-tmpfiles.d-permissions-properly.patch
 Revert-udev-network-device-renaming-immediately-give.patch
 Use-different-default-paths-for-various-binaries.patch
-Order-remote-fs.target-after-local-fs.target.patch
 insserv.conf-generator.patch
 Add-targets-for-compatibility-with-Debian-insserv-sy.patch
 Adjust-systemd-user-pam-config-file-for-Debian.patch
@@ -31,7 +29,6 @@ Re-enable-journal-forwarding-to-syslog.patch
 Disable-tests-which-fail-on-buildds.patch
 Make-sd_login_monitor_new-work-for-logind-without-sy.patch
 Don-t-enable-audit-by-default.patch
-Fix-usr-remount-failure-for-split-usr.patch
 util-Add-hidden-suffixes-for-ucf.patch
 Only-start-logind-if-dbus-is-installed.patch
 cgroup-don-t-trim-cgroup-trees-created-by-someone-el.patch
@@ -39,13 +36,13 @@ syslog-Increase-max_dgram_qlen-by-pulling-in-systemd.patch
 fsckd-daemon-for-inter-fsckd-communication.patch
 Skip-filesystem-check-if-already-done-by-the-initram.patch
 Revert-core-one-step-back-again-for-nspawn-we-actual.patch
+Revert-sd_pid_notify_with_fds-fix-computing-msg_cont.patch
 
 ## Ubuntu patches:
 Support-system-image-read-only-etc.patch
 Provide-shutdown-fallback-for-upstart.patch
-systemctl-Don-t-forward-telinit-u-to-upstart.patch
 Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch
 networkd-Change-IPForward-default-to-kernel.patch
 core-Put-session-scopes-into-all-cgroup-controllers.patch
-udev-trigger-Drop-hwdb-update-dependency.patch
 cg_migrate_everywhere-set-ignore_self-to-true.patch
+systemctl-Don-t-forward-telinit-u-to-upstart.patch

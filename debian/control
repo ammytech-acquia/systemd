@@ -41,7 +41,7 @@ Build-Depends: debhelper (>= 9.20141010),
                libgcrypt20-dev,
                libkmod-dev (>= 15),
                libblkid-dev (>= 2.24),
-               libmount-dev (>= 2.20),
+               libmount-dev (>= 2.27),
                libseccomp-dev (>= 1.0.0) [linux-any],
                python3:native,
                python3-lxml:native
@@ -60,10 +60,9 @@ Pre-Depends: ${shlibs:Pre-Depends},
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
-         util-linux (>= 2.26.2-3),
+         util-linux (>= 2.27),
          mount (>= 2.26),
          sysv-rc,
-         udev,
          adduser,
          libcap2-bin
 Breaks: lvm2 (<< 2.02.104-1),
@@ -243,36 +242,6 @@ Description: systemd utility library - development files
  .
  This package contains the development files.
 
-Package: libsystemd-login-dev
-Architecture: linux-any
-Multi-Arch: same
-Section: oldlibs
-Priority: extra
-Depends: ${misc:Depends},
-         libsystemd-dev (>= ${binary:Version})
-Description: systemd login utility library (transitional package)
- The libsystemd-login library provides an interface for the
- systemd-logind service which is used to track user sessions and seats.
- .
- This is a compatibility package which provides a .pc file for the old library
- name. That way, packages can be rebuilt against the new libsystemd library
- without requiring changes to existing configure scripts.
-
-Package: libsystemd-daemon-dev
-Architecture: linux-any
-Multi-Arch: same
-Section: oldlibs
-Priority: extra
-Depends: ${misc:Depends},
-         libsystemd-dev (>= ${binary:Version})
-Description: systemd utility library (transitional package)
- The sd-daemon library provides a reference implementation of various
- APIs for new-style daemons, as implemented by the systemd init system.
- .
- This is a compatibility package which provides a .pc file for the old library
- name. That way, packages can be rebuilt against the new libsystemd library
- without requiring changes to existing configure scripts.
-
 Package: udev
 Section: admin
 Priority: important
@@ -284,7 +253,7 @@ Depends: ${shlibs:Depends},
          adduser,
          libudev1 (= ${binary:Version}),
          lsb-base (>= 3.0-6),
-         util-linux (>= 2.25),
+         util-linux (>= 2.27),
          s390-tools (>> 1.6.2) [s390],
          procps
 Breaks: consolekit (<< 0.4.6-1),

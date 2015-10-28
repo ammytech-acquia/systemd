@@ -16,7 +16,7 @@ ifneq (,$(findstring noudeb,$(DEB_BUILD_OPTIONS)))
 export DEB_BUILD_PROFILES += noudeb
 endif
 
-# blocked by MIR LP #1488341 and wily FF
+# blocked by MIR LP #1488341
 export DH_OPTIONS += -Nsystemd-journal-remote
 
 CONFFLAGS = \
@@ -28,6 +28,7 @@ CONFFLAGS = \
 	--with-debug-shell=/bin/bash \
 	--with-telinit=/lib/sysvinit/telinit \
 	--enable-split-usr \
+	--disable-compat-libs \
 	--disable-qrencode \
 	--disable-libidn \
 	--disable-elfutils \
@@ -44,7 +45,6 @@ CONFFLAGS = \
 
 CONFFLAGS_deb = \
 	--enable-selinux \
-	--enable-compat-libs \
 	--enable-hwdb \
 	--enable-efi \
 	PYTHON=python3
@@ -166,14 +166,9 @@ override_dh_install:
 		-name ldconfig.service -o \
 		-name etc.conf \) -delete
 	rm -rf debian/install/*/usr/share/factory/
-	# remove deprecated compatibility libraries
-	rm -f debian/install/*/usr/lib/*/pkgconfig/libsystemd-journal.pc
-	rm -f debian/install/*/usr/lib/*/pkgconfig/libsystemd-id128.pc
-	rm -f debian/install/*/usr/lib/*/libsystemd-*.so
-	rm -f debian/install/*/lib/*/libsystemd-*.so.*
 	# remove symlinks enabling default-on services
 	rm -rf debian/install/*/etc/systemd/system/*.target.wants/
-	# blocked by MIR/FF in Ubuntu
+	# blocked by MIR in Ubuntu
 	rm -rf debian/install/*/lib/systemd/systemd-journal-upload
 	rm -rf debian/install/*/lib/systemd/system/systemd-journal-upload*
 	rm -rf debian/install/*/etc/systemd/journal-upload.conf
@@ -239,7 +234,7 @@ ifeq (, $(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 endif
 
 override_dh_installinit:
-	dh_installinit -R --no-start
+	dh_installinit --no-start
 	dh_installinit --name=lvm2 --no-start
 	# the following are only upstart jobs
 	dh_installinit --name=udevtrigger --noscripts

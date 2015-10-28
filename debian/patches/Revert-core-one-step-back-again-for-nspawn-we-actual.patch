@@ -10,26 +10,35 @@ Bug-Debian: https://bugs.debian.org/784720
 Bug-Ubuntu: https://launchpad.net/bugs/1448259
 Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
 ---
- src/core/unit.c | 10 +---------
- 1 file changed, 1 insertion(+), 9 deletions(-)
+ src/core/unit.c | 19 +------------------
+ 1 file changed, 1 insertion(+), 18 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 43a5ca1..43ef153 100644
+index 33c0317..74a9e22 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -3588,15 +3588,7 @@ int unit_kill_context(
-                                 log_unit_warning_errno(u, r, "Failed to kill control group: %m");
-                 } else if (r > 0) {
+@@ -3537,24 +3537,7 @@ int unit_kill_context(
+                                 log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", u->cgroup_path);
  
--                        /* FIXME: For now, we will not wait for the
--                         * cgroup members to die, simply because
--                         * cgroup notification is unreliable. It
--                         * doesn't work at all in containers, and
--                         * outside of containers it can be confused
--                         * easily by leaving directories in the
--                         * cgroup. */
+                 } else if (r > 0) {
 -
--                        /* wait_for_exit = true; */
+-                        /* FIXME: For now, on the legacy hierarchy, we
+-                         * will not wait for the cgroup members to die
+-                         * if we are running in a container or if this
+-                         * is a delegation unit, simply because cgroup
+-                         * notification is unreliable in these
+-                         * cases. It doesn't work at all in
+-                         * containers, and outside of containers it
+-                         * can be confused easily by left-over
+-                         * directories in the cgroup -- which however
+-                         * should not exist in non-delegated units. On
+-                         * the unified hierarchy that's different,
+-                         * there we get proper events. Hence rely on
+-                         * them.*/
+-
+-                        if  (cg_unified() > 0 ||
+-                             (detect_container() == 0 && !unit_cgroup_delegate(u)))
+-                                wait_for_exit = true;
 +                        wait_for_exit = true;
  
                          if (c->send_sighup && k != KILL_KILL) {
