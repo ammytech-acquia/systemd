@@ -25,6 +25,15 @@ typedef struct Automount Automount;
 
 #include "unit.h"
 
+typedef enum AutomountState {
+        AUTOMOUNT_DEAD,
+        AUTOMOUNT_WAITING,
+        AUTOMOUNT_RUNNING,
+        AUTOMOUNT_FAILED,
+        _AUTOMOUNT_STATE_MAX,
+        _AUTOMOUNT_STATE_INVALID = -1
+} AutomountState;
+
 typedef enum AutomountResult {
         AUTOMOUNT_SUCCESS,
         AUTOMOUNT_FAILURE_RESOURCES,
@@ -38,7 +47,6 @@ struct Automount {
         AutomountState state, deserialized_state;
 
         char *where;
-        usec_t timeout_idle_usec;
 
         int pipe_fd;
         sd_event_source *pipe_event_source;
@@ -46,16 +54,16 @@ struct Automount {
         dev_t dev_id;
 
         Set *tokens;
-        Set *expire_tokens;
-
-        sd_event_source *expire_event_source;
 
         AutomountResult result;
 };
 
 extern const UnitVTable automount_vtable;
 
-int automount_update_mount(Automount *a, MountState old_state, MountState state);
+int automount_send_ready(Automount *a, int status);
+
+const char* automount_state_to_string(AutomountState i) _const_;
+AutomountState automount_state_from_string(const char *s) _pure_;
 
 const char* automount_result_to_string(AutomountResult i) _const_;
 AutomountResult automount_result_from_string(const char *s) _pure_;

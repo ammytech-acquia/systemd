@@ -19,6 +19,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+#include <fcntl.h>
+
 #include "hostname-setup.h"
 #include "util.h"
 
@@ -27,7 +32,7 @@ int main(int argc, char* argv[]) {
 
         r = hostname_setup();
         if (r < 0)
-                log_error_errno(r, "hostname: %m");
+                fprintf(stderr, "hostname: %s\n", strerror(-r));
 
         return 0;
 }

@@ -20,11 +20,12 @@
 ***/
 
 #include <assert.h>
-#include <errno.h>
-#include <qrencode.h>
-#include <stdbool.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
+#include <qrencode.h>
 
 #include "journal-qrcode.h"
 

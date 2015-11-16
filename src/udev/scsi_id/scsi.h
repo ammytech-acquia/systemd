@@ -10,8 +10,6 @@
  *        Free Software Foundation version 2 of the License.
  */
 
-#pragma once
-
 #include <scsi/scsi.h>
 
 struct scsi_ioctl_command {

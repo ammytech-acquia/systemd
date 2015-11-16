@@ -23,41 +23,27 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <inttypes.h>
+#include <stdbool.h>
 #include <netinet/in.h>
 
 #include "sd-event.h"
-#include "_sd-common.h"
-
-_SD_BEGIN_DECLARATIONS;
 
 typedef struct sd_dhcp_server sd_dhcp_server;
 
-int sd_dhcp_server_new(sd_dhcp_server **ret, int ifindex);
-
 sd_dhcp_server *sd_dhcp_server_ref(sd_dhcp_server *server);
 sd_dhcp_server *sd_dhcp_server_unref(sd_dhcp_server *server);
+
+int sd_dhcp_server_new(sd_dhcp_server **ret, int ifindex);
 
 int sd_dhcp_server_attach_event(sd_dhcp_server *client, sd_event *event, int priority);
 int sd_dhcp_server_detach_event(sd_dhcp_server *client);
 sd_event *sd_dhcp_server_get_event(sd_dhcp_server *client);
 
-int sd_dhcp_server_is_running(sd_dhcp_server *server);
+bool sd_dhcp_server_is_running(sd_dhcp_server *server);
 
 int sd_dhcp_server_start(sd_dhcp_server *server);
 int sd_dhcp_server_stop(sd_dhcp_server *server);
 
-int sd_dhcp_server_configure_pool(sd_dhcp_server *server, struct in_addr *address, unsigned char prefixlen, uint32_t offset, uint32_t size);
-
-int sd_dhcp_server_set_timezone(sd_dhcp_server *server, const char *timezone);
-int sd_dhcp_server_set_dns(sd_dhcp_server *server, const struct in_addr ntp[], unsigned n);
-int sd_dhcp_server_set_ntp(sd_dhcp_server *server, const struct in_addr dns[], unsigned n);
-
-int sd_dhcp_server_set_max_lease_time(sd_dhcp_server *server, uint32_t t);
-int sd_dhcp_server_set_default_lease_time(sd_dhcp_server *server, uint32_t t);
-
-int sd_dhcp_server_forcerenew(sd_dhcp_server *server);
-
-_SD_END_DECLARATIONS;
-
+int sd_dhcp_server_set_address(sd_dhcp_server *server, struct in_addr *address);
+int sd_dhcp_server_set_lease_pool(sd_dhcp_server *server, struct in_addr *start, size_t size);
 #endif

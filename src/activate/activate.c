@@ -19,29 +19,26 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <getopt.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
-#include <unistd.h>
+#include <getopt.h>
 
-#include "sd-daemon.h"
+#include <systemd/sd-daemon.h>
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "log.h"
-#include "macro.h"
-#include "signal-util.h"
 #include "socket-util.h"
-#include "string-util.h"
+#include "build.h"
+#include "log.h"
 #include "strv.h"
+#include "macro.h"
 
 static char** arg_listen = NULL;
 static bool arg_accept = false;
 static char** arg_args = NULL;
 static char** arg_setenv = NULL;
-static const char *arg_fdname = NULL;
 
 static int add_epoll(int epoll_fd, int fd) {
         struct epoll_event ev = {
@@ -54,8 +51,10 @@ static int add_epoll(int epoll_fd, int fd) {
 
         ev.data.fd = fd;
         r = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
-        if (r < 0)
-                return log_error_errno(errno, "Failed to add event on epoll fd:%d for fd:%d: %m", epoll_fd, fd);
+        if (r < 0) {
+                log_error("Failed to add event on epoll fd:%d for fd:%d: %m", epoll_fd, fd);
+                return -errno;
+        }
 
         return 0;
 }
@@ -66,8 +65,11 @@ static int open_sockets(int *epoll_fd, bool accept) {
         int count = 0;
 
         n = sd_listen_fds(true);
-        if (n < 0)
-                return log_error_errno(n, "Failed to read listening file descriptors from environment: %m");
+        if (n < 0) {
+                log_error("Failed to read listening file descriptors from environment: %s",
+                          strerror(-n));
+                return n;
+        }
         if (n > 0) {
                 log_info("Received %i descriptors via the environment.", n);
 
@@ -101,7 +103,8 @@ static int open_sockets(int *epoll_fd, bool accept) {
                 fd = make_socket_fd(LOG_DEBUG, *address, SOCK_STREAM | (arg_accept*SOCK_CLOEXEC));
                 if (fd < 0) {
                         log_open();
-                        return log_error_errno(fd, "Failed to open '%s': %m", *address);
+                        log_error("Failed to open '%s': %s", *address, strerror(-fd));
+                        return fd;
                 }
 
                 assert(fd == SD_LISTEN_FDS_START + count);
@@ -112,8 +115,10 @@ static int open_sockets(int *epoll_fd, bool accept) {
                 log_open();
 
         *epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-        if (*epoll_fd < 0)
-                return log_error_errno(errno, "Failed to create epoll object: %m");
+        if (*epoll_fd < 0) {
+                log_error("Failed to create epoll object: %m");
+                return -errno;
+        }
 
         for (fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + count; fd++) {
                 _cleanup_free_ char *name = NULL;
@@ -140,8 +145,8 @@ static int launch(char* name, char **argv, char **env, int fds) {
 
         length = strv_length(arg_setenv);
 
-        /* PATH, TERM, HOME, USER, LISTEN_FDS, LISTEN_PID, LISTEN_FDNAMES, NULL */
-        envp = new0(char *, length + 8);
+        /* PATH, TERM, HOME, USER, LISTEN_FDS, LISTEN_PID, NULL */
+        envp = new0(char *, length + 7);
         if (!envp)
                 return log_oom();
 
@@ -149,9 +154,7 @@ static int launch(char* name, char **argv, char **env, int fds) {
                 if (strchr(*s, '='))
                         envp[n_env++] = *s;
                 else {
-                        _cleanup_free_ char *p;
-
-                        p = strappend(*s, "=");
+                        _cleanup_free_ char *p = strappend(*s, "=");
                         if (!p)
                                 return log_oom();
                         envp[n_env] = strv_find_prefix(env, p);
@@ -170,37 +173,15 @@ static int launch(char* name, char **argv, char **env, int fds) {
             (asprintf((char**)(envp + n_env++), "LISTEN_PID=%d", getpid()) < 0))
                 return log_oom();
 
-        if (arg_fdname) {
-                char *e;
-
-                e = strappend("LISTEN_FDNAMES=", arg_fdname);
-                if (!e)
-                        return log_oom();
-
-                for (i = 1; i < (unsigned) fds; i++) {
-                        char *c;
-
-                        c = strjoin(e, ":", arg_fdname, NULL);
-                        if (!c) {
-                                free(e);
-                                return log_oom();
-                        }
-
-                        free(e);
-                        e = c;
-                }
-
-                envp[n_env++] = e;
-        }
-
         tmp = strv_join(argv, " ");
         if (!tmp)
                 return log_oom();
 
         log_info("Execing %s (%s)", name, tmp);
         execvpe(name, argv, envp);
+        log_error("Failed to execp %s (%s): %m", name, tmp);
 
-        return log_error_errno(errno, "Failed to execp %s (%s): %m", name, tmp);
+        return -errno;
 }
 
 static int launch1(const char* child, char** argv, char **env, int fd) {
@@ -215,30 +196,28 @@ static int launch1(const char* child, char** argv, char **env, int fd) {
         parent_pid = getpid();
 
         child_pid = fork();
-        if (child_pid < 0)
-                return log_error_errno(errno, "Failed to fork: %m");
+        if (child_pid < 0) {
+                log_error("Failed to fork: %m");
+                return -errno;
+        }
 
         /* In the child */
         if (child_pid == 0) {
-
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-
                 r = dup2(fd, STDIN_FILENO);
                 if (r < 0) {
-                        log_error_errno(errno, "Failed to dup connection to stdin: %m");
+                        log_error("Failed to dup connection to stdin: %m");
                         _exit(EXIT_FAILURE);
                 }
 
                 r = dup2(fd, STDOUT_FILENO);
                 if (r < 0) {
-                        log_error_errno(errno, "Failed to dup connection to stdout: %m");
+                        log_error("Failed to dup connection to stdout: %m");
                         _exit(EXIT_FAILURE);
                 }
 
                 r = close(fd);
                 if (r < 0) {
-                        log_error_errno(errno, "Failed to close dupped connection: %m");
+                        log_error("Failed to close dupped connection: %m");
                         _exit(EXIT_FAILURE);
                 }
 
@@ -252,7 +231,7 @@ static int launch1(const char* child, char** argv, char **env, int fd) {
                         _exit(EXIT_SUCCESS);
 
                 execvp(child, argv);
-                log_error_errno(errno, "Failed to exec child %s: %m", child);
+                log_error("Failed to exec child %s: %m", child);
                 _exit(EXIT_FAILURE);
         }
 
@@ -263,11 +242,11 @@ static int launch1(const char* child, char** argv, char **env, int fd) {
 
 static int do_accept(const char* name, char **argv, char **envp, int fd) {
         _cleanup_free_ char *local = NULL, *peer = NULL;
-        _cleanup_close_ int fd2 = -1;
+        int fd2;
 
         fd2 = accept(fd, NULL, NULL);
         if (fd2 < 0) {
-                log_error_errno(errno, "Failed to accept connection on fd:%d: %m", fd);
+                log_error("Failed to accept connection on fd:%d: %m", fd);
                 return fd2;
         }
 
@@ -296,11 +275,11 @@ static int install_chld_handler(void) {
 
         r = sigaction(SIGCHLD, &act, 0);
         if (r < 0)
-                log_error_errno(errno, "Failed to install SIGCHLD handler: %m");
+                log_error("Failed to install SIGCHLD handler: %m");
         return r;
 }
 
-static void help(void) {
+static int help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Listen on sockets and launch child on connection.\n\n"
                "Options:\n"
@@ -311,13 +290,15 @@ static void help(void) {
                "  --version                Print version string and exit\n"
                "\n"
                "Note: file descriptors from sd_listen_fds() will be passed through.\n"
-               , program_invocation_short_name);
+               , program_invocation_short_name
+               );
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
-                ARG_FDNAME,
         };
 
         static const struct option options[] = {
@@ -326,12 +307,11 @@ static int parse_argv(int argc, char *argv[]) {
                 { "listen",      required_argument, NULL, 'l'           },
                 { "accept",      no_argument,       NULL, 'a'           },
                 { "setenv",      required_argument, NULL, 'E'           },
-                { "environment", required_argument, NULL, 'E'           }, /* legacy alias */
-                { "fdname",      required_argument, NULL, ARG_FDNAME    },
+                { "environment", required_argument, NULL, 'E'           }, /* alias */
                 {}
         };
 
-        int c, r;
+        int c;
 
         assert(argc >= 0);
         assert(argv);
@@ -339,38 +319,32 @@ static int parse_argv(int argc, char *argv[]) {
         while ((c = getopt_long(argc, argv, "+hl:aE:", options, NULL)) >= 0)
                 switch(c) {
                 case 'h':
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
-                        return version();
+                        puts(PACKAGE_STRING);
+                        puts(SYSTEMD_FEATURES);
+                        return 0 /* done */;
 
-                case 'l':
-                        r = strv_extend(&arg_listen, optarg);
+                case 'l': {
+                        int r = strv_extend(&arg_listen, optarg);
                         if (r < 0)
-                                return log_oom();
+                                return r;
 
                         break;
+                }
 
                 case 'a':
                         arg_accept = true;
                         break;
 
-                case 'E':
-                        r = strv_extend(&arg_setenv, optarg);
+                case 'E': {
+                        int r = strv_extend(&arg_setenv, optarg);
                         if (r < 0)
-                                return log_oom();
+                                return r;
 
                         break;
-
-                case ARG_FDNAME:
-                        if (!fdname_is_valid(optarg)) {
-                                log_error("File descriptor name %s is not valid, refusing.", optarg);
-                                return -EINVAL;
-                        }
-
-                        arg_fdname = optarg;
-                        break;
+                }
 
                 case '?':
                         return -EINVAL;
@@ -380,7 +354,7 @@ static int parse_argv(int argc, char *argv[]) {
                 }
 
         if (optind == argc) {
-                log_error("%s: command to execute is missing.",
+                log_error("Usage: %s [OPTION...] PROGRAM [OPTION...]",
                           program_invocation_short_name);
                 return -EINVAL;
         }
@@ -421,7 +395,7 @@ int main(int argc, char **argv, char **envp) {
                         if (errno == EINTR)
                                 continue;
 
-                        log_error_errno(errno, "epoll_wait() failed: %m");
+                        log_error("epoll_wait() failed: %m");
                         return EXIT_FAILURE;
                 }
 

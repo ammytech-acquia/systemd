@@ -21,10 +21,11 @@
 
 #pragma once
 
-#include "libudev.h"
-
-#include "condition.h"
 #include "ethtool-util.h"
+
+#include "condition-util.h"
+#include "libudev.h"
+#include "util.h"
 #include "list.h"
 
 typedef struct link_config_ctx link_config_ctx;
@@ -33,13 +34,11 @@ typedef struct link_config link_config;
 typedef enum MACPolicy {
         MACPOLICY_PERSISTENT,
         MACPOLICY_RANDOM,
-        MACPOLICY_NONE,
         _MACPOLICY_MAX,
         _MACPOLICY_INVALID = -1
 } MACPolicy;
 
 typedef enum NamePolicy {
-        NAMEPOLICY_KERNEL,
         NAMEPOLICY_DATABASE,
         NAMEPOLICY_ONBOARD,
         NAMEPOLICY_SLOT,
@@ -53,10 +52,9 @@ struct link_config {
         char *filename;
 
         struct ether_addr *match_mac;
-        char **match_path;
-        char **match_driver;
-        char **match_type;
-        char **match_name;
+        char *match_path;
+        char *match_driver;
+        char *match_type;
         Condition *match_host;
         Condition *match_virt;
         Condition *match_kernel;
@@ -68,8 +66,8 @@ struct link_config {
         NamePolicy *name_policy;
         char *name;
         char *alias;
-        size_t mtu;
-        size_t speed;
+        unsigned int mtu;
+        unsigned int speed;
         Duplex duplex;
         WakeOnLan wol;
 

@@ -22,7 +22,6 @@
 ***/
 
 #include "sd-bus.h"
-
 #include "unit.h"
 #include "kill.h"
 

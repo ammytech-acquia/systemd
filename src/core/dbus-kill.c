@@ -19,10 +19,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "bus-util.h"
-#include "dbus-kill.h"
 #include "kill.h"
-#include "signal-util.h"
+#include "dbus-kill.h"
+#include "bus-util.h"
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_kill_mode, kill_mode, KillMode);
 

@@ -23,6 +23,15 @@
 
 typedef struct Slice Slice;
 
+#include "unit.h"
+
+typedef enum SliceState {
+        SLICE_DEAD,
+        SLICE_ACTIVE,
+        _SLICE_STATE_MAX,
+        _SLICE_STATE_INVALID = -1
+} SliceState;
+
 struct Slice {
         Unit meta;
 
@@ -32,3 +41,6 @@ struct Slice {
 };
 
 extern const UnitVTable slice_vtable;
+
+const char* slice_state_to_string(SliceState i) _const_;
+SliceState slice_state_from_string(const char *s) _pure_;

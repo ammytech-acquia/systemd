@@ -24,28 +24,17 @@
 #include <stdbool.h>
 
 #include "sd-bus.h"
+#include "time-util.h"
 
 struct sd_bus_creds {
         bool allocated;
         unsigned n_ref;
-
         uint64_t mask;
-        uint64_t augmented;
 
         uid_t uid;
-        uid_t euid;
-        uid_t suid;
-        uid_t fsuid;
         gid_t gid;
-        gid_t egid;
-        gid_t sgid;
-        gid_t fsgid;
-
-        gid_t *supplementary_gids;
-        unsigned n_supplementary_gids;
-
-        pid_t ppid;
         pid_t pid;
+        usec_t pid_starttime;
         pid_t tid;
 
         char *comm;
@@ -61,11 +50,9 @@ struct sd_bus_creds {
         char *unit;
         char *user_unit;
         char *slice;
-        char *user_slice;
 
-        char *tty;
-
-        uint32_t *capability;
+        uint8_t *capability;
+        size_t capability_size;
 
         uint32_t audit_session_id;
         uid_t audit_login_uid;
@@ -75,12 +62,10 @@ struct sd_bus_creds {
         char *unique_name;
 
         char **well_known_names;
-        bool well_known_names_driver:1;
-        bool well_known_names_local:1;
 
         char *cgroup_root;
 
-        char *description, *unescaped_description;
+        char *conn_name, *unescaped_conn_name;
 };
 
 sd_bus_creds* bus_creds_new(void);

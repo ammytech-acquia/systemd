@@ -20,43 +20,19 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/xattr.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <locale.h>
+#include <errno.h>
+#include <signal.h>
 
-#include "alloc-util.h"
-#include "conf-parser.h"
-#include "cpu-set-util.h"
-#include "def.h"
-#include "escape.h"
-#include "fd-util.h"
-#include "fileio.h"
-#include "fs-util.h"
-#include "fstab-util.h"
-#include "glob-util.h"
-#include "hexdecoct.h"
-#include "io-util.h"
-#include "mkdir.h"
-#include "parse-util.h"
-#include "path-util.h"
-#include "proc-cmdline.h"
-#include "process-util.h"
-#include "rm-rf.h"
-#include "signal-util.h"
-#include "special.h"
-#include "stat-util.h"
-#include "string-util.h"
-#include "strv.h"
-#include "user-util.h"
 #include "util.h"
-#include "virt.h"
-#include "web-util.h"
-#include "xattr-util.h"
+#include "mkdir.h"
+#include "strv.h"
+#include "def.h"
+#include "fileio.h"
+#include "conf-parser.h"
 
 static void test_streq_ptr(void) {
         assert_se(streq_ptr(NULL, NULL));
@@ -91,112 +67,6 @@ static void test_align_power2(void) {
 
                 assert_se(ALIGN_POWER2(i) == p2);
         }
-}
-
-static void test_max(void) {
-        static const struct {
-                int a;
-                int b[CONST_MAX(10, 100)];
-        } val1 = {
-                .a = CONST_MAX(10, 100),
-        };
-        int d = 0;
-
-        assert_cc(sizeof(val1.b) == sizeof(int) * 100);
-
-        /* CONST_MAX returns (void) instead of a value if the passed arguments
-         * are not of the same type or not constant expressions. */
-        assert_cc(__builtin_types_compatible_p(typeof(CONST_MAX(1, 10)), int));
-        assert_cc(__builtin_types_compatible_p(typeof(CONST_MAX(1, 1U)), void));
-
-        assert_se(val1.a == 100);
-        assert_se(MAX(++d, 0) == 1);
-        assert_se(d == 1);
-
-        assert_cc(MAXSIZE(char[3], uint16_t) == 3);
-        assert_cc(MAXSIZE(char[3], uint32_t) == 4);
-        assert_cc(MAXSIZE(char, long) == sizeof(long));
-
-        assert_se(MAX(-5, 5) == 5);
-        assert_se(MAX(5, 5) == 5);
-        assert_se(MAX(MAX(1, MAX(2, MAX(3, 4))), 5) == 5);
-        assert_se(MAX(MAX(1, MAX(2, MAX(3, 2))), 1) == 3);
-        assert_se(MAX(MIN(1, MIN(2, MIN(3, 4))), 5) == 5);
-        assert_se(MAX(MAX(1, MIN(2, MIN(3, 2))), 1) == 2);
-        assert_se(LESS_BY(8, 4) == 4);
-        assert_se(LESS_BY(8, 8) == 0);
-        assert_se(LESS_BY(4, 8) == 0);
-        assert_se(LESS_BY(16, LESS_BY(8, 4)) == 12);
-        assert_se(LESS_BY(4, LESS_BY(8, 4)) == 0);
-        assert_se(CLAMP(-5, 0, 1) == 0);
-        assert_se(CLAMP(5, 0, 1) == 1);
-        assert_se(CLAMP(5, -10, 1) == 1);
-        assert_se(CLAMP(5, -10, 10) == 5);
-        assert_se(CLAMP(CLAMP(0, -10, 10), CLAMP(-5, 10, 20), CLAMP(100, -5, 20)) == 10);
-}
-
-static void test_container_of(void) {
-        struct mytype {
-                uint8_t pad1[3];
-                uint64_t v1;
-                uint8_t pad2[2];
-                uint32_t v2;
-        } _packed_ myval = { };
-
-        assert_cc(sizeof(myval) == 17);
-        assert_se(container_of(&myval.v1, struct mytype, v1) == &myval);
-        assert_se(container_of(&myval.v2, struct mytype, v2) == &myval);
-        assert_se(container_of(&container_of(&myval.v2,
-                                             struct mytype,
-                                             v2)->v1,
-                               struct mytype,
-                               v1) == &myval);
-}
-
-static void test_alloca(void) {
-        static const uint8_t zero[997] = { };
-        char *t;
-
-        t = alloca_align(17, 512);
-        assert_se(!((uintptr_t)t & 0xff));
-        memzero(t, 17);
-
-        t = alloca0_align(997, 1024);
-        assert_se(!((uintptr_t)t & 0x1ff));
-        assert_se(!memcmp(t, zero, 997));
-}
-
-static void test_div_round_up(void) {
-        int div;
-
-        /* basic tests */
-        assert_se(DIV_ROUND_UP(0, 8) == 0);
-        assert_se(DIV_ROUND_UP(1, 8) == 1);
-        assert_se(DIV_ROUND_UP(8, 8) == 1);
-        assert_se(DIV_ROUND_UP(12, 8) == 2);
-        assert_se(DIV_ROUND_UP(16, 8) == 2);
-
-        /* test multiple evaluation */
-        div = 0;
-        assert_se(DIV_ROUND_UP(div++, 8) == 0 && div == 1);
-        assert_se(DIV_ROUND_UP(++div, 8) == 1 && div == 2);
-        assert_se(DIV_ROUND_UP(8, div++) == 4 && div == 3);
-        assert_se(DIV_ROUND_UP(8, ++div) == 2 && div == 4);
-
-        /* overflow test with exact division */
-        assert_se(sizeof(0U) == 4);
-        assert_se(0xfffffffaU % 10U == 0U);
-        assert_se(0xfffffffaU / 10U == 429496729U);
-        assert_se(DIV_ROUND_UP(0xfffffffaU, 10U) == 429496729U);
-        assert_se((0xfffffffaU + 10U - 1U) / 10U == 0U);
-        assert_se(0xfffffffaU / 10U + !!(0xfffffffaU % 10U) == 429496729U);
-
-        /* overflow test with rounded division */
-        assert_se(0xfffffffdU % 10U == 3U);
-        assert_se(0xfffffffdU / 10U == 429496729U);
-        assert_se(DIV_ROUND_UP(0xfffffffdU, 10U) == 429496730U);
-        assert_se((0xfffffffdU + 10U - 1U) / 10U == 0U);
-        assert_se(0xfffffffdU / 10U + !!(0xfffffffdU % 10U) == 429496730U);
 }
 
 static void test_first_word(void) {
@@ -236,6 +106,59 @@ static void test_close_many(void) {
         unlink(name2);
 }
 
+static void test_parse_boolean(void) {
+        assert_se(parse_boolean("1") == 1);
+        assert_se(parse_boolean("y") == 1);
+        assert_se(parse_boolean("Y") == 1);
+        assert_se(parse_boolean("yes") == 1);
+        assert_se(parse_boolean("YES") == 1);
+        assert_se(parse_boolean("true") == 1);
+        assert_se(parse_boolean("TRUE") == 1);
+        assert_se(parse_boolean("on") == 1);
+        assert_se(parse_boolean("ON") == 1);
+
+        assert_se(parse_boolean("0") == 0);
+        assert_se(parse_boolean("n") == 0);
+        assert_se(parse_boolean("N") == 0);
+        assert_se(parse_boolean("no") == 0);
+        assert_se(parse_boolean("NO") == 0);
+        assert_se(parse_boolean("false") == 0);
+        assert_se(parse_boolean("FALSE") == 0);
+        assert_se(parse_boolean("off") == 0);
+        assert_se(parse_boolean("OFF") == 0);
+
+        assert_se(parse_boolean("garbage") < 0);
+        assert_se(parse_boolean("") < 0);
+}
+
+static void test_parse_pid(void) {
+        int r;
+        pid_t pid;
+
+        r = parse_pid("100", &pid);
+        assert_se(r == 0);
+        assert_se(pid == 100);
+
+        r = parse_pid("0x7FFFFFFF", &pid);
+        assert_se(r == 0);
+        assert_se(pid == 2147483647);
+
+        pid = 65; /* pid is left unchanged on ERANGE. Set to known arbitrary value. */
+        r = parse_pid("0", &pid);
+        assert_se(r == -ERANGE);
+        assert_se(pid == 65);
+
+        pid = 65; /* pid is left unchanged on ERANGE. Set to known arbitrary value. */
+        r = parse_pid("-100", &pid);
+        assert_se(r == -ERANGE);
+        assert_se(pid == 65);
+
+        pid = 65; /* pid is left unchanged on ERANGE. Set to known arbitrary value. */
+        r = parse_pid("0xFFFFFFFFFFFFFFFFF", &pid);
+        assert(r == -ERANGE);
+        assert_se(pid == 65);
+}
+
 static void test_parse_uid(void) {
         int r;
         uid_t uid;
@@ -243,12 +166,65 @@ static void test_parse_uid(void) {
         r = parse_uid("100", &uid);
         assert_se(r == 0);
         assert_se(uid == 100);
+}
 
-        r = parse_uid("65535", &uid);
-        assert_se(r == -ENXIO);
+static void test_safe_atolli(void) {
+        int r;
+        long long l;
 
-        r = parse_uid("asdsdas", &uid);
+        r = safe_atolli("12345", &l);
+        assert_se(r == 0);
+        assert_se(l == 12345);
+
+        r = safe_atolli("junk", &l);
         assert_se(r == -EINVAL);
+}
+
+static void test_safe_atod(void) {
+        int r;
+        double d;
+        char *e;
+
+        r = safe_atod("junk", &d);
+        assert_se(r == -EINVAL);
+
+        r = safe_atod("0.2244", &d);
+        assert_se(r == 0);
+        assert_se(abs(d - 0.2244) < 0.000001);
+
+        r = safe_atod("0,5", &d);
+        assert_se(r == -EINVAL);
+
+        errno = 0;
+        strtod("0,5", &e);
+        assert_se(*e == ',');
+
+        /* Check if this really is locale independent */
+        setlocale(LC_NUMERIC, "de_DE.utf8");
+
+        r = safe_atod("0.2244", &d);
+        assert_se(r == 0);
+        assert_se(abs(d - 0.2244) < 0.000001);
+
+        r = safe_atod("0,5", &d);
+        assert_se(r == -EINVAL);
+
+        errno = 0;
+        assert_se(abs(strtod("0,5", &e) - 0.5) < 0.00001);
+
+        /* And check again, reset */
+        setlocale(LC_NUMERIC, "C");
+
+        r = safe_atod("0.2244", &d);
+        assert_se(r == 0);
+        assert_se(abs(d - 0.2244) < 0.000001);
+
+        r = safe_atod("0,5", &d);
+        assert_se(r == -EINVAL);
+
+        errno = 0;
+        strtod("0,5", &e);
+        assert_se(*e == ',');
 }
 
 static void test_strappend(void) {
@@ -299,39 +275,6 @@ static void test_unhexchar(void) {
         assert_se(unhexchar('0') == 0x0);
 }
 
-static void test_base32hexchar(void) {
-        assert_se(base32hexchar(0) == '0');
-        assert_se(base32hexchar(9) == '9');
-        assert_se(base32hexchar(10) == 'A');
-        assert_se(base32hexchar(31) == 'V');
-}
-
-static void test_unbase32hexchar(void) {
-        assert_se(unbase32hexchar('0') == 0);
-        assert_se(unbase32hexchar('9') == 9);
-        assert_se(unbase32hexchar('A') == 10);
-        assert_se(unbase32hexchar('V') == 31);
-        assert_se(unbase32hexchar('=') == -EINVAL);
-}
-
-static void test_base64char(void) {
-        assert_se(base64char(0) == 'A');
-        assert_se(base64char(26) == 'a');
-        assert_se(base64char(63) == '/');
-}
-
-static void test_unbase64char(void) {
-        assert_se(unbase64char('A') == 0);
-        assert_se(unbase64char('Z') == 25);
-        assert_se(unbase64char('a') == 26);
-        assert_se(unbase64char('z') == 51);
-        assert_se(unbase64char('0') == 52);
-        assert_se(unbase64char('9') == 61);
-        assert_se(unbase64char('+') == 62);
-        assert_se(unbase64char('/') == 63);
-        assert_se(unbase64char('=') == -EINVAL);
-}
-
 static void test_octchar(void) {
         assert_se(octchar(00) == '0');
         assert_se(octchar(07) == '7');
@@ -352,273 +295,6 @@ static void test_undecchar(void) {
         assert_se(undecchar('9') == 9);
 }
 
-static void test_unhexmem(void) {
-        const char *hex = "efa214921";
-        const char *hex_invalid = "efa214921o";
-        _cleanup_free_ char *hex2 = NULL;
-        _cleanup_free_ void *mem = NULL;
-        size_t len;
-
-        assert_se(unhexmem(hex, strlen(hex), &mem, &len) == 0);
-        assert_se(unhexmem(hex, strlen(hex) + 1, &mem, &len) == -EINVAL);
-        assert_se(unhexmem(hex_invalid, strlen(hex_invalid), &mem, &len) == -EINVAL);
-
-        assert_se((hex2 = hexmem(mem, len)));
-
-        free(mem);
-
-        assert_se(memcmp(hex, hex2, strlen(hex)) == 0);
-
-        free(hex2);
-
-        assert_se(unhexmem(hex, strlen(hex) - 1, &mem, &len) == 0);
-        assert_se((hex2 = hexmem(mem, len)));
-        assert_se(memcmp(hex, hex2, strlen(hex) - 1) == 0);
-}
-
-/* https://tools.ietf.org/html/rfc4648#section-10 */
-static void test_base32hexmem(void) {
-        char *b32;
-
-        b32 = base32hexmem("", strlen(""), true);
-        assert_se(b32);
-        assert_se(streq(b32, ""));
-        free(b32);
-
-        b32 = base32hexmem("f", strlen("f"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CO======"));
-        free(b32);
-
-        b32 = base32hexmem("fo", strlen("fo"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNG===="));
-        free(b32);
-
-        b32 = base32hexmem("foo", strlen("foo"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMU==="));
-        free(b32);
-
-        b32 = base32hexmem("foob", strlen("foob"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOG="));
-        free(b32);
-
-        b32 = base32hexmem("fooba", strlen("fooba"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOJ1"));
-        free(b32);
-
-        b32 = base32hexmem("foobar", strlen("foobar"), true);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOJ1E8======"));
-        free(b32);
-
-        b32 = base32hexmem("", strlen(""), false);
-        assert_se(b32);
-        assert_se(streq(b32, ""));
-        free(b32);
-
-        b32 = base32hexmem("f", strlen("f"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CO"));
-        free(b32);
-
-        b32 = base32hexmem("fo", strlen("fo"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNG"));
-        free(b32);
-
-        b32 = base32hexmem("foo", strlen("foo"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMU"));
-        free(b32);
-
-        b32 = base32hexmem("foob", strlen("foob"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOG"));
-        free(b32);
-
-        b32 = base32hexmem("fooba", strlen("fooba"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOJ1"));
-        free(b32);
-
-        b32 = base32hexmem("foobar", strlen("foobar"), false);
-        assert_se(b32);
-        assert_se(streq(b32, "CPNMUOJ1E8"));
-        free(b32);
-}
-
-static void test_unbase32hexmem(void) {
-        void *mem;
-        size_t len;
-
-        assert_se(unbase32hexmem("", strlen(""), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), ""));
-        free(mem);
-
-        assert_se(unbase32hexmem("CO======", strlen("CO======"), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "f"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNG====", strlen("CPNG===="), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fo"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMU===", strlen("CPNMU==="), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foo"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOG=", strlen("CPNMUOG="), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foob"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fooba"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOJ1E8======", strlen("CPNMUOJ1E8======"), true, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foobar"));
-        free(mem);
-
-        assert_se(unbase32hexmem("A", strlen("A"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("A=======", strlen("A======="), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAA=====", strlen("AAA====="), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAAA==", strlen("AAAAAA=="), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AB======", strlen("AB======"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAB====", strlen("AAAB===="), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAB===", strlen("AAAAB==="), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAAAB=", strlen("AAAAAAB="), true, &mem, &len) == -EINVAL);
-
-        assert_se(unbase32hexmem("XPNMUOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CXNMUOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPXMUOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNXUOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNMXOJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNMUXJ1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNMUOX1", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNMUOJX", strlen("CPNMUOJ1"), true, &mem, &len) == -EINVAL);
-
-        assert_se(unbase32hexmem("", strlen(""), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), ""));
-        free(mem);
-
-        assert_se(unbase32hexmem("CO", strlen("CO"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "f"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNG", strlen("CPNG"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fo"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMU", strlen("CPNMU"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foo"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOG", strlen("CPNMUOG"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foob"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOJ1", strlen("CPNMUOJ1"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fooba"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOJ1E8", strlen("CPNMUOJ1E8"), false, &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foobar"));
-        free(mem);
-
-        assert_se(unbase32hexmem("CPNMUOG=", strlen("CPNMUOG="), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("CPNMUOJ1E8======", strlen("CPNMUOJ1E8======"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("A", strlen("A"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("A", strlen("A"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAA", strlen("AAA"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAAA", strlen("AAAAAA"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AB", strlen("AB"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAB", strlen("AAAB"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAB", strlen("AAAAB"), false, &mem, &len) == -EINVAL);
-        assert_se(unbase32hexmem("AAAAAAB", strlen("AAAAAAB"), false, &mem, &len) == -EINVAL);
-}
-
-/* https://tools.ietf.org/html/rfc4648#section-10 */
-static void test_base64mem(void) {
-        char *b64;
-
-        b64 = base64mem("", strlen(""));
-        assert_se(b64);
-        assert_se(streq(b64, ""));
-        free(b64);
-
-        b64 = base64mem("f", strlen("f"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zg=="));
-        free(b64);
-
-        b64 = base64mem("fo", strlen("fo"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zm8="));
-        free(b64);
-
-        b64 = base64mem("foo", strlen("foo"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zm9v"));
-        free(b64);
-
-        b64 = base64mem("foob", strlen("foob"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zm9vYg=="));
-        free(b64);
-
-        b64 = base64mem("fooba", strlen("fooba"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zm9vYmE="));
-        free(b64);
-
-        b64 = base64mem("foobar", strlen("foobar"));
-        assert_se(b64);
-        assert_se(streq(b64, "Zm9vYmFy"));
-        free(b64);
-}
-
-static void test_unbase64mem(void) {
-        void *mem;
-        size_t len;
-
-        assert_se(unbase64mem("", strlen(""), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), ""));
-        free(mem);
-
-        assert_se(unbase64mem("Zg==", strlen("Zg=="), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "f"));
-        free(mem);
-
-        assert_se(unbase64mem("Zm8=", strlen("Zm8="), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fo"));
-        free(mem);
-
-        assert_se(unbase64mem("Zm9v", strlen("Zm9v"), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foo"));
-        free(mem);
-
-        assert_se(unbase64mem("Zm9vYg==", strlen("Zm9vYg=="), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foob"));
-        free(mem);
-
-        assert_se(unbase64mem("Zm9vYmE=", strlen("Zm9vYmE="), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "fooba"));
-        free(mem);
-
-        assert_se(unbase64mem("Zm9vYmFy", strlen("Zm9vYmFy"), &mem, &len) == 0);
-        assert_se(streq(strndupa(mem, len), "foobar"));
-        free(mem);
-
-        assert_se(unbase64mem("A", strlen("A"), &mem, &len) == -EINVAL);
-        assert_se(unbase64mem("A====", strlen("A===="), &mem, &len) == -EINVAL);
-        assert_se(unbase64mem("AAB==", strlen("AAB=="), &mem, &len) == -EINVAL);
-        assert_se(unbase64mem("AAAB=", strlen("AAAB="), &mem, &len) == -EINVAL);
-}
-
 static void test_cescape(void) {
         _cleanup_free_ char *escaped;
 
@@ -629,48 +305,12 @@ static void test_cescape(void) {
 static void test_cunescape(void) {
         _cleanup_free_ char *unescaped;
 
-        assert_se(cunescape("abc\\\\\\\"\\b\\f\\a\\n\\r\\t\\v\\003\\177\\234\\313\\000\\x00", 0, &unescaped) < 0);
-        assert_se(cunescape("abc\\\\\\\"\\b\\f\\a\\n\\r\\t\\v\\003\\177\\234\\313\\000\\x00", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "abc\\\"\b\f\a\n\r\t\v\003\177\234\313\\000\\x00"));
-        unescaped = mfree(unescaped);
-
-        /* incomplete sequences */
-        assert_se(cunescape("\\x0", 0, &unescaped) < 0);
-        assert_se(cunescape("\\x0", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "\\x0"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\x", 0, &unescaped) < 0);
-        assert_se(cunescape("\\x", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "\\x"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\", 0, &unescaped) < 0);
-        assert_se(cunescape("\\", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "\\"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\11", 0, &unescaped) < 0);
-        assert_se(cunescape("\\11", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "\\11"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\1", 0, &unescaped) < 0);
-        assert_se(cunescape("\\1", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "\\1"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\u0000", 0, &unescaped) < 0);
-        assert_se(cunescape("\\u00DF\\U000000df\\u03a0\\U00000041", UNESCAPE_RELAX, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, "ßßΠA"));
-        unescaped = mfree(unescaped);
-
-        assert_se(cunescape("\\073", 0, &unescaped) >= 0);
-        assert_se(streq_ptr(unescaped, ";"));
+        assert_se(unescaped = cunescape("abc\\\\\\\"\\b\\f\\a\\n\\r\\t\\v\\003\\177\\234\\313\\000\\x00"));
+        assert_se(streq(unescaped, "abc\\\"\b\f\a\n\r\t\v\003\177\234\313\\000\\x00"));
 }
 
 static void test_foreach_word(void) {
-        const char *word, *state;
+        char *w, *state;
         size_t l;
         int i = 0;
         const char test[] = "test abc d\te   f   ";
@@ -684,51 +324,55 @@ static void test_foreach_word(void) {
                 NULL
         };
 
-        FOREACH_WORD(word, l, test, state)
-                assert_se(strneq(expected[i++], word, l));
-}
-
-static void check(const char *test, char** expected, bool trailing) {
-        const char *word, *state;
-        size_t l;
-        int i = 0;
-
-        printf("<<<%s>>>\n", test);
-        FOREACH_WORD_QUOTED(word, l, test, state) {
-                _cleanup_free_ char *t = NULL;
-
-                assert_se(t = strndup(word, l));
-                assert_se(strneq(expected[i++], word, l));
-                printf("<%s>\n", t);
+        FOREACH_WORD(w, l, test, state) {
+                assert_se(strneq(expected[i++], w, l));
         }
-        printf("<<<%s>>>\n", state);
-        assert_se(expected[i] == NULL);
-        assert_se(isempty(state) == !trailing);
 }
 
 static void test_foreach_word_quoted(void) {
-        check("test a b c 'd' e '' '' hhh '' '' \"a b c\"",
-              STRV_MAKE("test",
-                        "a",
-                        "b",
-                        "c",
-                        "d",
-                        "e",
-                        "",
-                        "",
-                        "hhh",
-                        "",
-                        "",
-                        "a b c"),
-              false);
+        char *w, *state;
+        size_t l;
+        int i = 0;
+        const char test[] = "test a b c 'd' e '' '' hhh '' '' \"a b c\"";
+        const char * const expected[] = {
+                "test",
+                "a",
+                "b",
+                "c",
+                "d",
+                "e",
+                "",
+                "",
+                "hhh",
+                "",
+                "",
+                "a b c",
+                NULL
+        };
 
-        check("test \"xxx",
-              STRV_MAKE("test"),
-              true);
+        printf("<%s>\n", test);
+        FOREACH_WORD_QUOTED(w, l, test, state) {
+                _cleanup_free_ char *t = NULL;
 
-        check("test\\",
-              STRV_MAKE_EMPTY,
-              true);
+                assert_se(t = strndup(w, l));
+                assert_se(strneq(expected[i++], w, l));
+                printf("<%s>\n", t);
+        }
+}
+
+static void test_default_term_for_tty(void) {
+        puts(default_term_for_tty("/dev/tty23"));
+        puts(default_term_for_tty("/dev/ttyS23"));
+        puts(default_term_for_tty("/dev/tty0"));
+        puts(default_term_for_tty("/dev/pty0"));
+        puts(default_term_for_tty("/dev/pts/0"));
+        puts(default_term_for_tty("/dev/console"));
+        puts(default_term_for_tty("tty23"));
+        puts(default_term_for_tty("ttyS23"));
+        puts(default_term_for_tty("tty0"));
+        puts(default_term_for_tty("pty0"));
+        puts(default_term_for_tty("pts/0"));
+        puts(default_term_for_tty("console"));
 }
 
 static void test_memdup_multiply(void) {
@@ -744,14 +388,77 @@ static void test_memdup_multiply(void) {
         free(dup);
 }
 
+static void test_hostname_is_valid(void) {
+        assert(hostname_is_valid("foobar"));
+        assert(hostname_is_valid("foobar.com"));
+        assert(!hostname_is_valid("fööbar"));
+        assert(!hostname_is_valid(""));
+        assert(!hostname_is_valid("."));
+        assert(!hostname_is_valid(".."));
+        assert(!hostname_is_valid("foobar."));
+        assert(!hostname_is_valid(".foobar"));
+        assert(!hostname_is_valid("foo..bar"));
+        assert(!hostname_is_valid("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+}
+
 static void test_u64log2(void) {
-        assert_se(u64log2(0) == 0);
-        assert_se(u64log2(8) == 3);
-        assert_se(u64log2(9) == 3);
-        assert_se(u64log2(15) == 3);
-        assert_se(u64log2(16) == 4);
-        assert_se(u64log2(1024*1024) == 20);
-        assert_se(u64log2(1024*1024+5) == 20);
+        assert(u64log2(0) == 0);
+        assert(u64log2(8) == 3);
+        assert(u64log2(9) == 3);
+        assert(u64log2(15) == 3);
+        assert(u64log2(16) == 4);
+        assert(u64log2(1024*1024) == 20);
+        assert(u64log2(1024*1024+5) == 20);
+}
+
+static void test_get_process_comm(void) {
+        struct stat st;
+        _cleanup_free_ char *a = NULL, *c = NULL, *d = NULL, *f = NULL, *i = NULL;
+        unsigned long long b;
+        pid_t e;
+        uid_t u;
+        gid_t g;
+        dev_t h;
+        int r;
+
+        if (stat("/proc/1/comm", &st) == 0) {
+                assert_se(get_process_comm(1, &a) >= 0);
+                log_info("pid1 comm: '%s'", a);
+        } else {
+                log_warning("/proc/1/comm does not exist.");
+        }
+
+        assert_se(get_starttime_of_pid(1, &b) >= 0);
+        log_info("pid1 starttime: '%llu'", b);
+
+        assert_se(get_process_cmdline(1, 0, true, &c) >= 0);
+        log_info("pid1 cmdline: '%s'", c);
+
+        assert_se(get_process_cmdline(1, 8, false, &d) >= 0);
+        log_info("pid1 cmdline truncated: '%s'", d);
+
+        assert_se(get_parent_of_pid(1, &e) >= 0);
+        log_info("pid1 ppid: "PID_FMT, e);
+        assert_se(e == 0);
+
+        assert_se(is_kernel_thread(1) == 0);
+
+        r = get_process_exe(1, &f);
+        assert_se(r >= 0 || r == -EACCES);
+        log_info("pid1 exe: '%s'", strna(f));
+
+        assert_se(get_process_uid(1, &u) == 0);
+        log_info("pid1 uid: "UID_FMT, u);
+        assert_se(u == 0);
+
+        assert_se(get_process_gid(1, &g) == 0);
+        log_info("pid1 gid: "GID_FMT, g);
+        assert_se(g == 0);
+
+        assert(get_ctty_devnr(1, &h) == -ENOENT);
+
+        getenv_for_pid(1, "PATH", &i);
+        log_info("pid1 $PATH: '%s'", strna(i));
 }
 
 static void test_protect_errno(void) {
@@ -760,130 +467,83 @@ static void test_protect_errno(void) {
                 PROTECT_ERRNO;
                 errno = 11;
         }
-        assert_se(errno == 12);
+        assert(errno == 12);
 }
 
-static void test_parse_cpu_set(void) {
-        cpu_set_t *c = NULL;
-        int ncpus;
-        int cpu;
+static void test_parse_size(void) {
+        off_t bytes;
 
-        /* Simple range (from CPUAffinity example) */
-        ncpus = parse_cpu_set_and_warn("1 2", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_ISSET_S(1, CPU_ALLOC_SIZE(ncpus), c));
-        assert_se(CPU_ISSET_S(2, CPU_ALLOC_SIZE(ncpus), c));
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 2);
-        c = mfree(c);
+        assert_se(parse_size("111", 1024, &bytes) == 0);
+        assert_se(bytes == 111);
 
-        /* A more interesting range */
-        ncpus = parse_cpu_set_and_warn("0 1 2 3 8 9 10 11", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 8);
-        for (cpu = 0; cpu < 4; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        for (cpu = 8; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size("111.4", 1024, &bytes) == 0);
+        assert_se(bytes == 111);
 
-        /* Quoted strings */
-        ncpus = parse_cpu_set_and_warn("8 '9' 10 \"11\"", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 4);
-        for (cpu = 8; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size(" 112 B", 1024, &bytes) == 0);
+        assert_se(bytes == 112);
 
-        /* Use commas as separators */
-        ncpus = parse_cpu_set_and_warn("0,1,2,3 8,9,10,11", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 8);
-        for (cpu = 0; cpu < 4; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        for (cpu = 8; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size(" 112.6 B", 1024, &bytes) == 0);
+        assert_se(bytes == 112);
 
-        /* Commas with spaces (and trailing comma, space) */
-        ncpus = parse_cpu_set_and_warn("0, 1, 2, 3, 4, 5, 6, 7, ", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 8);
-        for (cpu = 0; cpu < 8; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size("3.5 K", 1024, &bytes) == 0);
+        assert_se(bytes == 3*1024 + 512);
 
-        /* Ranges */
-        ncpus = parse_cpu_set_and_warn("0-3,8-11", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 8);
-        for (cpu = 0; cpu < 4; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        for (cpu = 8; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size("3. K", 1024, &bytes) == 0);
+        assert_se(bytes == 3*1024);
 
-        /* Ranges with trailing comma, space */
-        ncpus = parse_cpu_set_and_warn("0-3  8-11, ", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 8);
-        for (cpu = 0; cpu < 4; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        for (cpu = 8; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size("3.0 K", 1024, &bytes) == 0);
+        assert_se(bytes == 3*1024);
 
-        /* Negative range (returns empty cpu_set) */
-        ncpus = parse_cpu_set_and_warn("3-0", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 0);
-        c = mfree(c);
+        assert_se(parse_size("3. 0 K", 1024, &bytes) == -EINVAL);
 
-        /* Overlapping ranges */
-        ncpus = parse_cpu_set_and_warn("0-7 4-11", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 12);
-        for (cpu = 0; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size(" 4 M 11.5K", 1024, &bytes) == 0);
+        assert_se(bytes == 4*1024*1024 + 11 * 1024 + 512);
 
-        /* Mix ranges and individual CPUs */
-        ncpus = parse_cpu_set_and_warn("0,1 4-11", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus >= 1024);
-        assert_se(CPU_COUNT_S(CPU_ALLOC_SIZE(ncpus), c) == 10);
-        assert_se(CPU_ISSET_S(0, CPU_ALLOC_SIZE(ncpus), c));
-        assert_se(CPU_ISSET_S(1, CPU_ALLOC_SIZE(ncpus), c));
-        for (cpu = 4; cpu < 12; cpu++)
-                assert_se(CPU_ISSET_S(cpu, CPU_ALLOC_SIZE(ncpus), c));
-        c = mfree(c);
+        assert_se(parse_size("3B3.5G", 1024, &bytes) == -EINVAL);
 
-        /* Garbage */
-        ncpus = parse_cpu_set_and_warn("0 1 2 3 garbage", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus < 0);
-        assert_se(!c);
+        assert_se(parse_size("3.5G3B", 1024, &bytes) == 0);
+        assert_se(bytes == 3ULL*1024*1024*1024 + 512*1024*1024 + 3);
 
-        /* Range with garbage */
-        ncpus = parse_cpu_set_and_warn("0-3 8-garbage", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus < 0);
-        assert_se(!c);
+        assert_se(parse_size("3.5G 4B", 1024, &bytes) == 0);
+        assert_se(bytes == 3ULL*1024*1024*1024 + 512*1024*1024 + 4);
 
-        /* Empty string */
-        c = NULL;
-        ncpus = parse_cpu_set_and_warn("", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus == 0);  /* empty string returns 0 */
-        assert_se(!c);
+        assert_se(parse_size("3B3G4T", 1024, &bytes) == -EINVAL);
 
-        /* Runnaway quoted string */
-        ncpus = parse_cpu_set_and_warn("0 1 2 3 \"4 5 6 7 ", &c, NULL, "fake", 1, "CPUAffinity");
-        assert_se(ncpus < 0);
-        assert_se(!c);
+        assert_se(parse_size("4T3G3B", 1024, &bytes) == 0);
+        assert_se(bytes == (4ULL*1024 + 3)*1024*1024*1024 + 3);
+
+        assert_se(parse_size(" 4 T 3 G 3 B", 1024, &bytes) == 0);
+        assert_se(bytes == (4ULL*1024 + 3)*1024*1024*1024 + 3);
+
+        assert_se(parse_size("12P", 1024, &bytes) == 0);
+        assert_se(bytes == 12ULL * 1024*1024*1024*1024*1024);
+
+        assert_se(parse_size("12P12P", 1024, &bytes) == -EINVAL);
+
+        assert_se(parse_size("3E 2P", 1024, &bytes) == 0);
+        assert_se(bytes == (3 * 1024 + 2ULL) * 1024*1024*1024*1024*1024);
+
+        assert_se(parse_size("12X", 1024, &bytes) == -EINVAL);
+
+        assert_se(parse_size("12.5X", 1024, &bytes) == -EINVAL);
+
+        assert_se(parse_size("12.5e3", 1024, &bytes) == -EINVAL);
+
+        assert_se(parse_size("1024E", 1024, &bytes) == -ERANGE);
+        assert_se(parse_size("-1", 1024, &bytes) == -ERANGE);
+        assert_se(parse_size("-1024E", 1024, &bytes) == -ERANGE);
+
+        assert_se(parse_size("-1024P", 1024, &bytes) == -ERANGE);
+
+        assert_se(parse_size("-10B 20K", 1024, &bytes) == -ERANGE);
 }
 
-static void test_config_parse_iec_uint64(void) {
-        uint64_t offset = 0;
-        assert_se(config_parse_iec_uint64(NULL, "/this/file", 11, "Section", 22, "Size", 0, "4M", &offset, NULL) == 0);
+static void test_config_parse_iec_off(void) {
+        off_t offset = 0;
+        assert_se(config_parse_iec_off(NULL, "/this/file", 11, "Section", 22, "Size", 0, "4M", &offset, NULL) == 0);
         assert_se(offset == 4 * 1024 * 1024);
 
-        assert_se(config_parse_iec_uint64(NULL, "/this/file", 11, "Section", 22, "Size", 0, "4.5M", &offset, NULL) == 0);
+        assert_se(config_parse_iec_off(NULL, "/this/file", 11, "Section", 22, "Size", 0, "4.5M", &offset, NULL) == 0);
 }
 
 static void test_strextend(void) {
@@ -992,12 +652,12 @@ static void test_writing_tmpfile(void) {
         printf("tmpfile: %s", name);
 
         r = writev(fd, iov, 3);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         r = read_full_file(name, &contents, &size);
-        assert_se(r == 0);
+        assert(r == 0);
         printf("contents: %s", contents);
-        assert_se(streq(contents, "abc\n" ALPHANUMERICAL "\n"));
+        assert(streq(contents, "abc\n" ALPHANUMERICAL "\n"));
 
         unlink(name);
 }
@@ -1051,38 +711,24 @@ static void test_foreach_string(void) {
                 assert_se(streq(x, "zzz"));
 }
 
-static void test_filename_is_valid(void) {
+static void test_filename_is_safe(void) {
         char foo[FILENAME_MAX+2];
         int i;
 
-        assert_se(!filename_is_valid(""));
-        assert_se(!filename_is_valid("/bar/foo"));
-        assert_se(!filename_is_valid("/"));
-        assert_se(!filename_is_valid("."));
-        assert_se(!filename_is_valid(".."));
+        assert_se(!filename_is_safe(""));
+        assert_se(!filename_is_safe("/bar/foo"));
+        assert_se(!filename_is_safe("/"));
+        assert_se(!filename_is_safe("."));
+        assert_se(!filename_is_safe(".."));
 
         for (i=0; i<FILENAME_MAX+1; i++)
                 foo[i] = 'a';
         foo[FILENAME_MAX+1] = '\0';
 
-        assert_se(!filename_is_valid(foo));
+        assert_se(!filename_is_safe(foo));
 
-        assert_se(filename_is_valid("foo_bar-333"));
-        assert_se(filename_is_valid("o.o"));
-}
-
-static void test_string_has_cc(void) {
-        assert_se(string_has_cc("abc\1", NULL));
-        assert_se(string_has_cc("abc\x7f", NULL));
-        assert_se(string_has_cc("abc\x7f", NULL));
-        assert_se(string_has_cc("abc\t\x7f", "\t"));
-        assert_se(string_has_cc("abc\t\x7f", "\t"));
-        assert_se(string_has_cc("\x7f", "\t"));
-        assert_se(string_has_cc("\x7f", "\t\a"));
-
-        assert_se(!string_has_cc("abc\t\t", "\t"));
-        assert_se(!string_has_cc("abc\t\t\a", "\t\a"));
-        assert_se(!string_has_cc("a\ab\tc", "\t\a"));
+        assert_se(filename_is_safe("foo_bar-333"));
+        assert_se(filename_is_safe("o.o"));
 }
 
 static void test_ascii_strlower(void) {
@@ -1107,39 +753,23 @@ static void test_files_same(void) {
 }
 
 static void test_is_valid_documentation_url(void) {
-        assert_se(documentation_url_is_valid("http://www.freedesktop.org/wiki/Software/systemd"));
-        assert_se(documentation_url_is_valid("https://www.kernel.org/doc/Documentation/binfmt_misc.txt"));
-        assert_se(documentation_url_is_valid("file:/foo/foo"));
-        assert_se(documentation_url_is_valid("man:systemd.special(7)"));
-        assert_se(documentation_url_is_valid("info:bar"));
+        assert_se(is_valid_documentation_url("http://www.freedesktop.org/wiki/Software/systemd"));
+        assert_se(is_valid_documentation_url("https://www.kernel.org/doc/Documentation/binfmt_misc.txt"));
+        assert_se(is_valid_documentation_url("file:foo"));
+        assert_se(is_valid_documentation_url("man:systemd.special(7)"));
+        assert_se(is_valid_documentation_url("info:bar"));
 
-        assert_se(!documentation_url_is_valid("foo:"));
-        assert_se(!documentation_url_is_valid("info:"));
-        assert_se(!documentation_url_is_valid(""));
+        assert_se(!is_valid_documentation_url("foo:"));
+        assert_se(!is_valid_documentation_url("info:"));
+        assert_se(!is_valid_documentation_url(""));
 }
 
 static void test_file_in_same_dir(void) {
-        char *t;
-
-        t = file_in_same_dir("/", "a");
-        assert_se(streq(t, "/a"));
-        free(t);
-
-        t = file_in_same_dir("/", "/a");
-        assert_se(streq(t, "/a"));
-        free(t);
-
-        t = file_in_same_dir("", "a");
-        assert_se(streq(t, "a"));
-        free(t);
-
-        t = file_in_same_dir("a/", "a");
-        assert_se(streq(t, "a/a"));
-        free(t);
-
-        t = file_in_same_dir("bar/foo", "bar");
-        assert_se(streq(t, "bar/bar"));
-        free(t);
+        assert_se(streq(file_in_same_dir("/", "a"), "/a"));
+        assert_se(streq(file_in_same_dir("/", "/a"), "/a"));
+        assert_se(streq(file_in_same_dir("", "a"), "a"));
+        assert_se(streq(file_in_same_dir("a/", "a"), "a/a"));
+        assert_se(streq(file_in_same_dir("bar/foo", "bar"), "bar/bar"));
 }
 
 static void test_endswith(void) {
@@ -1150,16 +780,6 @@ static void test_endswith(void) {
 
         assert_se(!endswith("foobar", "foo"));
         assert_se(!endswith("foobar", "foobarfoofoo"));
-}
-
-static void test_endswith_no_case(void) {
-        assert_se(endswith_no_case("fooBAR", "bar"));
-        assert_se(endswith_no_case("foobar", ""));
-        assert_se(endswith_no_case("foobar", "FOOBAR"));
-        assert_se(endswith_no_case("", ""));
-
-        assert_se(!endswith_no_case("foobar", "FOO"));
-        assert_se(!endswith_no_case("foobar", "FOOBARFOOFOO"));
 }
 
 static void test_close_nointr(void) {
@@ -1200,7 +820,7 @@ static void test_readlink_and_make_absolute(void) {
         char name_alias[] = "/tmp/test-readlink_and_make_absolute-alias";
         char *r = NULL;
 
-        assert_se(mkdir_safe(tempdir, 0755, getuid(), getgid()) >= 0);
+        assert(mkdir_safe(tempdir, 0755, getuid(), getgid()) >= 0);
         assert_se(touch(name) >= 0);
 
         assert_se(symlink(name, name_alias) >= 0);
@@ -1216,7 +836,39 @@ static void test_readlink_and_make_absolute(void) {
         free(r);
         assert_se(unlink(name_alias) >= 0);
 
-        assert_se(rm_rf(tempdir, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
+        assert_se(rm_rf_dangerous(tempdir, false, true, false) >= 0);
+}
+
+static void test_read_one_char(void) {
+        char r;
+        bool need_nl;
+        char name[] = "/tmp/test-read_one_char.XXXXXX";
+        _cleanup_close_ int fd = -1;
+        FILE *file;
+
+        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
+        assert_se(fd >= 0);
+        file = fdopen(fd, "r+");
+        assert_se(file);
+        assert_se(fputs("c\n", file) >= 0);
+        rewind(file);
+
+        assert_se(read_one_char(file, &r, 1000000, &need_nl) >= 0);
+        assert_se(!need_nl);
+        assert_se(r == 'c');
+        assert_se(read_one_char(file, &r, 1000000, &need_nl) < 0);
+
+        rewind(file);
+        assert_se(fputs("foobar\n", file) >= 0);
+        rewind(file);
+        assert_se(read_one_char(file, &r, 1000000, &need_nl) < 0);
+
+        rewind(file);
+        assert_se(fputs("\n", file) >= 0);
+        rewind(file);
+        assert_se(read_one_char(file, &r, 1000000, &need_nl) < 0);
+
+        unlink(name);
 }
 
 static void test_ignore_signals(void) {
@@ -1239,453 +891,41 @@ static void test_strshorten(void) {
         assert_se(strlen(strshorten(s, 0)) == 0);
 }
 
-static void test_strjoina(void) {
-        char *actual;
-
-        actual = strjoina("", "foo", "bar");
-        assert_se(streq(actual, "foobar"));
-
-        actual = strjoina("foo", "bar", "baz");
-        assert_se(streq(actual, "foobarbaz"));
-
-        actual = strjoina("foo", "", "bar", "baz");
-        assert_se(streq(actual, "foobarbaz"));
-
-        actual = strjoina("foo");
-        assert_se(streq(actual, "foo"));
-
-        actual = strjoina(NULL);
-        assert_se(streq(actual, ""));
-
-        actual = strjoina(NULL, "foo");
-        assert_se(streq(actual, ""));
-
-        actual = strjoina("foo", NULL, "bar");
-        assert_se(streq(actual, "foo"));
-}
-
-static void test_is_symlink(void) {
-        char name[] = "/tmp/test-is_symlink.XXXXXX";
-        char name_link[] = "/tmp/test-is_symlink.link";
-        _cleanup_close_ int fd = -1;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-        assert_se(symlink(name, name_link) >= 0);
-
-        assert_se(is_symlink(name) == 0);
-        assert_se(is_symlink(name_link) == 1);
-        assert_se(is_symlink("/a/file/which/does/not/exist/i/guess") < 0);
-
-
-        unlink(name);
-        unlink(name_link);
-}
-
-static void test_search_and_fopen(void) {
-        const char *dirs[] = {"/tmp/foo/bar", "/tmp", NULL};
-        char name[] = "/tmp/test-search_and_fopen.XXXXXX";
-        int fd = -1;
-        int r;
-        FILE *f;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-        close(fd);
-
-        r = search_and_fopen(basename(name), "r", NULL, dirs, &f);
-        assert_se(r >= 0);
-        fclose(f);
-
-        r = search_and_fopen(name, "r", NULL, dirs, &f);
-        assert_se(r >= 0);
-        fclose(f);
-
-        r = search_and_fopen(basename(name), "r", "/", dirs, &f);
-        assert_se(r >= 0);
-        fclose(f);
-
-        r = search_and_fopen("/a/file/which/does/not/exist/i/guess", "r", NULL, dirs, &f);
-        assert_se(r < 0);
-        r = search_and_fopen("afilewhichdoesnotexistiguess", "r", NULL, dirs, &f);
-        assert_se(r < 0);
-
-        r = unlink(name);
-        assert_se(r == 0);
-
-        r = search_and_fopen(basename(name), "r", NULL, dirs, &f);
-        assert_se(r < 0);
-}
-
-
-static void test_search_and_fopen_nulstr(void) {
-        const char dirs[] = "/tmp/foo/bar\0/tmp\0";
-        char name[] = "/tmp/test-search_and_fopen.XXXXXX";
-        int fd = -1;
-        int r;
-        FILE *f;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-        close(fd);
-
-        r = search_and_fopen_nulstr(basename(name), "r", NULL, dirs, &f);
-        assert_se(r >= 0);
-        fclose(f);
-
-        r = search_and_fopen_nulstr(name, "r", NULL, dirs, &f);
-        assert_se(r >= 0);
-        fclose(f);
-
-        r = search_and_fopen_nulstr("/a/file/which/does/not/exist/i/guess", "r", NULL, dirs, &f);
-        assert_se(r < 0);
-        r = search_and_fopen_nulstr("afilewhichdoesnotexistiguess", "r", NULL, dirs, &f);
-        assert_se(r < 0);
-
-        r = unlink(name);
-        assert_se(r == 0);
-
-        r = search_and_fopen_nulstr(basename(name), "r", NULL, dirs, &f);
-        assert_se(r < 0);
-}
-
-static void test_glob_exists(void) {
-        char name[] = "/tmp/test-glob_exists.XXXXXX";
-        int fd = -1;
-        int r;
-
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
-        assert_se(fd >= 0);
-        close(fd);
-
-        r = glob_exists("/tmp/test-glob_exists*");
-        assert_se(r == 1);
-
-        r = unlink(name);
-        assert_se(r == 0);
-        r = glob_exists("/tmp/test-glob_exists*");
-        assert_se(r == 0);
-}
-
-static void test_execute_directory(void) {
-        char template_lo[] = "/tmp/test-readlink_and_make_absolute-lo.XXXXXXX";
-        char template_hi[] = "/tmp/test-readlink_and_make_absolute-hi.XXXXXXX";
-        const char * dirs[] = {template_hi, template_lo, NULL};
-        const char *name, *name2, *name3, *overridden, *override, *masked, *mask;
-
-        assert_se(mkdtemp(template_lo));
-        assert_se(mkdtemp(template_hi));
-
-        name = strjoina(template_lo, "/script");
-        name2 = strjoina(template_hi, "/script2");
-        name3 = strjoina(template_lo, "/useless");
-        overridden = strjoina(template_lo, "/overridden");
-        override = strjoina(template_hi, "/overridden");
-        masked = strjoina(template_lo, "/masked");
-        mask = strjoina(template_hi, "/masked");
-
-        assert_se(write_string_file(name, "#!/bin/sh\necho 'Executing '$0\ntouch $(dirname $0)/it_works", WRITE_STRING_FILE_CREATE) == 0);
-        assert_se(write_string_file(name2, "#!/bin/sh\necho 'Executing '$0\ntouch $(dirname $0)/it_works2", WRITE_STRING_FILE_CREATE) == 0);
-        assert_se(write_string_file(overridden, "#!/bin/sh\necho 'Executing '$0\ntouch $(dirname $0)/failed", WRITE_STRING_FILE_CREATE) == 0);
-        assert_se(write_string_file(override, "#!/bin/sh\necho 'Executing '$0", WRITE_STRING_FILE_CREATE) == 0);
-        assert_se(write_string_file(masked, "#!/bin/sh\necho 'Executing '$0\ntouch $(dirname $0)/failed", WRITE_STRING_FILE_CREATE) == 0);
-        assert_se(symlink("/dev/null", mask) == 0);
-        assert_se(chmod(name, 0755) == 0);
-        assert_se(chmod(name2, 0755) == 0);
-        assert_se(chmod(overridden, 0755) == 0);
-        assert_se(chmod(override, 0755) == 0);
-        assert_se(chmod(masked, 0755) == 0);
-        assert_se(touch(name3) >= 0);
-
-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL);
-
-        assert_se(chdir(template_lo) == 0);
-        assert_se(access("it_works", F_OK) >= 0);
-        assert_se(access("failed", F_OK) < 0);
-
-        assert_se(chdir(template_hi) == 0);
-        assert_se(access("it_works2", F_OK) >= 0);
-        assert_se(access("failed", F_OK) < 0);
-
-        (void) rm_rf(template_lo, REMOVE_ROOT|REMOVE_PHYSICAL);
-        (void) rm_rf(template_hi, REMOVE_ROOT|REMOVE_PHYSICAL);
-}
-
-static int parse_item(const char *key, const char *value) {
-        assert_se(key);
-
-        log_info("kernel cmdline option <%s> = <%s>", key, strna(value));
-        return 0;
-}
-
-static void test_parse_proc_cmdline(void) {
-        assert_se(parse_proc_cmdline(parse_item) >= 0);
-}
-
-static void test_raw_clone(void) {
-        pid_t parent, pid, pid2;
-
-        parent = getpid();
-        log_info("before clone: getpid()→"PID_FMT, parent);
-        assert_se(raw_getpid() == parent);
-
-        pid = raw_clone(0, NULL);
-        assert_se(pid >= 0);
-
-        pid2 = raw_getpid();
-        log_info("raw_clone: "PID_FMT" getpid()→"PID_FMT" raw_getpid()→"PID_FMT,
-                 pid, getpid(), pid2);
-        if (pid == 0) {
-                assert_se(pid2 != parent);
-                _exit(EXIT_SUCCESS);
-        } else {
-                int status;
-
-                assert_se(pid2 == parent);
-                waitpid(pid, &status, __WCLONE);
-                assert_se(WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS);
-        }
-}
-
-static void test_same_fd(void) {
-        _cleanup_close_pair_ int p[2] = { -1, -1 };
-        _cleanup_close_ int a = -1, b = -1, c = -1;
-
-        assert_se(pipe2(p, O_CLOEXEC) >= 0);
-        assert_se((a = dup(p[0])) >= 0);
-        assert_se((b = open("/dev/null", O_RDONLY|O_CLOEXEC)) >= 0);
-        assert_se((c = dup(a)) >= 0);
-
-        assert_se(same_fd(p[0], p[0]) > 0);
-        assert_se(same_fd(p[1], p[1]) > 0);
-        assert_se(same_fd(a, a) > 0);
-        assert_se(same_fd(b, b) > 0);
-
-        assert_se(same_fd(a, p[0]) > 0);
-        assert_se(same_fd(p[0], a) > 0);
-        assert_se(same_fd(c, p[0]) > 0);
-        assert_se(same_fd(p[0], c) > 0);
-        assert_se(same_fd(a, c) > 0);
-        assert_se(same_fd(c, a) > 0);
-
-        assert_se(same_fd(p[0], p[1]) == 0);
-        assert_se(same_fd(p[1], p[0]) == 0);
-        assert_se(same_fd(p[0], b) == 0);
-        assert_se(same_fd(b, p[0]) == 0);
-        assert_se(same_fd(p[1], a) == 0);
-        assert_se(same_fd(a, p[1]) == 0);
-        assert_se(same_fd(p[1], b) == 0);
-        assert_se(same_fd(b, p[1]) == 0);
-
-        assert_se(same_fd(a, b) == 0);
-        assert_se(same_fd(b, a) == 0);
-}
-
-static void test_uid_ptr(void) {
-
-        assert_se(UID_TO_PTR(0) != NULL);
-        assert_se(UID_TO_PTR(1000) != NULL);
-
-        assert_se(PTR_TO_UID(UID_TO_PTR(0)) == 0);
-        assert_se(PTR_TO_UID(UID_TO_PTR(1000)) == 1000);
-}
-
-static void test_sparse_write_one(int fd, const char *buffer, size_t n) {
-        char check[n];
-
-        assert_se(lseek(fd, 0, SEEK_SET) == 0);
-        assert_se(ftruncate(fd, 0) >= 0);
-        assert_se(sparse_write(fd, buffer, n, 4) == (ssize_t) n);
-
-        assert_se(lseek(fd, 0, SEEK_CUR) == (off_t) n);
-        assert_se(ftruncate(fd, n) >= 0);
-
-        assert_se(lseek(fd, 0, SEEK_SET) == 0);
-        assert_se(read(fd, check, n) == (ssize_t) n);
-
-        assert_se(memcmp(buffer, check, n) == 0);
-}
-
-static void test_sparse_write(void) {
-        const char test_a[] = "test";
-        const char test_b[] = "\0\0\0\0test\0\0\0\0";
-        const char test_c[] = "\0\0test\0\0\0\0";
-        const char test_d[] = "\0\0test\0\0\0test\0\0\0\0test\0\0\0\0\0test\0\0\0test\0\0\0\0test\0\0\0\0\0\0\0\0";
-        const char test_e[] = "test\0\0\0\0test";
-        _cleanup_close_ int fd = -1;
-        char fn[] = "/tmp/sparseXXXXXX";
-
-        fd = mkostemp(fn, O_CLOEXEC);
-        assert_se(fd >= 0);
-        unlink(fn);
-
-        test_sparse_write_one(fd, test_a, sizeof(test_a));
-        test_sparse_write_one(fd, test_b, sizeof(test_b));
-        test_sparse_write_one(fd, test_c, sizeof(test_c));
-        test_sparse_write_one(fd, test_d, sizeof(test_d));
-        test_sparse_write_one(fd, test_e, sizeof(test_e));
-}
-
-static void test_shell_escape_one(const char *s, const char *bad, const char *expected) {
-        _cleanup_free_ char *r;
-
-        assert_se(r = shell_escape(s, bad));
-        assert_se(streq_ptr(r, expected));
-}
-
-static void test_shell_escape(void) {
-        test_shell_escape_one("", "", "");
-        test_shell_escape_one("\\", "", "\\\\");
-        test_shell_escape_one("foobar", "", "foobar");
-        test_shell_escape_one("foobar", "o", "f\\o\\obar");
-        test_shell_escape_one("foo:bar,baz", ",:", "foo\\:bar\\,baz");
-}
-
-static void test_shell_maybe_quote_one(const char *s, const char *expected) {
-        _cleanup_free_ char *r;
-
-        assert_se(r = shell_maybe_quote(s));
-        assert_se(streq(r, expected));
-}
-
-static void test_shell_maybe_quote(void) {
-
-        test_shell_maybe_quote_one("", "");
-        test_shell_maybe_quote_one("\\", "\"\\\\\"");
-        test_shell_maybe_quote_one("\"", "\"\\\"\"");
-        test_shell_maybe_quote_one("foobar", "foobar");
-        test_shell_maybe_quote_one("foo bar", "\"foo bar\"");
-        test_shell_maybe_quote_one("foo \"bar\" waldo", "\"foo \\\"bar\\\" waldo\"");
-        test_shell_maybe_quote_one("foo$bar", "\"foo\\$bar\"");
-}
-
-static void test_tempfn(void) {
-        char *ret = NULL, *p;
-
-        assert_se(tempfn_xxxxxx("/foo/bar/waldo", NULL, &ret) >= 0);
-        assert_se(streq_ptr(ret, "/foo/bar/.#waldoXXXXXX"));
-        free(ret);
-
-        assert_se(tempfn_xxxxxx("/foo/bar/waldo", "[miau]", &ret) >= 0);
-        assert_se(streq_ptr(ret, "/foo/bar/.#[miau]waldoXXXXXX"));
-        free(ret);
-
-        assert_se(tempfn_random("/foo/bar/waldo", NULL, &ret) >= 0);
-        assert_se(p = startswith(ret, "/foo/bar/.#waldo"));
-        assert_se(strlen(p) == 16);
-        assert_se(in_charset(p, "0123456789abcdef"));
-        free(ret);
-
-        assert_se(tempfn_random("/foo/bar/waldo", "[wuff]", &ret) >= 0);
-        assert_se(p = startswith(ret, "/foo/bar/.#[wuff]waldo"));
-        assert_se(strlen(p) == 16);
-        assert_se(in_charset(p, "0123456789abcdef"));
-        free(ret);
-
-        assert_se(tempfn_random_child("/foo/bar/waldo", NULL, &ret) >= 0);
-        assert_se(p = startswith(ret, "/foo/bar/waldo/.#"));
-        assert_se(strlen(p) == 16);
-        assert_se(in_charset(p, "0123456789abcdef"));
-        free(ret);
-
-        assert_se(tempfn_random_child("/foo/bar/waldo", "[kikiriki]", &ret) >= 0);
-        assert_se(p = startswith(ret, "/foo/bar/waldo/.#[kikiriki]"));
-        assert_se(strlen(p) == 16);
-        assert_se(in_charset(p, "0123456789abcdef"));
-        free(ret);
-}
-
-static void test_strcmp_ptr(void) {
-        assert_se(strcmp_ptr(NULL, NULL) == 0);
-        assert_se(strcmp_ptr("", NULL) > 0);
-        assert_se(strcmp_ptr("foo", NULL) > 0);
-        assert_se(strcmp_ptr(NULL, "") < 0);
-        assert_se(strcmp_ptr(NULL, "bar") < 0);
-        assert_se(strcmp_ptr("foo", "bar") > 0);
-        assert_se(strcmp_ptr("bar", "baz") < 0);
-        assert_se(strcmp_ptr("foo", "foo") == 0);
-        assert_se(strcmp_ptr("", "") == 0);
-}
-
-static void test_fgetxattrat_fake(void) {
-        char t[] = "/var/tmp/xattrtestXXXXXX";
-        _cleanup_close_ int fd = -1;
-        const char *x;
-        char v[3] = {};
-        int r;
-
-        assert_se(mkdtemp(t));
-        x = strjoina(t, "/test");
-        assert_se(touch(x) >= 0);
-
-        r = setxattr(x, "user.foo", "bar", 3, 0);
-        if (r < 0 && errno == EOPNOTSUPP) /* no xattrs supported on /var/tmp... */
-                goto cleanup;
-        assert_se(r >= 0);
-
-        fd = open(t, O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOCTTY);
-        assert_se(fd >= 0);
-
-        assert_se(fgetxattrat_fake(fd, "test", "user.foo", v, 3, 0) >= 0);
-        assert_se(memcmp(v, "bar", 3) == 0);
-
-        safe_close(fd);
-        fd = open("/", O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOCTTY);
-        assert_se(fd >= 0);
-        assert_se(fgetxattrat_fake(fd, "usr", "user.idontexist", v, 3, 0) == -ENODATA);
-
-cleanup:
-        assert_se(unlink(x) >= 0);
-        assert_se(rmdir(t) >= 0);
-}
-
-static void test_runlevel_to_target(void) {
-        assert_se(streq_ptr(runlevel_to_target(NULL), NULL));
-        assert_se(streq_ptr(runlevel_to_target("unknown-runlevel"), NULL));
-        assert_se(streq_ptr(runlevel_to_target("3"), SPECIAL_MULTI_USER_TARGET));
-}
-
 int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
 
         test_streq_ptr();
         test_align_power2();
-        test_max();
-        test_container_of();
-        test_alloca();
-        test_div_round_up();
         test_first_word();
         test_close_many();
+        test_parse_boolean();
+        test_parse_pid();
         test_parse_uid();
+        test_safe_atolli();
+        test_safe_atod();
         test_strappend();
         test_strstrip();
         test_delete_chars();
         test_in_charset();
         test_hexchar();
         test_unhexchar();
-        test_base32hexchar();
-        test_unbase32hexchar();
-        test_base64char();
-        test_unbase64char();
         test_octchar();
         test_unoctchar();
         test_decchar();
         test_undecchar();
-        test_unhexmem();
-        test_base32hexmem();
-        test_unbase32hexmem();
-        test_base64mem();
-        test_unbase64mem();
         test_cescape();
         test_cunescape();
         test_foreach_word();
         test_foreach_word_quoted();
+        test_default_term_for_tty();
         test_memdup_multiply();
+        test_hostname_is_valid();
         test_u64log2();
+        test_get_process_comm();
         test_protect_errno();
-        test_parse_cpu_set();
-        test_config_parse_iec_uint64();
+        test_parse_size();
+        test_config_parse_iec_off();
         test_strextend();
         test_strrep();
         test_split_pair();
@@ -1696,36 +936,18 @@ int main(int argc, char *argv[]) {
         test_hexdump();
         test_log2i();
         test_foreach_string();
-        test_filename_is_valid();
-        test_string_has_cc();
+        test_filename_is_safe();
         test_ascii_strlower();
         test_files_same();
         test_is_valid_documentation_url();
         test_file_in_same_dir();
         test_endswith();
-        test_endswith_no_case();
         test_close_nointr();
         test_unlink_noerrno();
         test_readlink_and_make_absolute();
+        test_read_one_char();
         test_ignore_signals();
         test_strshorten();
-        test_strjoina();
-        test_is_symlink();
-        test_search_and_fopen();
-        test_search_and_fopen_nulstr();
-        test_glob_exists();
-        test_execute_directory();
-        test_parse_proc_cmdline();
-        test_raw_clone();
-        test_same_fd();
-        test_uid_ptr();
-        test_sparse_write();
-        test_shell_escape();
-        test_shell_maybe_quote();
-        test_tempfn();
-        test_strcmp_ptr();
-        test_fgetxattrat_fake();
-        test_runlevel_to_target();
 
         return 0;
 }

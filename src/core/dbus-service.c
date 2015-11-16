@@ -19,20 +19,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "alloc-util.h"
-#include "async.h"
-#include "bus-util.h"
-#include "dbus-cgroup.h"
+#include "strv.h"
+#include "path-util.h"
+#include "unit.h"
+#include "service.h"
+#include "dbus-unit.h"
 #include "dbus-execute.h"
 #include "dbus-kill.h"
+#include "dbus-cgroup.h"
 #include "dbus-service.h"
-#include "fd-util.h"
-#include "fileio.h"
-#include "path-util.h"
-#include "service.h"
-#include "string-util.h"
-#include "strv.h"
-#include "unit.h"
+#include "bus-util.h"
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_type, service_type, ServiceType);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, service_result, ServiceResult);
@@ -63,13 +59,8 @@ const sd_bus_vtable bus_service_vtable[] = {
         SD_BUS_PROPERTY("MainPID", "u", bus_property_get_pid, offsetof(Service, main_pid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("ControlPID", "u", bus_property_get_pid, offsetof(Service, control_pid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("BusName", "s", NULL, offsetof(Service, bus_name), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("FileDescriptorStoreMax", "u", bus_property_get_unsigned, offsetof(Service, n_fd_store_max), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("NFileDescriptorStore", "u", bus_property_get_unsigned, offsetof(Service, n_fd_store), 0),
         SD_BUS_PROPERTY("StatusText", "s", NULL, offsetof(Service, status_text), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("StatusErrno", "i", NULL, offsetof(Service, status_errno), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Result", "s", property_get_result, offsetof(Service, result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("USBFunctionDescriptors", "s", NULL, offsetof(Service, usb_function_descriptors), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("USBFunctionStrings", "s", NULL, offsetof(Service, usb_function_strings), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_STATUS_VTABLE("ExecMain", offsetof(Service, main_exec_status), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPre", offsetof(Service, exec_command[SERVICE_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStart", offsetof(Service, exec_command[SERVICE_EXEC_START]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
@@ -122,37 +113,6 @@ static int bus_service_set_transient_property(
                 if (mode != UNIT_CHECK) {
                         s->type = k;
                         unit_write_drop_in_private_format(UNIT(s), mode, name, "Type=%s\n", service_type_to_string(s->type));
-                }
-
-                return 1;
-
-        } else if (STR_IN_SET(name,
-                              "StandardInputFileDescriptor",
-                              "StandardOutputFileDescriptor",
-                              "StandardErrorFileDescriptor")) {
-                int fd;
-
-                r = sd_bus_message_read(message, "h", &fd);
-                if (r < 0)
-                        return r;
-
-                if (mode != UNIT_CHECK) {
-                        int copy;
-
-                        copy = fcntl(fd, F_DUPFD_CLOEXEC, 3);
-                        if (copy < 0)
-                                return -errno;
-
-                        if (streq(name, "StandardInputFileDescriptor")) {
-                                asynchronous_close(s->stdin_fd);
-                                s->stdin_fd = copy;
-                        } else if (streq(name, "StandardOutputFileDescriptor")) {
-                                asynchronous_close(s->stdout_fd);
-                                s->stdout_fd = copy;
-                        } else {
-                                asynchronous_close(s->stderr_fd);
-                                s->stderr_fd = copy;
-                        }
                 }
 
                 return 1;
@@ -226,8 +186,10 @@ static int bus_service_set_transient_property(
                         ExecCommand *c;
                         size_t size = 0;
 
-                        if (n == 0)
-                                s->exec_command[SERVICE_EXEC_START] = exec_command_free_list(s->exec_command[SERVICE_EXEC_START]);
+                        if (n == 0) {
+                                exec_command_free_list(s->exec_command[SERVICE_EXEC_START]);
+                                s->exec_command[SERVICE_EXEC_START] = NULL;
+                        }
 
                         f = open_memstream(&buf, &size);
                         if (!f)
@@ -248,9 +210,7 @@ static int bus_service_set_transient_property(
                                         a);
                         }
 
-                        r = fflush_and_check(f);
-                        if (r < 0)
-                                return r;
+                        fflush(f);
                         unit_write_drop_in_private(UNIT(s), mode, name, buf);
                 }
 

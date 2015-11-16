@@ -22,5 +22,6 @@
 ***/
 
 
+#include "sd-bus.h"
 
 extern const sd_bus_vtable bus_path_vtable[];

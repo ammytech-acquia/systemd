@@ -19,24 +19,20 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <poll.h>
+#include <sys/poll.h>
 #include <string.h>
 
-#include "sd-login.h"
+#include <systemd/sd-login.h>
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "formats-util.h"
-#include "string-util.h"
-#include "strv.h"
 #include "util.h"
+#include "strv.h"
 
 static void test_login(void) {
         _cleanup_close_pair_ int pair[2] = { -1, -1 };
         _cleanup_free_ char *pp = NULL, *qq = NULL;
         int r, k;
         uid_t u, u2;
-        char *seat, *type, *class, *display, *remote_user, *remote_host, *display_session, *cgroup;
+        char *seat, *type, *class, *display, *remote_user, *remote_host;
         char *session;
         char *state;
         char *session2;
@@ -52,16 +48,6 @@ static void test_login(void) {
 
         assert_se(sd_pid_get_owner_uid(0, &u2) == 0);
         printf("user = "UID_FMT"\n", u2);
-
-        assert_se(sd_pid_get_cgroup(0, &cgroup) == 0);
-        printf("cgroup = %s\n", cgroup);
-        free(cgroup);
-
-        display_session = NULL;
-        r = sd_uid_get_display(u2, &display_session);
-        assert_se(r >= 0 || r == -ENODATA);
-        printf("user's display session = %s\n", strna(display_session));
-        free(display_session);
 
         assert_se(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
         sd_peer_get_session(pair[0], &pp);
@@ -113,22 +99,16 @@ static void test_login(void) {
         printf("class = %s\n", class);
         free(class);
 
-        display = NULL;
-        r = sd_session_get_display(session, &display);
-        assert_se(r >= 0 || r == -ENODATA);
-        printf("display = %s\n", strna(display));
+        assert_se(sd_session_get_display(session, &display) >= 0);
+        printf("display = %s\n", display);
         free(display);
 
-        remote_user = NULL;
-        r = sd_session_get_remote_user(session, &remote_user);
-        assert_se(r >= 0 || r == -ENODATA);
-        printf("remote_user = %s\n", strna(remote_user));
+        assert_se(sd_session_get_remote_user(session, &remote_user) >= 0);
+        printf("remote_user = %s\n", remote_user);
         free(remote_user);
 
-        remote_host = NULL;
-        r = sd_session_get_remote_host(session, &remote_host);
-        assert_se(r >= 0 || r == -ENODATA);
-        printf("remote_host = %s\n", strna(remote_host));
+        assert_se(sd_session_get_remote_host(session, &remote_host) >= 0);
+        printf("remote_host = %s\n", remote_host);
         free(remote_host);
 
         assert_se(sd_session_get_seat(session, &seat) >= 0);

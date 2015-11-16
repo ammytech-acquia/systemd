@@ -22,12 +22,11 @@
 #include <stdlib.h>
 
 #include "sd-bus.h"
-
-#include "bus-util.h"
 #include "log.h"
+#include "bus-util.h"
 
 int main(int argc, char *argv[]) {
-        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int r;
 
         if (argc != 2) {
@@ -44,12 +43,12 @@ int main(int argc, char *argv[]) {
          * this to avoid an activation loop when we start dbus when we
          * are called when the dbus service is shut down. */
 
-        r = bus_connect_system_systemd(&bus);
+        r = bus_open_system_systemd(&bus);
         if (r < 0) {
                 /* If we couldn't connect we assume this was triggered
                  * while systemd got restarted/transitioned from
                  * initrd to the system, so let's ignore this */
-                log_debug_errno(r, "Failed to get D-Bus connection: %m");
+                log_debug("Failed to get D-Bus connection: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
 
@@ -59,9 +58,11 @@ int main(int argc, char *argv[]) {
                                "Released",
                                "s", argv[1]);
         if (r < 0) {
-                log_debug_errno(r, "Failed to send signal message on private connection: %m");
+                log_debug("Failed to send signal message on private connection: %s", strerror(-r));
                 return EXIT_FAILURE;
         }
+
+        sd_bus_flush(bus);
 
         return EXIT_SUCCESS;
 }

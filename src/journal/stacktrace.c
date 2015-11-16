@@ -22,13 +22,9 @@
 #include <dwarf.h>
 #include <elfutils/libdwfl.h>
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "formats-util.h"
+#include "util.h"
 #include "macro.h"
 #include "stacktrace.h"
-#include "string-util.h"
-#include "util.h"
 
 #define FRAMES_MAX 64
 #define THREADS_MAX 64
@@ -180,7 +176,8 @@ int coredump_make_stack_trace(int fd, const char *executable, char **ret) {
                 goto finish;
         }
 
-        c.f = safe_fclose(c.f);
+        fclose(c.f);
+        c.f = NULL;
 
         *ret = buf;
         buf = NULL;
@@ -194,7 +191,8 @@ finish:
         if (c.elf)
                 elf_end(c.elf);
 
-        safe_fclose(c.f);
+        if (c.f)
+                fclose(c.f);
 
         free(buf);
 

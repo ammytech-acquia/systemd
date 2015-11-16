@@ -19,20 +19,21 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <fcntl.h>
+#include <libudev.h>
 #include <linux/input.h>
+#include <linux/ioctl.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
-#include "libudev.h"
-
-#include "alloc-util.h"
-#include "bus-util.h"
-#include "fd-util.h"
-#include "logind-session-device.h"
-#include "missing.h"
 #include "util.h"
+#include "missing.h"
+#include "bus-util.h"
+#include "logind-session-device.h"
 
 enum SessionDeviceNotifications {
         SESSION_DEVICE_RESUME,
@@ -106,7 +107,7 @@ static int sd_eviocrevoke(int fd) {
 
         assert(fd >= 0);
 
-        r = ioctl(fd, EVIOCREVOKE, NULL);
+        r = ioctl(fd, EVIOCREVOKE, 1);
         if (r < 0) {
                 r = -errno;
                 if (r == -EINVAL && !warned) {

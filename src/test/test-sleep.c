@@ -19,12 +19,15 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <errno.h>
+#include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
 
+#include "util.h"
 #include "log.h"
 #include "sleep-config.h"
 #include "strv.h"
-#include "util.h"
 
 static void test_sleep(void) {
         _cleanup_strv_free_ char
@@ -56,7 +59,7 @@ int main(int argc, char* argv[]) {
         log_open();
 
         if (getuid() != 0)
-                log_warning("This program is unlikely to work for unprivileged users");
+                log_warning("This program is unlikely to work for unpriviledged users");
 
         test_sleep();
 

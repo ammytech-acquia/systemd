@@ -19,9 +19,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "bus-bloom.h"
-#include "siphash24.h"
 #include "util.h"
+#include "siphash24.h"
+#include "bus-bloom.h"
 
 static inline void set_bit(uint64_t filter[], unsigned long b) {
         filter[b >> 6] |= 1ULL << (b & 63);
@@ -45,10 +45,9 @@ static void bloom_add_data(
                 const void *data,      /* Data to hash */
                 size_t n) {            /* Size of data to hash in bytes */
 
-        uint64_t h;
+        uint8_t h[8];
         uint64_t m;
         unsigned w, i, c = 0;
-        unsigned hash_index;
 
         assert(size > 0);
         assert(k > 0);
@@ -66,17 +65,17 @@ static void bloom_add_data(
          * hash value for each 128 bits of hash key. */
         assert(k * w <= ELEMENTSOF(hash_keys) * 8);
 
-        for (i = 0, hash_index = 0; i < k; i++) {
+        for (i = 0; i < k; i++) {
                 uint64_t p = 0;
                 unsigned d;
 
                 for (d = 0; d < w; d++) {
                         if (c <= 0) {
-                                h = siphash24(data, n, hash_keys[hash_index++].bytes);
+                                siphash24(h, data, n, hash_keys[i++].bytes);
                                 c += 8;
                         }
 
-                        p = (p << 8ULL) | (uint64_t) ((uint8_t *)&h)[8 - c];
+                        p = (p << 8ULL) | (uint64_t) h[8 - c];
                         c--;
                 }
 
@@ -116,19 +115,11 @@ void bloom_add_prefixes(uint64_t filter[], size_t size, unsigned k, const char *
         p = stpcpy(stpcpy(c, a), ":");
         strcpy(p, b);
 
-        bloom_add_data(filter, size, k, c, n);
-
         for (;;) {
                 char *e;
 
                 e = strrchr(p, sep);
-                if (!e)
-                        break;
-
-                *(e + 1) = 0;
-                bloom_add_data(filter, size, k, c, e - c + 1);
-
-                if (e == p)
+                if (!e || e == p)
                         break;
 
                 *e = 0;

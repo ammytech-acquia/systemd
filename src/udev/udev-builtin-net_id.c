@@ -27,7 +27,7 @@
  * http://www.freedesktop.org/wiki/Software/systemd/PredictableNetworkInterfaceNames
  *
  * Two character prefixes based on the type of interface:
- *   en -- Ethernet
+ *   en -- ethernet
  *   sl -- serial line IP (slip)
  *   wl -- wlan
  *   ww -- wwan
@@ -35,7 +35,7 @@
  * Type of names:
  *   b<number>                             -- BCMA bus core number
  *   ccw<name>                             -- CCW bus group name
- *   o<index>[d<dev_port>]                 -- on-board device index number
+ *   o<index>                              -- on-board device index number
  *   s<slot>[f<function>][d<dev_port>]     -- hotplug slot index number
  *   x<MAC>                                -- MAC address
  *   [P<domain>]p<bus>s<slot>[f<function>][d<dev_port>]
@@ -53,17 +53,17 @@
  * exported.
  * The usual USB configuration == 1 and interface == 0 values are suppressed.
  *
- * PCI Ethernet card with firmware index "1":
+ * PCI ethernet card with firmware index "1":
  *   ID_NET_NAME_ONBOARD=eno1
  *   ID_NET_NAME_ONBOARD_LABEL=Ethernet Port 1
  *
- * PCI Ethernet card in hotplug slot with firmware index number:
+ * PCI ethernet card in hotplug slot with firmware index number:
  *   /sys/devices/pci0000:00/0000:00:1c.3/0000:05:00.0/net/ens1
  *   ID_NET_NAME_MAC=enx000000000466
  *   ID_NET_NAME_PATH=enp5s0
  *   ID_NET_NAME_SLOT=ens1
  *
- * PCI Ethernet multi-function card with 2 ports:
+ * PCI ethernet multi-function card with 2 ports:
  *   /sys/devices/pci0000:00/0000:00:1c.0/0000:02:00.0/net/enp2s0f0
  *   ID_NET_NAME_MAC=enx78e7d1ea46da
  *   ID_NET_NAME_PATH=enp2s0f0
@@ -87,21 +87,18 @@
  *   ID_NET_NAME_PATH=enp0s29u1u2
  */
 
-#include <errno.h>
-#include <fcntl.h>
-#include <net/if.h>
-#include <net/if_arp.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include <net/if.h>
+#include <net/if_arp.h>
 #include <linux/pci_regs.h>
 
-#include "fd-util.h"
-#include "fileio.h"
-#include "string-util.h"
 #include "udev.h"
+#include "fileio.h"
 
 enum netname_type{
         NET_UNDEF,
@@ -131,60 +128,46 @@ struct netnames {
 
 /* retrieve on-board index number and label from firmware */
 static int dev_pci_onboard(struct udev_device *dev, struct netnames *names) {
-        unsigned dev_port = 0;
-        size_t l;
-        char *s;
-        const char *attr;
+        const char *index;
         int idx;
 
         /* ACPI _DSM  -- device specific method for naming a PCI or PCI Express device */
-        attr = udev_device_get_sysattr_value(names->pcidev, "acpi_index");
+        index = udev_device_get_sysattr_value(names->pcidev, "acpi_index");
         /* SMBIOS type 41 -- Onboard Devices Extended Information */
-        if (!attr)
-                attr = udev_device_get_sysattr_value(names->pcidev, "index");
-        if (!attr)
+        if (!index)
+                index = udev_device_get_sysattr_value(names->pcidev, "index");
+        if (!index)
                 return -ENOENT;
-
-        idx = strtoul(attr, NULL, 0);
+        idx = strtoul(index, NULL, 0);
         if (idx <= 0)
                 return -EINVAL;
-
-        /* kernel provided port index for multiple ports on a single PCI function */
-        attr = udev_device_get_sysattr_value(dev, "dev_port");
-        if (attr)
-                dev_port = strtol(attr, NULL, 10);
-
-        s = names->pci_onboard;
-        l = sizeof(names->pci_onboard);
-        l = strpcpyf(&s, l, "o%d", idx);
-        if (dev_port > 0)
-                l = strpcpyf(&s, l, "d%d", dev_port);
-        if (l == 0)
-                names->pci_onboard[0] = '\0';
+        snprintf(names->pci_onboard, sizeof(names->pci_onboard), "o%d", idx);
 
         names->pci_onboard_label = udev_device_get_sysattr_value(names->pcidev, "label");
-
         return 0;
 }
 
 /* read the 256 bytes PCI configuration space to check the multi-function bit */
 static bool is_pci_multifunction(struct udev_device *dev) {
-        _cleanup_close_ int fd = -1;
-        const char *filename;
-        uint8_t config[64];
+        char filename[256];
+        FILE *f = NULL;
+        char config[64];
+        bool multi = false;
 
-        filename = strjoina(udev_device_get_syspath(dev), "/config");
-        fd = open(filename, O_RDONLY | O_CLOEXEC);
-        if (fd < 0)
-                return false;
-        if (read(fd, &config, sizeof(config)) != sizeof(config))
-                return false;
+        snprintf(filename, sizeof(filename), "%s/config", udev_device_get_syspath(dev));
+        f = fopen(filename, "re");
+        if (!f)
+                goto out;
+        if (fread(&config, sizeof(config), 1, f) != 1)
+                goto out;
 
         /* bit 0-6 header type, bit 7 multi/single function device */
         if ((config[PCI_HEADER_TYPE] & 0x80) != 0)
-                return true;
-
-        return false;
+                multi = true;
+out:
+        if (f)
+                fclose(f);
+        return multi;
 }
 
 static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
@@ -202,7 +185,7 @@ static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
         if (sscanf(udev_device_get_sysname(names->pcidev), "%x:%x:%x.%u", &domain, &bus, &slot, &func) != 4)
                 return -ENOENT;
 
-        /* kernel provided port index for multiple ports on a single PCI function */
+        /* kernel provided multi-device index */
         attr = udev_device_get_sysattr_value(dev, "dev_port");
         if (attr)
                 dev_port = strtol(attr, NULL, 10);
@@ -211,12 +194,12 @@ static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
         s = names->pci_path;
         l = sizeof(names->pci_path);
         if (domain > 0)
-                l = strpcpyf(&s, l, "P%u", domain);
-        l = strpcpyf(&s, l, "p%us%u", bus, slot);
+                l = strpcpyf(&s, l, "P%d", domain);
+        l = strpcpyf(&s, l, "p%ds%d", bus, slot);
         if (func > 0 || is_pci_multifunction(names->pcidev))
-                l = strpcpyf(&s, l, "f%u", func);
+                l = strpcpyf(&s, l, "f%d", func);
         if (dev_port > 0)
-                l = strpcpyf(&s, l, "d%u", dev_port);
+                l = strpcpyf(&s, l, "d%d", dev_port);
         if (l == 0)
                 names->pci_path[0] = '\0';
 
@@ -268,7 +251,7 @@ static int dev_pci_slot(struct udev_device *dev, struct netnames *names) {
                 if (dev_port > 0)
                         l = strpcpyf(&s, l, "d%d", dev_port);
                 if (l == 0)
-                        names->pci_slot[0] = '\0';
+                        names->pci_path[0] = '\0';
         }
 out:
         udev_device_unref(pci);
@@ -278,20 +261,9 @@ out:
 static int names_pci(struct udev_device *dev, struct netnames *names) {
         struct udev_device *parent;
 
-        assert(dev);
-        assert(names);
-
         parent = udev_device_get_parent(dev);
-
-        /* there can only ever be one virtio bus per parent device, so we can
-           safely ignore any virtio buses. see
-           <http://lists.linuxfoundation.org/pipermail/virtualization/2015-August/030331.html> */
-        while (parent && streq_ptr("virtio", udev_device_get_subsystem(parent)))
-                parent = udev_device_get_parent(parent);
-
         if (!parent)
                 return -ENOENT;
-
         /* check if our direct parent is a PCI device with no other bus in-between */
         if (streq_ptr("pci", udev_device_get_subsystem(parent))) {
                 names->type = NET_PCI;
@@ -314,9 +286,6 @@ static int names_usb(struct udev_device *dev, struct netnames *names) {
         char *interf;
         size_t l;
         char *s;
-
-        assert(dev);
-        assert(names);
 
         usbdev = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_interface");
         if (!usbdev)
@@ -341,7 +310,7 @@ static int names_usb(struct udev_device *dev, struct netnames *names) {
         s[0] = '\0';
         interf = s+1;
 
-        /* prefix every port number in the chain with "u" */
+        /* prefix every port number in the chain with "u"*/
         s = ports;
         while ((s = strchr(s, '.')))
                 s[0] = 'u';
@@ -366,9 +335,6 @@ static int names_bcma(struct udev_device *dev, struct netnames *names) {
         struct udev_device *bcmadev;
         unsigned int core;
 
-        assert(dev);
-        assert(names);
-
         bcmadev = udev_device_get_parent_with_subsystem_devtype(dev, "bcma", NULL);
         if (!bcmadev)
                 return -ENOENT;
@@ -389,9 +355,6 @@ static int names_ccw(struct  udev_device *dev, struct netnames *names) {
         const char *bus_id;
         size_t bus_id_len;
         int rc;
-
-        assert(dev);
-        assert(names);
 
         /* Retrieve the associated CCW device */
         cdev = udev_device_get_parent(dev);
@@ -602,5 +565,5 @@ out:
 const struct udev_builtin udev_builtin_net_id = {
         .name = "net_id",
         .cmd = builtin_net_id,
-        .help = "Network device properties",
+        .help = "network device properties",
 };
