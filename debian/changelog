@@ -1,11 +1,4 @@
-systemd (227-2ubuntu2) xenial; urgency=medium
-
-  * debian/patches/siphash24-unaligned.patch: fix siphash24
-    implementation to handle unaligned inputs.  Closes LP: #1512323.
-
- -- Steve Langasek <steve.langasek@ubuntu.com>  Sat, 14 Nov 2015 23:22:39 +0000
-
-systemd (227-2ubuntu1) xenial; urgency=medium
+systemd (228-1ubuntu1) xenial; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
@@ -32,10 +25,6 @@ systemd (227-2ubuntu1) xenial; urgency=medium
       Ubuntu we currently keep the setting whether the RTC is in local or UTC
       time in /etc/default/rcS "UTC=yes|no", instead of /etc/adjtime.
       (LP: #1377258)
-    - networkd: Change IPForward= default to "kernel". This keeps
-      compatibility with lots of packages which expect to be able to
-      enable global forwarding in /proc/sys/net/ipv4/ip_forward.
-      (LP: #1500992)
     - Put session scopes into all cgroup controllers. This makes unprivileged
       user LXC containers work under systemd. (LP: #1346734)
     - Don't attempt to migrate pid 1 itself when migrating cgroups for started
@@ -46,7 +35,7 @@ systemd (227-2ubuntu1) xenial; urgency=medium
     - Change systemd-sysv's conflicts to upstart-sysv. (LP: #1422681)
     - Don't build new systemd-journal-remote package and drop
       libmicrohttpd-dev. This is blocked by the MIR (LP #1488341).
-    - Build using libseccomp on all architectures (See Debian #800818)
+    - Build using libseccomp on powerpc and ppc64el (See Debian #800818).
 
     Upgrade fixes, keep until 16.04 LTS release:
     - systemd Conflicts/Replaces/Provides systemd-services.
@@ -59,9 +48,74 @@ systemd (227-2ubuntu1) xenial; urgency=medium
       that changes to point to systemd during the upgrade. This avoids running
       systemd during a dist-upgrade. (LP: #1430479)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 28 Oct 2015 09:46:04 +0100
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 18 Nov 2015 18:11:38 +0100
 
-systemd (227-3) UNRELEASED; urgency=medium
+systemd (228-1) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * New upstream release:
+    - Fix journald killing by watchdog. (Closes: #805042)
+    - Drop check for /etc/mtab. (Closes: #802025)
+    - Follow unit file symlinks in /usr, but not /etc when looking for
+      [Install] data, to avoid getting confused by Aliases. (Closes: #719695)
+    - journalctl: introduce short options for --since and --until.
+      (Closes: #801390)
+    - journald: Never accept fds from file systems with mandatory locking.
+      (LP: #1514141)
+    - Put nspawn containers in correct slice. (LP: #1455828)
+  * Cherry-pick some networkd fixes from trunk to fix regressions from 228.
+  * debian/rules: Configure with --as-needed to avoid unnecessary binary
+    dependencies.
+  * systemd-networkd-resolvconf-update.service: Increase StartLimitBurst, as
+    this might be legitimately called several times in quick succession. If
+    that part of the "networkd" autopkgtest fails, show the journal log for
+    that service for easier debugging.
+  * debian/tests/boot-and-services: Add test case for systemd-coredump.
+  * Add systemd-coredump postinst/prerm to enable/disable this without a
+    reboot.
+  * debian/tests/networkd: Check for systemd-networkd-wait-online in /usr as
+    well, for usage in other distros.
+  * debian/tests/logind: Skip suspend test if the kernel does not support
+    suspend.
+  * debian/tests/logind: Split tests into functions.
+  * debian/tests/boot-and-services: Ignore failures of console-setup.service,
+    to work around LP: #1516591.
+  * debian/tests/control: Restrict boot-smoke test to isolation-machine, it
+    does not currently work well in LXC.
+  * debian/tests/networkd: Add new test cases for "DHCP=all, IPv4 only,
+    disabling RA" (which should always be fast), "DHCP=all, IPv4 only" (which
+    will require a longer timeout due to waiting 12s for a potential IPv6 RA
+    reply), and "DHCP=ipv4" (with and without RA).
+  * debian/tests/networkd: Fix UnicodeDecodeError under 'C' locale.
+  * debian/tests/networkd: Show networkctl and journal output on failure.
+  * debian/tests/networkd: Fix bytes vs. string TypeError in the IPv6 polling.
+    (LP: #1516009)
+  * debian/tests/networkd: Show contents of test .network file on failure.
+  * debian/tests/networkd: Skip if networkd is already running (safer when
+    running on real systems), and add copyright header.
+  * Bump util-linux dependencies to >= 2.27.1 to ensure that the mount monitor
+    ignores /etc/mtab.
+
+  [ Felipe Sateler ]
+  * Enable elfutils support for getting stack traces for systemd-coredump.
+  * libnss-my{machines,hostname}.postrm: do not remove entries from
+    nsswitch.conf if there are packages from other architectures remaining.
+
+  [ Michael Biebl ]
+  * Drop systemd-setup-dgram-qlen.service. This has been made obsolete by
+    upstream commit 1985486 which bumps net.unix.max_dgram_qlen to 512 early
+    during boot.
+  * Various cleanups to the udev maintainer scripts:
+    - Remove unused tempdir() function.
+    - Properly stop udev daemon on remove.
+    - Stop killing udev daemon on failed upgrades and drop the corresponding
+      starts from preinst.
+    - Stop masking systemd-udevd.service and udev.service during upgrades. We
+      restart the udev daemon in postinst, so those masks seem unnecessary.
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 18 Nov 2015 16:11:59 +0100
+
+systemd (227-3) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/tests/logind: Add tests for scheduled shutdown with and without
@@ -78,13 +132,35 @@ systemd (227-3) UNRELEASED; urgency=medium
   * Drop Order-remote-fs.target-after-local-fs.target.patch. It's mostly
     academic and only applies to the already known-broken situation that rcS
     init.d scripts depend on $remote_fs.
+  * Replace reversion of sd_pid_notify_with_fds() msg_controllen fix with
+    proper upstream fix to never block on sending messages on NOTIFY_SOCKET
+    socket.
+  * Drop check for missing /etc/machine-id on "make check" failure; this isn't
+    happening on current buildds any more.
+  * Drop Disable-tests-which-fail-on-buildds.patch, to re-evaluate what still
+    fails and needs fixing. On failure, show kernel version and /etc/hosts
+    to be able to debug them better. The next upload will make the necessary
+    adjustments to fix package builds again.
 
   [ Michael Biebl ]
   * Drop dependency on udev from the systemd package. We don't need udev
     within a container, so this allows us to trim down the footprint by not
-    installing the udev package.
+    installing the udev package. As the udev package has Priority: important,
+    it is still installed by default though.
+  * Include the status of the udev package when filing a bug report against
+    systemd, and vice versa.
+  * Use filter instead of findstring, since findstring also matches
+    substrings and we only want direct matches.
+  * systemd.bug-script: Fix typo. (Closes: #804512)
+  * Re-add bits which call SELinux in systemd-user pam service.
+    (Closes: #804565)
 
- -- Martin Pitt <mpitt@debian.org>  Tue, 13 Oct 2015 11:03:21 +0200
+  [ Felipe Sateler ]
+  * Add libnss-resolve package. (Closes: #798905)
+  * Add systemd-coredump package. This Conflicts/Replaces/Provides a new
+    "core-dump-handler" virtual package. (Closes: #744964)
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 11 Nov 2015 15:04:26 +0100
 
 systemd (227-2) unstable; urgency=medium
 

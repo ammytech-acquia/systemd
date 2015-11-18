@@ -10,15 +10,23 @@ we need to update those files instead if the original files are symlinks into
 Forwarded: OMGno, this is a rather nasty hack until we fix system-image to get a writable /etc
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
- src/hostname/hostnamed.c | 27 +++++++++++++++++++++++----
+ src/hostname/hostnamed.c | 28 ++++++++++++++++++++++++----
  src/timedate/timedated.c | 31 +++++++++++++++++++++++++------
- 2 files changed, 48 insertions(+), 10 deletions(-)
+ 2 files changed, 49 insertions(+), 10 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index dd508ae..ff514af 100644
+index dde2baf..bf9096a 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -74,6 +74,25 @@ static void context_free(Context *c) {
+@@ -33,6 +33,7 @@
+ #include "hostname-util.h"
+ #include "parse-util.h"
+ #include "path-util.h"
++#include "fs-util.h"
+ #include "selinux-util.h"
+ #include "strv.h"
+ #include "user-util.h"
+@@ -78,6 +79,25 @@ static void context_free(Context *c) {
          bus_verify_polkit_async_registry_free(c->polkit_registry);
  }
  
@@ -44,7 +52,7 @@ index dd508ae..ff514af 100644
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -297,12 +316,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -301,12 +321,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -59,7 +67,7 @@ index dd508ae..ff514af 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -348,13 +367,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -352,13 +372,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -76,10 +84,10 @@ index dd508ae..ff514af 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index dcd8a38..8edcd60 100644
+index 2199f29..34b968c 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -176,6 +176,25 @@ static int context_read_data(Context *c) {
+@@ -180,6 +180,25 @@ static int context_read_data(Context *c) {
          return 0;
  }
  
@@ -105,7 +113,7 @@ index dcd8a38..8edcd60 100644
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
-@@ -184,10 +203,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -188,10 +207,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -118,7 +126,7 @@ index dcd8a38..8edcd60 100644
                          r = -errno;
  
                  return r;
-@@ -197,12 +216,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -201,12 +220,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
@@ -134,7 +142,7 @@ index dcd8a38..8edcd60 100644
                  if (r < 0)
                          return r;
          }
-@@ -254,7 +273,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -258,7 +277,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

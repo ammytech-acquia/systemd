@@ -4,6 +4,11 @@
 # See core-Put-session-scopes-into-all-cgroup-controllers.patch
 
 set -e
+if [ -z "$XDG_SESSION_ID" ]; then
+    echo 'Not running in logind session, skipping'
+    exit 0
+fi
+
 echo "---- cgroups for session $XDG_SESSION_ID -----"
 cat /proc/self/cgroup
 echo "----------------------------------------------"

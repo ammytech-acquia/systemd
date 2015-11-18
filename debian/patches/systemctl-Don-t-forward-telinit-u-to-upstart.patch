@@ -17,10 +17,10 @@ https://launchpad.net/bugs/1430479
  1 file changed, 7 insertions(+)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index ad289a9..e199281 100644
+index f2399dc..db4c338 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -7327,6 +7327,13 @@ static int parse_argv(int argc, char *argv[]) {
+@@ -7253,6 +7253,13 @@ static int parse_argv(int argc, char *argv[]) {
                                   * request to it. For now we simply
                                   * guess that it is Upstart. */
  
