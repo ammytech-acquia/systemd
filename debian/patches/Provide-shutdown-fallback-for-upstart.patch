@@ -17,7 +17,7 @@ LP: #1370329
  1 file changed, 42 insertions(+), 2 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index feb5d44..ad289a9 100644
+index 95f0daf..f2399dc 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
 @@ -31,6 +31,7 @@
@@ -28,7 +28,7 @@ index feb5d44..ad289a9 100644
  #include <unistd.h>
  
  #include "sd-bus.h"
-@@ -7401,6 +7402,41 @@ static int talk_initctl(void) {
+@@ -7327,6 +7328,41 @@ static int talk_initctl(void) {
  #endif
  }
  
@@ -70,7 +70,7 @@ index feb5d44..ad289a9 100644
  static int systemctl_main(int argc, char *argv[]) {
  
          static const Verb verbs[] = {
-@@ -7497,11 +7533,15 @@ static int start_with_fallback(void) {
+@@ -7421,11 +7457,15 @@ static int start_with_fallback(void) {
          if (start_unit(0, NULL, NULL) >= 0)
                  return 0;
  

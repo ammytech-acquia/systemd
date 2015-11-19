@@ -1,7 +1,7 @@
 ## Cherry-picked from upstream
-core-ignore-.slice-and-init.scope-when-isolating.patch
-sd-daemon-simply-code-simplification.patch
-sd-daemon-wipe-out-memory-before-using-CMSG_NXTHDR.patch
+networkd-ndisc-revert-to-letting-the-kernel-handle-NDisc.patch
+networkd-dhcp4-dirty-link-when-the-lease-changes.patch
+test-remove-wrong-endianess-conversion-in-test-siphash24.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
@@ -26,24 +26,19 @@ Make-run-lock-tmpfs-an-API-fs.patch
 Include-additional-directories-in-ProtectSystem.patch
 udev-re-enable-mount-propagation-for-udevd.patch
 Re-enable-journal-forwarding-to-syslog.patch
-Disable-tests-which-fail-on-buildds.patch
 Make-sd_login_monitor_new-work-for-logind-without-sy.patch
 Don-t-enable-audit-by-default.patch
 util-Add-hidden-suffixes-for-ucf.patch
 Only-start-logind-if-dbus-is-installed.patch
 cgroup-don-t-trim-cgroup-trees-created-by-someone-el.patch
-syslog-Increase-max_dgram_qlen-by-pulling-in-systemd.patch
 fsckd-daemon-for-inter-fsckd-communication.patch
 Skip-filesystem-check-if-already-done-by-the-initram.patch
 Revert-core-one-step-back-again-for-nspawn-we-actual.patch
-Revert-sd_pid_notify_with_fds-fix-computing-msg_cont.patch
 
 ## Ubuntu patches:
 Support-system-image-read-only-etc.patch
 Provide-shutdown-fallback-for-upstart.patch
 Get-RTC-is-in-local-time-setting-from-etc-default-rc.patch
-networkd-Change-IPForward-default-to-kernel.patch
 core-Put-session-scopes-into-all-cgroup-controllers.patch
 cg_migrate_everywhere-set-ignore_self-to-true.patch
 systemctl-Don-t-forward-telinit-u-to-upstart.patch
-siphash24-unaligned.patch

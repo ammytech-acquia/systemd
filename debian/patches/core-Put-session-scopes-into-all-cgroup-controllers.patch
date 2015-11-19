@@ -29,10 +29,10 @@ https://launchpad.net/bugs/1346734
  4 files changed, 94 insertions(+)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index a9124f5..4a7f546 100644
+index 0cb5b57..51e3146 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
-@@ -668,6 +668,27 @@ int cg_create(const char *controller, const char *path) {
+@@ -679,6 +679,27 @@ int cg_create(const char *controller, const char *path) {
          return 1;
  }
  
@@ -60,7 +60,7 @@ index a9124f5..4a7f546 100644
  int cg_create_and_attach(const char *controller, const char *path, pid_t pid) {
          int r, q;
  
-@@ -1856,6 +1877,42 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path
+@@ -1867,6 +1888,42 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path
          return 0;
  }
  
@@ -103,7 +103,7 @@ index a9124f5..4a7f546 100644
  int cg_attach_everywhere(CGroupMask supported, const char *path, pid_t pid, cg_migrate_callback_t path_callback, void *userdata) {
          CGroupController c;
          int r, unified;
-@@ -2253,6 +2310,11 @@ static const char *cgroup_controller_table[_CGROUP_CONTROLLER_MAX] = {
+@@ -2264,6 +2321,11 @@ static const char *cgroup_controller_table[_CGROUP_CONTROLLER_MAX] = {
          [CGROUP_CONTROLLER_DEVICES] = "devices",
          [CGROUP_CONTROLLER_PIDS] = "pids",
          [CGROUP_CONTROLLER_NET_CLS] = "net_cls",
@@ -148,10 +148,10 @@ index 01359fa..661ce4a 100644
  int cg_attach_many_everywhere(CGroupMask supported, const char *path, Set* pids, cg_migrate_callback_t callback, void *userdata);
  int cg_migrate_everywhere(CGroupMask supported, const char *from, const char *to, cg_migrate_callback_t callback, void *userdata);
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 5858c86..c13c803 100644
+index 6124a85..57ea554 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -567,6 +567,11 @@ CGroupMask unit_get_own_mask(Unit *u) {
+@@ -573,6 +573,11 @@ CGroupMask unit_get_own_mask(Unit *u) {
                          return _CGROUP_MASK_ALL;
          }
  
@@ -163,7 +163,7 @@ index 5858c86..c13c803 100644
          return cgroup_context_get_mask(c);
  }
  
-@@ -1465,6 +1470,11 @@ int manager_setup_cgroup(Manager *m) {
+@@ -1471,6 +1476,11 @@ int manager_setup_cgroup(Manager *m) {
                  /* 6.  Always enable hierarchical support if it exists... */
                  if (!unified)
                          (void) cg_set_attribute("memory", "/", "memory.use_hierarchy", "1");
@@ -176,10 +176,10 @@ index 5858c86..c13c803 100644
  
          /* 7. Figure out which controllers are supported */
 diff --git a/src/core/scope.c b/src/core/scope.c
-index 7325e36..5f47add 100644
+index 1953af1..4d6a463 100644
 --- a/src/core/scope.c
 +++ b/src/core/scope.c
-@@ -301,6 +301,21 @@ static int scope_start(Unit *u) {
+@@ -304,6 +304,21 @@ static int scope_start(Unit *u) {
          (void) unit_realize_cgroup(u);
          (void) unit_reset_cpu_usage(u);
  
