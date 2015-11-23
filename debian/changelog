@@ -1,27 +1,4 @@
-systemd (228-1ubuntu2) xenial; urgency=medium
-
-  * Merge with Debian to fix FTBFS.
-
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 19 Nov 2015 12:41:25 +0100
-
-systemd (228-3) UNRELEASED; urgency=medium
-
-  * debian/rules: Remove temporary debug output from test failures again. All
-    Debian buildd kernels are recent enough now, but add a check for kernels
-    older than 3.13 and ignore test failures for those.
-
- -- Martin Pitt <mpitt@debian.org>  Thu, 19 Nov 2015 12:09:17 +0100
-
-systemd (228-2) unstable; urgency=medium
-
-  * Remove wrong endianess conversion in test-siphash24 to fix FTBFS on
-    big-endian machines.
-  * Bump libseccomp-dev build dependency to indicate required versions for
-    backporting to jessie. (Closes: #805497)
-
- -- Martin Pitt <mpitt@debian.org>  Thu, 19 Nov 2015 11:37:45 +0100
-
-systemd (228-1ubuntu1) xenial; urgency=medium
+systemd (228-2ubuntu1) xenial; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
@@ -71,7 +48,41 @@ systemd (228-1ubuntu1) xenial; urgency=medium
       that changes to point to systemd during the upgrade. This avoids running
       systemd during a dist-upgrade. (LP: #1430479)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Wed, 18 Nov 2015 18:11:38 +0100
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 23 Nov 2015 11:35:02 +0100
+
+systemd (228-3) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/rules: Remove temporary debug output from test failures again. All
+    Debian buildd kernels are recent enough now, but add a check for kernels
+    older than 3.13 and ignore test failures for those.
+  * debian/tests/networkd: Factor out dnsmasq specific test "router" setup, so
+    that we can test against other implementations.
+  * debian/tests/networkd: Add router setup using an (isolated) networkd
+    process for configuring the veths and DHCP server.
+  * debian/tests/networkd: On failure, only show journal for current test.
+  * systemd-networkd-resolvconf-update.service: Wait for getting a name
+    server, not just for getting online.
+  * debian/tests/boot-and-services: Wait until bash crash stack trace is in
+    the journal before asserting on it. Also relax RE to work on non-x86
+    architectures.
+  * debian/tests/networkd: If /etc/resolv.conf already has three nameservers,
+    accept that too (as then the additional test one can't be added any more).
+
+  [ Michael Biebl ]
+  * Bump Build-Depends on libdw-dev to (>= 0.158) as per configure.ac.
+    (Closes: #805631)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 19 Nov 2015 12:09:17 +0100
+
+systemd (228-2) unstable; urgency=medium
+
+  * Remove wrong endianess conversion in test-siphash24 to fix FTBFS on
+    big-endian machines.
+  * Bump libseccomp-dev build dependency to indicate required versions for
+    backporting to jessie. (Closes: #805497)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 19 Nov 2015 11:37:45 +0100
 
 systemd (228-1) unstable; urgency=medium
 
