@@ -37,6 +37,7 @@ Build-Depends: debhelper (>= 9.20141010),
                libbz2-dev <!stage1>,
                zlib1g-dev <!stage1> | libz-dev <!stage1>,
                libcurl4-gnutls-dev <!stage1> | libcurl-dev <!stage1>,
+               libmicrohttpd-dev <!stage1>,
                libgnutls28-dev <!stage1>,
                libgcrypt20-dev,
                libkmod-dev (>= 15),
@@ -45,6 +46,7 @@ Build-Depends: debhelper (>= 9.20141010),
                libseccomp-dev (>= 1.0.0) [amd64 arm64 armel armhf i386 mips mipsel mips64 mips64el x32 powerpc ppc64el],
                libdw-dev (>= 0.158) <!stage1>,
                linux-base <!nocheck>,
+               acl <!nocheck>,
                python3:native,
                python3-lxml:native
 
@@ -293,8 +295,9 @@ Depends: ${shlibs:Depends},
          procps
 Breaks: consolekit (<< 0.4.6-1),
         kmod (<< 14),
-        plymouth (<< 0.9.0-0ubuntu8~),
+        plymouth (<< 0.9.0-7),
         bash-completion (<< 1:2.1),
+        lvm2 (<< 2.02.133-1ubuntu1),
         systemd (<< 224-2)
 Replaces: bash-completion (<< 1:2.1),
           systemd (<< 224-2)

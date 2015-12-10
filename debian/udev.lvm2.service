@@ -1,9 +1,0 @@
-[Unit]
-Description=Dummy job, LVM is handled via udev in Ubuntu
-DefaultDependencies=no
-Before=sysinit.target checkfs.service local-fs.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/true
