@@ -1,4 +1,4 @@
-systemd (228-3ubuntu1) xenial; urgency=medium
+systemd (228-4ubuntu1) xenial; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
@@ -30,7 +30,29 @@ systemd (228-3ubuntu1) xenial; urgency=medium
     - Make udev break on mdadm << 3.3-2ubuntu3, as udev's init script dropped
       the "Provides: raid-mdadm". This needs to be kept until after 16.04 LTS.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 03 Jan 2016 12:59:25 +0100
+  * Adjust our user LXC support patch to only chown the "systemd" controller
+    to the user. Other controllers are now being handled by libpam-cgm. Adjust
+    debian/tests/user-session-cgroups accordingly.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 14 Jan 2016 12:19:58 +0100
+
+systemd (228-5) UNRELEASED; urgency=medium
+
+  * Drop systemd-vconsole-setup.service: It has never been installed/used in
+    Debian and is not necessary for Ubuntu any more.
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 11 Jan 2016 14:00:11 +0100
+
+systemd (228-4) unstable; urgency=medium
+
+  * debian/udev.README.Debian: Add alternative way of disabling ifnames.
+    (Closes: #809339)
+  * Put back /lib/udev/hotplug.functions, until the three remaining packages
+    that use it stop doing so. (Closes: #810114)
+  * debian/udev.README.Debian: Point out that any change to interface naming
+    rules requires an initrd update.
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 11 Jan 2016 07:12:40 +0100
 
 systemd (228-3) unstable; urgency=medium
 
