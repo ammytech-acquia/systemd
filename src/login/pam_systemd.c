@@ -19,28 +19,34 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <sys/file.h>
 #include <pwd.h>
-#include <endian.h>
-#include <sys/capability.h>
-
-#include <security/pam_modules.h>
 #include <security/_pam_macros.h>
-#include <security/pam_modutil.h>
 #include <security/pam_ext.h>
 #include <security/pam_misc.h>
+#include <security/pam_modules.h>
+#include <security/pam_modutil.h>
+#include <sys/file.h>
 
-#include "util.h"
-#include "audit.h"
-#include "macro.h"
-#include "strv.h"
+#include "alloc-util.h"
+#include "audit-util.h"
+#include "bus-common-errors.h"
+#include "bus-error.h"
 #include "bus-util.h"
 #include "def.h"
-#include "socket-util.h"
+#include "fd-util.h"
 #include "fileio.h"
-#include "bus-error.h"
+#include "formats-util.h"
+#include "hostname-util.h"
+#include "login-util.h"
+#include "macro.h"
+#include "parse-util.h"
+#include "socket-util.h"
+#include "strv.h"
+#include "terminal-util.h"
+#include "util.h"
 
 static int parse_argv(
                 pam_handle_t *handle,
@@ -114,7 +120,7 @@ static int get_user_data(
         }
 
         *ret_pw = pw;
-        *ret_username = username ? username : pw->pw_name;
+        *ret_username = username;
 
         return PAM_SUCCESS;
 }
@@ -175,27 +181,38 @@ static int export_legacy_dbus_address(
                 uid_t uid,
                 const char *runtime) {
 
-#ifdef ENABLE_KDBUS
         _cleanup_free_ char *s = NULL;
-        int r;
+        int r = PAM_BUF_ERR;
 
-        /* skip export if kdbus is not active */
-        if (access("/dev/kdbus", F_OK) < 0)
-                return PAM_SUCCESS;
+        if (is_kdbus_available()) {
+                if (asprintf(&s, KERNEL_USER_BUS_ADDRESS_FMT ";" UNIX_USER_BUS_ADDRESS_FMT, uid, runtime) < 0)
+                        goto error;
+        } else {
+                /* FIXME: We *really* should move the access() check into the
+                 * daemons that spawn dbus-daemon, instead of forcing
+                 * DBUS_SESSION_BUS_ADDRESS= here. */
 
-        if (asprintf(&s, KERNEL_USER_BUS_FMT ";" UNIX_USER_BUS_FMT,
-                     uid, runtime) < 0) {
-                pam_syslog(handle, LOG_ERR, "Failed to set bus variable.");
-                return PAM_BUF_ERR;
+                s = strjoin(runtime, "/bus", NULL);
+                if (!s)
+                        goto error;
+
+                if (access(s, F_OK) < 0)
+                        return PAM_SUCCESS;
+
+                s = mfree(s);
+                if (asprintf(&s, UNIX_USER_BUS_ADDRESS_FMT, runtime) < 0)
+                        goto error;
         }
 
         r = pam_misc_setenv(handle, "DBUS_SESSION_BUS_ADDRESS", s, 0);
-        if (r != PAM_SUCCESS) {
-                pam_syslog(handle, LOG_ERR, "Failed to set bus variable.");
-                return r;
-        }
-#endif
+        if (r != PAM_SUCCESS)
+                goto error;
+
         return PAM_SUCCESS;
+
+error:
+        pam_syslog(handle, LOG_ERR, "Failed to set bus variable.");
+        return r;
 }
 
 _public_ PAM_EXTERN int pam_sm_open_session(
@@ -213,7 +230,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 *seat = NULL,
                 *type = NULL, *class = NULL,
                 *class_pam = NULL, *type_pam = NULL, *cvtnr = NULL, *desktop = NULL;
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
         int session_fd = -1, existing, r;
         bool debug = false, remote;
         struct passwd *pw;
@@ -250,28 +267,20 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         pam_get_item(handle, PAM_SERVICE, (const void**) &service);
         if (streq_ptr(service, "systemd-user")) {
-                _cleanup_free_ char *p = NULL, *rt = NULL;
+                _cleanup_free_ char *rt = NULL;
 
-                if (asprintf(&p, "/run/systemd/users/"UID_FMT, pw->pw_uid) < 0)
+                if (asprintf(&rt, "/run/user/"UID_FMT, pw->pw_uid) < 0)
                         return PAM_BUF_ERR;
 
-                r = parse_env_file(p, NEWLINE,
-                                   "RUNTIME", &rt,
-                                   NULL);
-                if (r < 0 && r != -ENOENT)
-                        return PAM_SESSION_ERR;
-
-                if (rt)  {
-                        r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", rt, 0);
-                        if (r != PAM_SUCCESS) {
-                                pam_syslog(handle, LOG_ERR, "Failed to set runtime dir.");
-                                return r;
-                        }
-
-                        r = export_legacy_dbus_address(handle, pw->pw_uid, rt);
-                        if (r != PAM_SUCCESS)
-                                return r;
+                r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", rt, 0);
+                if (r != PAM_SUCCESS) {
+                        pam_syslog(handle, LOG_ERR, "Failed to set runtime dir.");
+                        return r;
                 }
+
+                r = export_legacy_dbus_address(handle, pw->pw_uid, rt);
+                if (r != PAM_SUCCESS)
+                        return r;
 
                 return PAM_SUCCESS;
         }
@@ -336,7 +345,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         /* If this fails vtnr will be 0, that's intended */
         if (!isempty(cvtnr))
-                safe_atou32(cvtnr, &vtnr);
+                (void) safe_atou32(cvtnr, &vtnr);
 
         if (!isempty(display) && !vtnr) {
                 if (isempty(seat))
@@ -346,7 +355,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         }
 
         if (seat && !streq(seat, "seat0") && vtnr != 0) {
-                pam_syslog(handle, LOG_DEBUG, "Ignoring vtnr %d for %s which is not seat0", vtnr, seat);
+                pam_syslog(handle, LOG_DEBUG, "Ignoring vtnr %"PRIu32" for %s which is not seat0", vtnr, seat);
                 vtnr = 0;
         }
 
@@ -369,7 +378,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         if (debug)
                 pam_syslog(handle, LOG_DEBUG, "Asking logind to create session: "
-                           "uid=%u pid=%u service=%s type=%s class=%s desktop=%s seat=%s vtnr=%u tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
+                           "uid="UID_FMT" pid="PID_FMT" service=%s type=%s class=%s desktop=%s seat=%s vtnr=%"PRIu32" tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
                            pw->pw_uid, getpid(),
                            strempty(service),
                            type, class, strempty(desktop),
@@ -399,8 +408,13 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                                remote_host,
                                0);
         if (r < 0) {
-                pam_syslog(handle, LOG_ERR, "Failed to create session: %s", bus_error_message(&error, r));
-                return PAM_SYSTEM_ERR;
+                if (sd_bus_error_has_name(&error, BUS_ERROR_SESSION_BUSY)) {
+                        pam_syslog(handle, LOG_DEBUG, "Cannot create session: %s", bus_error_message(&error, r));
+                        return PAM_SUCCESS;
+                } else {
+                        pam_syslog(handle, LOG_ERR, "Failed to create session: %s", bus_error_message(&error, r));
+                        return PAM_SYSTEM_ERR;
+                }
         }
 
         r = sd_bus_message_read(reply,
@@ -479,7 +493,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                         return PAM_SESSION_ERR;
                 }
 
-                r = pam_set_data(handle, "systemd.session-fd", INT_TO_PTR(session_fd+1), NULL);
+                r = pam_set_data(handle, "systemd.session-fd", FD_TO_PTR(session_fd), NULL);
                 if (r != PAM_SUCCESS) {
                         pam_syslog(handle, LOG_ERR, "Failed to install session fd.");
                         safe_close(session_fd);
@@ -496,7 +510,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                 int argc, const char **argv) {
 
         _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_bus_flush_close_unref_ sd_bus *bus = NULL;
         const void *existing = NULL;
         const char *id;
         int r;

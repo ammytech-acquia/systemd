@@ -21,12 +21,17 @@
 
 #include <errno.h>
 #include <string.h>
-#include <libudev.h>
 
-#include "util.h"
-#include "sysfs-show.h"
+#include "libudev.h"
+
+#include "alloc-util.h"
+#include "locale-util.h"
 #include "path-util.h"
+#include "string-util.h"
+#include "sysfs-show.h"
+#include "terminal-util.h"
 #include "udev-util.h"
+#include "util.h"
 
 static int show_sysfs_one(
                 struct udev *udev,
@@ -113,7 +118,7 @@ static int show_sysfs_one(
                              "%s%s:%s%s%s%s",
                              is_master ? "[MASTER] " : "",
                              subsystem, sysname,
-                             name ? " \"" : "", name ? name : "", name ? "\"" : "") < 0)
+                             name ? " \"" : "", strempty(name), name ? "\"" : "") < 0)
                         return -ENOMEM;
 
                 free(k);

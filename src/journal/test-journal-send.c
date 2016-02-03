@@ -19,9 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <systemd/sd-journal.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+#include "sd-journal.h"
 
 #include "log.h"
 
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]) {
                         "N_CPUS=%li", sysconf(_SC_NPROCESSORS_ONLN),
                         NULL);
 
-        sleep(10);
+        sleep(1);
 
         return 0;
 }

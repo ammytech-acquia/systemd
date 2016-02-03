@@ -21,6 +21,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include "sd-event.h"
+
 #include "util.h"
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_event*, sd_event_unref);

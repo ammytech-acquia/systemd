@@ -22,9 +22,10 @@
 #include <stdio.h>
 
 #include "sd-bus.h"
-#include "bus-util.h"
+
 #include "bus-internal.h"
 #include "bus-message.h"
+#include "bus-util.h"
 #include "refcnt.h"
 
 static void test_bus_new(void) {
@@ -34,11 +35,18 @@ static void test_bus_new(void) {
         printf("after new: refcount %u\n", REFCNT_GET(bus->n_ref));
 }
 
-static void test_bus_open(void) {
+static int test_bus_open(void) {
         _cleanup_bus_unref_ sd_bus *bus = NULL;
+        int r;
 
-        assert_se(sd_bus_open_system(&bus) >= 0);
+        r = sd_bus_open_system(&bus);
+        if (r == -ECONNREFUSED || r == -ENOENT)
+                return r;
+
+        assert_se(r >= 0);
         printf("after open: refcount %u\n", REFCNT_GET(bus->n_ref));
+
+        return 0;
 }
 
 static void test_bus_new_method_call(void) {
@@ -70,11 +78,20 @@ static void test_bus_new_signal(void) {
 }
 
 int main(int argc, char **argv) {
+        int r;
+
         log_parse_environment();
         log_open();
 
         test_bus_new();
-        test_bus_open();
+        r = test_bus_open();
+        if (r < 0) {
+                log_info("Failed to connect to bus, skipping tests.");
+                return EXIT_TEST_SKIP;
+        }
+
         test_bus_new_method_call();
         test_bus_new_signal();
+
+        return EXIT_SUCCESS;
 }

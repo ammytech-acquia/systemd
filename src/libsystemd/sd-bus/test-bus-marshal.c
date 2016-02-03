@@ -19,9 +19,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <assert.h>
+#include <math.h>
 #include <stdlib.h>
-#include <byteswap.h>
 
 #ifdef HAVE_GLIB
 #include <gio/gio.h>
@@ -31,14 +30,27 @@
 #include <dbus/dbus.h>
 #endif
 
+#include "sd-bus.h"
+
+#include "alloc-util.h"
+#include "bus-dump.h"
+#include "bus-label.h"
+#include "bus-message.h"
+#include "bus-util.h"
+#include "fd-util.h"
+#include "hexdecoct.h"
 #include "log.h"
 #include "util.h"
 
-#include "sd-bus.h"
-#include "bus-message.h"
-#include "bus-util.h"
-#include "bus-dump.h"
-#include "bus-label.h"
+static void test_bus_path_encode_unique(void) {
+        _cleanup_free_ char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *e = NULL;
+
+        assert_se(bus_path_encode_unique(NULL, "/foo/bar", "some.sender", "a.suffix", &a) >= 0 && streq_ptr(a, "/foo/bar/some_2esender/a_2esuffix"));
+        assert_se(bus_path_decode_unique(a, "/foo/bar", &b, &c) > 0 && streq_ptr(b, "some.sender") && streq_ptr(c, "a.suffix"));
+        assert_se(bus_path_decode_unique(a, "/bar/foo", &d, &d) == 0 && !d);
+        assert_se(bus_path_decode_unique("/foo/bar/onlyOneSuffix", "/foo/bar", &d, &d) == 0 && !d);
+        assert_se(bus_path_decode_unique("/foo/bar/_/_", "/foo/bar", &d, &e) > 0 && streq_ptr(d, "") && streq_ptr(e, ""));
+}
 
 static void test_bus_path_encode(void) {
         _cleanup_free_ char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *e = NULL, *f = NULL;
@@ -55,6 +67,36 @@ static void test_bus_path_encode(void) {
 
         assert_se(sd_bus_path_encode("/foo/bar", "foo.bar", &e) >= 0 && streq(e, "/foo/bar/foo_2ebar"));
         assert_se(sd_bus_path_decode(e, "/foo/bar", &f) > 0 && streq(f, "foo.bar"));
+}
+
+static void test_bus_path_encode_many(void) {
+        _cleanup_free_ char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *e = NULL, *f = NULL;
+
+        assert_se(sd_bus_path_decode_many("/foo/bar", "/prefix/%", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/prefix/bar", "/prefix/%bar", NULL) == 1);
+        assert_se(sd_bus_path_decode_many("/foo/bar", "/prefix/%/suffix", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/prefix/foobar/suffix", "/prefix/%/suffix", &a) == 1 && streq_ptr(a, "foobar"));
+        assert_se(sd_bus_path_decode_many("/prefix/one_foo_two/mid/three_bar_four/suffix", "/prefix/one_%_two/mid/three_%_four/suffix", &b, &c) == 1 && streq_ptr(b, "foo") && streq_ptr(c, "bar"));
+        assert_se(sd_bus_path_decode_many("/prefix/one_foo_two/mid/three_bar_four/suffix", "/prefix/one_%_two/mid/three_%_four/suffix", NULL, &d) == 1 && streq_ptr(d, "bar"));
+
+        assert_se(sd_bus_path_decode_many("/foo/bar", "/foo/bar/%", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/bar%", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%/bar", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%bar", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/bar/suffix") == 1);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%%/suffix", NULL, NULL) == 0); /* multiple '%' are treated verbatim */
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%/suffi", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%/suffix", &e) == 1 && streq_ptr(e, "bar"));
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/foo/%/%", NULL, NULL) == 1);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/%/%/%", NULL, NULL, NULL) == 1);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "%/%/%", NULL, NULL, NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/%/%", NULL, NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/%/%/", NULL, NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/%/", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "/%", NULL) == 0);
+        assert_se(sd_bus_path_decode_many("/foo/bar/suffix", "%", NULL) == 0);
+
+        assert_se(sd_bus_path_encode_many(&f, "/prefix/one_%_two/mid/three_%_four/suffix", "foo", "bar") >= 0 && streq_ptr(f, "/prefix/one_foo_two/mid/three_bar_four/suffix"));
 }
 
 static void test_bus_label_escape_one(const char *a, const char *b) {
@@ -94,6 +136,8 @@ int main(int argc, char *argv[]) {
         _cleanup_fclose_ FILE *ms = NULL;
         size_t first_size = 0, second_size = 0, third_size = 0;
         _cleanup_bus_unref_ sd_bus *bus = NULL;
+        double dbl;
+        uint64_t u64;
 
         r = sd_bus_default_system(&bus);
         if (r < 0)
@@ -118,6 +162,12 @@ int main(int argc, char *argv[]) {
         assert_se(r >= 0);
 
         r = sd_bus_message_append(m, "a{yv}", 2, 3, "s", "foo", 5, "s", "waldo");
+        assert_se(r >= 0);
+
+        r = sd_bus_message_append(m, "y(ty)y(yt)y", 8, 777ULL, 7, 9, 77, 7777ULL, 10);
+        assert_se(r >= 0);
+
+        r = sd_bus_message_append(m, "()");
         assert_se(r >= 0);
 
         r = sd_bus_message_append(m, "ba(ss)", 255, 3, "aaa", "1", "bbb", "2", "ccc", "3");
@@ -145,13 +195,16 @@ int main(int argc, char *argv[]) {
         r = sd_bus_message_append_array(m, 'u', NULL, 0);
         assert_se(r >= 0);
 
+        r = sd_bus_message_append(m, "a(stdo)", 1, "foo", 815ULL, 47.0, "/");
+        assert_se(r >= 0);
+
         r = bus_message_seal(m, 4711, 0);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, true);
+        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         ms = open_memstream(&first, &first_size);
-        bus_message_dump(m, ms, false);
+        bus_message_dump(m, ms, 0);
         fflush(ms);
         assert_se(!ferror(ms));
 
@@ -198,14 +251,14 @@ int main(int argc, char *argv[]) {
 
         m = sd_bus_message_unref(m);
 
-        r = bus_message_from_malloc(bus, buffer, sz, NULL, 0, NULL, NULL, &m);
+        r = bus_message_from_malloc(bus, buffer, sz, NULL, 0, NULL, &m);
         assert_se(r >= 0);
 
-        bus_message_dump(m, stdout, true);
+        bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
 
         fclose(ms);
         ms = open_memstream(&second, &second_size);
-        bus_message_dump(m, ms, false);
+        bus_message_dump(m, ms, 0);
         fflush(ms);
         assert_se(!ferror(ms));
         assert_se(first_size == second_size);
@@ -238,6 +291,25 @@ int main(int argc, char *argv[]) {
         assert_se(v == 5);
         assert_se(streq(y, "waldo"));
 
+        r = sd_bus_message_read(m, "y(ty)", &v, &u64, &u);
+        assert_se(r > 0);
+        assert_se(v == 8);
+        assert_se(u64 == 777);
+        assert_se(u == 7);
+
+        r = sd_bus_message_read(m, "y(yt)", &v, &u, &u64);
+        assert_se(r > 0);
+        assert_se(v == 9);
+        assert_se(u == 77);
+        assert_se(u64 == 7777);
+
+        r = sd_bus_message_read(m, "y", &v);
+        assert_se(r > 0);
+        assert_se(v == 10);
+
+        r = sd_bus_message_read(m, "()");
+        assert_se(r > 0);
+
         r = sd_bus_message_read(m, "ba(ss)", &boolean, 3, &x, &y, &a, &b, &c, &d);
         assert_se(r > 0);
         assert_se(boolean);
@@ -268,6 +340,13 @@ int main(int argc, char *argv[]) {
         assert_se(r > 0);
         assert_se(sz == 0);
 
+        r = sd_bus_message_read(m, "a(stdo)", 1, &x, &u64, &dbl, &y);
+        assert_se(r > 0);
+        assert_se(streq(x, "foo"));
+        assert_se(u64 == 815ULL);
+        assert_se(fabs(dbl - 47.0) < 0.1);
+        assert_se(streq(y, "/"));
+
         r = sd_bus_message_peek_type(m, NULL, NULL);
         assert_se(r == 0);
 
@@ -285,7 +364,7 @@ int main(int argc, char *argv[]) {
 
         fclose(ms);
         ms = open_memstream(&third, &third_size);
-        bus_message_dump(copy, ms, false);
+        bus_message_dump(copy, ms, 0);
         fflush(ms);
         assert_se(!ferror(ms));
 
@@ -310,7 +389,7 @@ int main(int argc, char *argv[]) {
 
         assert_se(sd_bus_message_verify_type(m, 'a', "{yv}") > 0);
 
-        r = sd_bus_message_skip(m, "a{yv}");
+        r = sd_bus_message_skip(m, "a{yv}y(ty)y(yt)y()");
         assert_se(r >= 0);
 
         assert_se(sd_bus_message_verify_type(m, 'b', NULL) > 0);
@@ -346,6 +425,8 @@ int main(int argc, char *argv[]) {
 
         test_bus_label_escape();
         test_bus_path_encode();
+        test_bus_path_encode_unique();
+        test_bus_path_encode_many();
 
         return 0;
 }

@@ -8,16 +8,57 @@ This reverts the Debian specific bits from
 46a2911bf2780f616396df5671dd901cc7cb54fd
 99f861310d3f05f4e86cb9582a94b891dbb3382b
 ---
+ src/basic/time-util.c    | 22 ++++++++++++++++++++--
  src/core/locale-setup.c  | 22 ++++++++++++++++++++++
- src/timedate/timedated.c | 16 ++++++++++++++++
- 2 files changed, 38 insertions(+)
+ src/timedate/timedated.c | 10 ++++++++++
+ 3 files changed, 52 insertions(+), 2 deletions(-)
 
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 647763a..06bc206 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -32,6 +32,7 @@
+ #include "strv.h"
+ #include "time-util.h"
+ #include "util.h"
++#include "fileio.h"
+ 
+ usec_t now(clockid_t clock_id) {
+         struct timespec ts;
+@@ -1105,8 +1106,25 @@ int get_timezone(char **tz) {
+         int r;
+ 
+         r = readlink_malloc("/etc/localtime", &t);
+-        if (r < 0)
+-                return r; /* returns EINVAL if not a symlink */
++        if (r < 0) {
++                if (r != -EINVAL)
++                        return r; /* returns EINVAL if not a symlink */
++
++                r = read_one_line_file("/etc/timezone", &t);
++                if (r < 0) {
++                        if (r != -ENOENT)
++                                log_warning("Failed to read /etc/timezone: %s", strerror(-r));
++                        return -EINVAL;
++                }
++
++                if (!timezone_is_valid(t))
++                        return -EINVAL;
++                z = strdup(t);
++                if (!z)
++                        return -ENOMEM;
++                *tz = z;
++                return 0;
++        }
+ 
+         e = path_startswith(t, "/usr/share/zoneinfo/");
+         if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 7a41035..3817ab0 100644
+index 4c8d920..417237b 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
-@@ -120,6 +120,28 @@ int locale_setup(char ***environment) {
-                         log_warning("Failed to read /etc/locale.conf: %s", strerror(-r));
+@@ -82,6 +82,28 @@ int locale_setup(char ***environment) {
+                         log_warning_errno(r, "Failed to read /etc/locale.conf: %m");
          }
  
 +        if (r <= 0) {
@@ -43,26 +84,13 @@ index 7a41035..3817ab0 100644
 +        }
 +
          add = NULL;
-         for (i = 0; i < _VARIABLE_MAX; i++) {
+         for (i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 204031f..58745cf 100644
+index 968ef8a..9df38b1 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -136,6 +136,12 @@ static int context_read_data(Context *c) {
-                 }
-         }
- 
-+        r = read_one_line_file("/etc/timezone", &c->zone);
-+        if (r < 0) {
-+                if (r != -ENOENT)
-+                        log_warning("Failed to read /etc/timezone: %s", strerror(-r));
-+        }
-+
- have_timezone:
-         if (isempty(c->zone)) {
-                 free(c->zone);
-@@ -150,6 +156,7 @@ have_timezone:
+@@ -89,6 +89,7 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
@@ -70,7 +98,7 @@ index 204031f..58745cf 100644
  
          assert(c);
  
-@@ -157,6 +164,9 @@ static int context_write_data_timezone(Context *c) {
+@@ -96,6 +97,9 @@ static int context_write_data_timezone(Context *c) {
                  if (unlink("/etc/localtime") < 0 && errno != ENOENT)
                          r = -errno;
  
@@ -80,12 +108,12 @@ index 204031f..58745cf 100644
                  return r;
          }
  
-@@ -168,6 +178,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -107,6 +111,12 @@ static int context_write_data_timezone(Context *c) {
          if (r < 0)
                  return r;
  
 +        if (stat("/etc/timezone", &st) == 0 && S_ISREG(st.st_mode)) {
-+                r = write_string_file_atomic("/etc/timezone", c->zone);
++                r = write_string_file("/etc/timezone", c->zone, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC);
 +                if (r < 0)
 +                        return r;
 +        }

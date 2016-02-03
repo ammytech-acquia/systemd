@@ -21,18 +21,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <inttypes.h>
 #include <stdbool.h>
-#include <sys/epoll.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 
 #include "sd-event.h"
-#include "journal-file.h"
+
+typedef struct Server Server;
+
 #include "hashmap.h"
-#include "util.h"
-#include "audit.h"
+#include "journal-file.h"
 #include "journald-rate-limit.h"
+#include "journald-stream.h"
 #include "list.h"
 
 typedef enum Storage {
@@ -52,14 +51,14 @@ typedef enum SplitMode {
         _SPLIT_INVALID = -1
 } SplitMode;
 
-typedef struct StdoutStream StdoutStream;
-
-typedef struct Server {
+struct Server {
         int syslog_fd;
         int native_fd;
         int stdout_fd;
         int dev_kmsg_fd;
+        int audit_fd;
         int hostname_fd;
+        int notify_fd;
 
         sd_event *event;
 
@@ -67,16 +66,20 @@ typedef struct Server {
         sd_event_source *native_event_source;
         sd_event_source *stdout_event_source;
         sd_event_source *dev_kmsg_event_source;
+        sd_event_source *audit_event_source;
         sd_event_source *sync_event_source;
         sd_event_source *sigusr1_event_source;
         sd_event_source *sigusr2_event_source;
         sd_event_source *sigterm_event_source;
         sd_event_source *sigint_event_source;
+        sd_event_source *sigrtmin1_event_source;
         sd_event_source *hostname_event_source;
+        sd_event_source *notify_event_source;
+        sd_event_source *watchdog_event_source;
 
         JournalFile *runtime_journal;
         JournalFile *system_journal;
-        Hashmap *user_journals;
+        OrderedHashmap *user_journals;
 
         uint64_t seqnum;
 
@@ -102,8 +105,9 @@ typedef struct Server {
         unsigned n_forward_syslog_missed;
         usec_t last_warn_forward_syslog_missed;
 
-        uint64_t cached_available_space;
-        usec_t cached_available_space_timestamp;
+        uint64_t cached_space_available;
+        uint64_t cached_space_limit;
+        usec_t cached_space_timestamp;
 
         uint64_t var_available_timestamp;
 
@@ -112,6 +116,7 @@ typedef struct Server {
         usec_t oldest_file_usec;
 
         LIST_HEAD(StdoutStream, stdout_streams);
+        LIST_HEAD(StdoutStream, stdout_streams_notify_queue);
         unsigned n_stdout_streams;
 
         char *tty_path;
@@ -127,13 +132,14 @@ typedef struct Server {
 
         MMapCache *mmap;
 
-        bool dev_kmsg_readable;
-
-        uint64_t *kernel_seqnum;
-
         struct udev *udev;
 
-        bool sync_scheduled;
+        uint64_t *kernel_seqnum;
+        bool dev_kmsg_readable:1;
+
+        bool send_watchdog:1;
+        bool sent_notify_ready:1;
+        bool sync_scheduled:1;
 
         char machine_id_field[sizeof("_MACHINE_ID=") + 32];
         char boot_id_field[sizeof("_BOOT_ID=") + 32];
@@ -141,14 +147,18 @@ typedef struct Server {
 
         /* Cached cgroup root, so that we don't have to query that all the time */
         char *cgroup_root;
-} Server;
+
+        usec_t watchdog_usec;
+};
+
+#define SERVER_MACHINE_ID(s) ((s)->machine_id_field + strlen("_MACHINE_ID="))
 
 #define N_IOVEC_META_FIELDS 20
 #define N_IOVEC_KERNEL_FIELDS 64
 #define N_IOVEC_UDEV_FIELDS 32
-#define N_IOVEC_OBJECT_FIELDS 11
+#define N_IOVEC_OBJECT_FIELDS 12
 
-void server_dispatch_message(Server *s, struct iovec *iovec, unsigned n, unsigned m, struct ucred *ucred, struct timeval *tv, const char *label, size_t label_len, const char *unit_id, int priority, pid_t object_pid);
+void server_dispatch_message(Server *s, struct iovec *iovec, unsigned n, unsigned m, const struct ucred *ucred, const struct timeval *tv, const char *label, size_t label_len, const char *unit_id, int priority, pid_t object_pid);
 void server_driver_message(Server *s, sd_id128_t message_id, const char *format, ...) _printf_(3,4);
 
 /* gperf lookup function */
@@ -165,13 +175,12 @@ const char *split_mode_to_string(SplitMode s) _const_;
 SplitMode split_mode_from_string(const char *s) _pure_;
 
 void server_fix_perms(Server *s, JournalFile *f, uid_t uid);
-bool shall_try_append_again(JournalFile *f, int r);
 int server_init(Server *s);
 void server_done(Server *s);
 void server_sync(Server *s);
-void server_vacuum(Server *s);
+int server_vacuum(Server *s, bool verbose, bool patch_min_use);
 void server_rotate(Server *s);
 int server_schedule_sync(Server *s, int priority);
 int server_flush_to_var(Server *s);
 void server_maybe_append_tags(Server *s);
-int process_datagram(sd_event_source *es, int fd, uint32_t revents, void *userdata);
+int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void *userdata);

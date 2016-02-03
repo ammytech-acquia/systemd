@@ -62,45 +62,60 @@ int sd_pid_get_session(pid_t pid, char **session);
  * return an error for system processes. */
 int sd_pid_get_owner_uid(pid_t pid, uid_t *uid);
 
-/* Get systemd unit (i.e. service) name from PID, for system
+/* Get systemd non-slice unit (i.e. service) name from PID, for system
  * services. This will return an error for non-service processes. */
 int sd_pid_get_unit(pid_t pid, char **unit);
 
-/* Get systemd unit (i.e. service) name from PID, for user
+/* Get systemd non-slice unit (i.e. service) name from PID, for user
  * services. This will return an error for non-user-service
  * processes. */
 int sd_pid_get_user_unit(pid_t pid, char **unit);
+
+/* Get slice name from PID. */
+int sd_pid_get_slice(pid_t pid, char **slice);
+
+/* Get user slice name from PID. */
+int sd_pid_get_user_slice(pid_t pid, char **slice);
 
 /* Get machine name from PID, for processes assigned to a VM or
  * container. This will return an error for non-machine processes. */
 int sd_pid_get_machine_name(pid_t pid, char **machine);
 
-/* Get slice name from PID. */
-int sd_pid_get_slice(pid_t pid, char **slice);
+/* Get the control group from a PID, relative to the root of the
+ * hierarchy. */
+int sd_pid_get_cgroup(pid_t pid, char **cgroup);
 
-/* Similar to sd_pid_get_session(), but retrieves data about peer of
- * connected AF_UNIX socket */
+/* Similar to sd_pid_get_session(), but retrieves data about the peer
+ * of a connected AF_UNIX socket */
 int sd_peer_get_session(int fd, char **session);
 
-/* Similar to sd_pid_get_owner_uid(), but retrieves data about peer of
- * connected AF_UNIX socket */
+/* Similar to sd_pid_get_owner_uid(), but retrieves data about the peer of
+ * a connected AF_UNIX socket */
 int sd_peer_get_owner_uid(int fd, uid_t *uid);
 
-/* Similar to sd_pid_get_unit(), but retrieves data about peer of
- * connected AF_UNIX socket */
+/* Similar to sd_pid_get_unit(), but retrieves data about the peer of
+ * a connected AF_UNIX socket */
 int sd_peer_get_unit(int fd, char **unit);
 
-/* Similar to sd_pid_get_user_unit(), but retrieves data about peer of
- * connected AF_UNIX socket */
+/* Similar to sd_pid_get_user_unit(), but retrieves data about the peer of
+ * a connected AF_UNIX socket */
 int sd_peer_get_user_unit(int fd, char **unit);
 
-/* Similar to sd_pid_get_machine_name(), but retrieves data about peer
- * of connected AF_UNIX socket */
+/* Similar to sd_pid_get_slice(), but retrieves data about the peer of
+ * a connected AF_UNIX socket */
+int sd_peer_get_slice(int fd, char **slice);
+
+/* Similar to sd_pid_get_user_slice(), but retrieves data about the peer of
+ * a connected AF_UNIX socket */
+int sd_peer_get_user_slice(int fd, char **slice);
+
+/* Similar to sd_pid_get_machine_name(), but retrieves data about the
+ * peer of a a connected AF_UNIX socket */
 int sd_peer_get_machine_name(int fd, char **machine);
 
-/* Similar to sd_pid_get_slice(), but retrieves data about peer of
- * connected AF_UNIX socket */
-int sd_peer_get_slice(int fd, char **slice);
+/* Similar to sd_pid_get_cgroup(), but retrieves data about the peer
+ * of a connected AF_UNIX socket. */
+int sd_peer_get_cgroup(pid_t pid, char **cgroup);
 
 /* Get state from UID. Possible states: offline, lingering, online, active, closing */
 int sd_uid_get_state(uid_t uid, char **state);
@@ -119,7 +134,7 @@ int sd_uid_get_sessions(uid_t uid, int require_active, char ***sessions);
 
 /* Return seats of user is on. If require_active is true, this will look for
  * active seats only. Returns the number of seats.
- * If seats is NULL, this will just return the number of seats.*/
+ * If seats is NULL, this will just return the number of seats. */
 int sd_uid_get_seats(uid_t uid, int require_active, char ***seats);
 
 /* Return 1 if the session is active. */
@@ -146,6 +161,9 @@ int sd_session_get_type(const char *session, char **type);
 
 /* Determine the class of this session, i.e. one of "user", "greeter" or "lock-screen". */
 int sd_session_get_class(const char *session, char **clazz);
+
+/* Determine the desktop brand of this session, i.e. something like "GNOME", "KDE" or "systemd-console". */
+int sd_session_get_desktop(const char *session, char **desktop);
 
 /* Determine the X11 display of this session. */
 int sd_session_get_display(const char *session, char **display);
@@ -180,6 +198,9 @@ int sd_seat_can_graphical(const char *seat);
 
 /* Return the class of machine */
 int sd_machine_get_class(const char *machine, char **clazz);
+
+/* Return the list if host-side network interface indices of a machine */
+int sd_machine_get_ifindices(const char *machine, int **ifindices);
 
 /* Get all seats, store in *seats. Returns the number of seats. If
  * seats is NULL, this only returns the number of seats. */

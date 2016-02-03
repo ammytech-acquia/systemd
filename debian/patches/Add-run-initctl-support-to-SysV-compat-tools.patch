@@ -7,14 +7,14 @@ Make the SysV compat tools in systemd-sysv try both /run/initctl and the
 traditional /dev/initctl. This makes them usable when running sysvinit
 as PID 1.
 ---
- src/systemctl/systemctl.c | 17 +++++++++++------
- 1 file changed, 11 insertions(+), 6 deletions(-)
+ src/systemctl/systemctl.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index 5b53aad..006eaba 100644
+index 51b82d5..95f0daf 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -6547,19 +6547,24 @@ static int talk_initctl(void) {
+@@ -7304,17 +7304,22 @@ static int talk_initctl(void) {
  
          request.runlevel = rl;
  
@@ -30,18 +30,15 @@ index 5b53aad..006eaba 100644
 +                        if (errno == ENOENT)
 +                                return 0;
  
--                log_error("Failed to open "INIT_FIFO": %m");
--                return -errno;
-+                        log_error("Failed to open initctl FIFO: %m");
-+                        return -errno;
+-                return log_error_errno(errno, "Failed to open "INIT_FIFO": %m");
++                        return log_error_errno(errno, "Failed to open "INIT_FIFO": %m");
 +                }
          }
  
-         errno = 0;
-         r = loop_write(fd, &request, sizeof(request), false) != sizeof(request);
-         if (r) {
--                log_error("Failed to write to "INIT_FIFO": %m");
-+                log_error("Failed to write to initctl FIFO: %m");
-                 return errno > 0 ? -errno : -EIO;
-         }
+         r = loop_write(fd, &request, sizeof(request), false);
+         if (r < 0)
+-                return log_error_errno(r, "Failed to write to "INIT_FIFO": %m");
++                return log_error_errno(r, "Failed to write to initctl FIFO: %m");
  
+         return 1;
+ #else

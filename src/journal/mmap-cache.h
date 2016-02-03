@@ -21,9 +21,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <inttypes.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+
+/* One context per object type, plus one of the header, plus one "additional" one */
+#define MMAP_CACHE_MAX_CONTEXTS 9
 
 typedef struct MMapCache MMapCache;
 
@@ -41,15 +43,9 @@ int mmap_cache_get(
         size_t size,
         struct stat *st,
         void **ret);
-int mmap_cache_release(
-        MMapCache *m,
-        int fd,
-        int prot,
-        unsigned context,
-        uint64_t offset,
-        size_t size);
 void mmap_cache_close_fd(MMapCache *m, int fd);
-void mmap_cache_close_context(MMapCache *m, unsigned context);
 
 unsigned mmap_cache_get_hit(MMapCache *m);
 unsigned mmap_cache_get_missed(MMapCache *m);
+
+bool mmap_cache_got_sigbus(MMapCache *m, int fd);

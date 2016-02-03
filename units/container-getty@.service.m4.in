@@ -14,14 +14,15 @@ After=rc-local.service
 )m4_dnl
 Before=getty.target
 IgnoreOnIsolate=yes
+ConditionPathExists=/dev/pts/%I
 
 [Service]
 ExecStart=-/sbin/agetty --noclear --keep-baud pts/%I 115200,38400,9600 $TERM
 Type=idle
 Restart=always
 RestartSec=0
-UtmpIdentifier=%I
-TTYPath=/dev/%I
+UtmpIdentifier=pts/%I
+TTYPath=/dev/pts/%I
 TTYReset=yes
 TTYVHangup=yes
 KillMode=process

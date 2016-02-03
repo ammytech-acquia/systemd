@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <unistd.h>
 
+#include "formats-util.h"
 #include "log.h"
 #include "util.h"
 

@@ -19,28 +19,37 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <unistd.h>
-#include <sys/epoll.h>
 #include <fcntl.h>
+#include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
-#include <systemd/sd-messages.h>
-#include <libudev.h>
+#include "libudev.h"
+#include "sd-messages.h"
 
-#include "journald-server.h"
+#include "escape.h"
+#include "fd-util.h"
+#include "formats-util.h"
+#include "io-util.h"
 #include "journald-kmsg.h"
+#include "journald-server.h"
 #include "journald-syslog.h"
+#include "parse-util.h"
+#include "process-util.h"
+#include "stdio-util.h"
+#include "string-util.h"
 
 void server_forward_kmsg(
         Server *s,
         int priority,
         const char *identifier,
         const char *message,
-        struct ucred *ucred) {
+        const struct ucred *ucred) {
 
         struct iovec iovec[5];
-        char header_priority[6], header_pid[16];
+        char header_priority[DECIMAL_STR_MAX(priority) + 3],
+             header_pid[sizeof("[]: ")-1 + DECIMAL_STR_MAX(pid_t) + 1];
         int n = 0;
         char *ident_buf = NULL;
 
@@ -60,8 +69,7 @@ void server_forward_kmsg(
         priority = syslog_fixup_facility(priority);
 
         /* First: priority field */
-        snprintf(header_priority, sizeof(header_priority), "<%i>", priority);
-        char_array_0(header_priority);
+        xsprintf(header_priority, "<%i>", priority);
         IOVEC_SET_STRING(iovec[n++], header_priority);
 
         /* Second: identifier and PID */
@@ -71,8 +79,7 @@ void server_forward_kmsg(
                         identifier = ident_buf;
                 }
 
-                snprintf(header_pid, sizeof(header_pid), "["PID_FMT"]: ", ucred->pid);
-                char_array_0(header_pid);
+                xsprintf(header_pid, "["PID_FMT"]: ", ucred->pid);
 
                 if (identifier)
                         IOVEC_SET_STRING(iovec[n++], identifier);
@@ -88,7 +95,7 @@ void server_forward_kmsg(
         IOVEC_SET_STRING(iovec[n++], "\n");
 
         if (writev(s->dev_kmsg_fd, iovec, n) < 0)
-                log_debug("Failed to write to /dev/kmsg for logging: %m");
+                log_debug_errno(errno, "Failed to write to /dev/kmsg for logging: %m");
 
         free(ident_buf);
 }
@@ -104,7 +111,7 @@ static bool is_us(const char *pid) {
         return t == getpid();
 }
 
-static void dev_kmsg_record(Server *s, char *p, size_t l) {
+static void dev_kmsg_record(Server *s, const char *p, size_t l) {
         struct iovec iovec[N_IOVEC_META_FIELDS + 7 + N_IOVEC_KERNEL_FIELDS + 2 + N_IOVEC_UDEV_FIELDS];
         char *message = NULL, *syslog_priority = NULL, *syslog_pid = NULL, *syslog_facility = NULL, *syslog_identifier = NULL, *source_time = NULL;
         int priority, r;
@@ -152,7 +159,7 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
                 /* Did we lose any? */
                 if (serial > *s->kernel_seqnum)
                         server_driver_message(s, SD_MESSAGE_JOURNAL_MISSED, "Missed %"PRIu64" kernel messages",
-                                              serial - *s->kernel_seqnum - 1);
+                                              serial - *s->kernel_seqnum);
 
                 /* Make sure we never read this one again. Note that
                  * we always store the next message serial we expect
@@ -189,7 +196,7 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
 
         for (j = 0; l > 0 && j < N_IOVEC_KERNEL_FIELDS; j++) {
                 char *m;
-                /* Meta data fields attached */
+                /* Metadata fields attached */
 
                 if (*k != ' ')
                         break;
@@ -202,8 +209,7 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
 
                 *e = 0;
 
-                m = cunescape_length_with_prefix(k, e - k, "_KERNEL_");
-                if (!m)
+                if (cunescape_length_with_prefix(k, e - k, "_KERNEL_", UNESCAPE_RELAX, &m) < 0)
                         break;
 
                 if (startswith(m, "_KERNEL_DEVICE="))
@@ -274,6 +280,9 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
         if (asprintf(&syslog_priority, "PRIORITY=%i", priority & LOG_PRIMASK) >= 0)
                 IOVEC_SET_STRING(iovec[n++], syslog_priority);
 
+        if (asprintf(&syslog_facility, "SYSLOG_FACILITY=%i", LOG_FAC(priority)) >= 0)
+                IOVEC_SET_STRING(iovec[n++], syslog_facility);
+
         if ((priority & LOG_FACMASK) == LOG_KERN)
                 IOVEC_SET_STRING(iovec[n++], "SYSLOG_IDENTIFIER=kernel");
         else {
@@ -295,13 +304,9 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
                         if (syslog_pid)
                                 IOVEC_SET_STRING(iovec[n++], syslog_pid);
                 }
-
-                if (asprintf(&syslog_facility, "SYSLOG_FACILITY=%i", LOG_FAC(priority)) >= 0)
-                        IOVEC_SET_STRING(iovec[n++], syslog_facility);
         }
 
-        message = cunescape_length_with_prefix(p, pl, "MESSAGE=");
-        if (message)
+        if (cunescape_length_with_prefix(p, pl, "MESSAGE=", UNESCAPE_RELAX, &message) >= 0)
                 IOVEC_SET_STRING(iovec[n++], message);
 
         server_dispatch_message(s, iovec, n, ELEMENTSOF(iovec), NULL, NULL, NULL, 0, NULL, priority, 0);
@@ -342,8 +347,7 @@ static int server_read_dev_kmsg(Server *s) {
                 if (errno == EAGAIN || errno == EINTR || errno == EPIPE)
                         return 0;
 
-                log_error("Failed to read from kernel: %m");
-                return -errno;
+                return log_error_errno(errno, "Failed to read from kernel: %m");
         }
 
         dev_kmsg_record(s, buffer, l);
@@ -413,13 +417,13 @@ int server_open_dev_kmsg(Server *s) {
                         goto fail;
                 }
 
-                log_error("Failed to add /dev/kmsg fd to event loop: %s", strerror(-r));
+                log_error_errno(r, "Failed to add /dev/kmsg fd to event loop: %m");
                 goto fail;
         }
 
         r = sd_event_source_set_priority(s->dev_kmsg_event_source, SD_EVENT_PRIORITY_IMPORTANT+10);
         if (r < 0) {
-                log_error("Failed to adjust priority of kmsg event source: %s", strerror(-r));
+                log_error_errno(r, "Failed to adjust priority of kmsg event source: %m");
                 goto fail;
         }
 
@@ -437,6 +441,7 @@ fail:
 int server_open_kernel_seqnum(Server *s) {
         _cleanup_close_ int fd;
         uint64_t *p;
+        int r;
 
         assert(s);
 
@@ -446,18 +451,19 @@ int server_open_kernel_seqnum(Server *s) {
 
         fd = open("/run/systemd/journal/kernel-seqnum", O_RDWR|O_CREAT|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, 0644);
         if (fd < 0) {
-                log_error("Failed to open /run/systemd/journal/kernel-seqnum, ignoring: %m");
+                log_error_errno(errno, "Failed to open /run/systemd/journal/kernel-seqnum, ignoring: %m");
                 return 0;
         }
 
-        if (posix_fallocate(fd, 0, sizeof(uint64_t)) < 0) {
-                log_error("Failed to allocate sequential number file, ignoring: %m");
+        r = posix_fallocate(fd, 0, sizeof(uint64_t));
+        if (r != 0) {
+                log_error_errno(r, "Failed to allocate sequential number file, ignoring: %m");
                 return 0;
         }
 
         p = mmap(NULL, sizeof(uint64_t), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
         if (p == MAP_FAILED) {
-                log_error("Failed to map sequential number file, ignoring: %m");
+                log_error_errno(errno, "Failed to map sequential number file, ignoring: %m");
                 return 0;
         }
 

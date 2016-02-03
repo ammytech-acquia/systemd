@@ -17,27 +17,29 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <stdio.h>
 #include <errno.h>
-#include <string.h>
 #include <fcntl.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <syslog.h>
-#include <time.h>
 #include <inttypes.h>
+#include <linux/bsg.h>
+#include <linux/types.h>
 #include <scsi/scsi.h>
 #include <scsi/sg.h>
-#include <linux/types.h>
-#include <linux/bsg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "libudev.h"
+
 #include "libudev-private.h"
+#include "random-util.h"
 #include "scsi.h"
 #include "scsi_id.h"
+#include "string-util.h"
 
 /*
  * A priority based list of id, naa, and binary/ascii for the identifier
@@ -135,9 +137,8 @@ static int sg_err_category_new(struct udev *udev,
                                         return SG_ERR_CAT_MEDIA_CHANGED;
                                 if (0x29 == asc)
                                         return SG_ERR_CAT_RESET;
-                        } else if (sense_key == ILLEGAL_REQUEST) {
+                        } else if (sense_key == ILLEGAL_REQUEST)
                                 return SG_ERR_CAT_NOTSUPPORTED;
-                        }
                 }
                 return SG_ERR_CAT_SENSE;
         }
@@ -362,7 +363,7 @@ resend:
                         dev_scsi->use_sg = 3;
                         goto resend;
                 }
-                log_debug("%s: ioctl failed: %m", dev_scsi->kernel);
+                log_debug_errno(errno, "%s: ioctl failed: %m", dev_scsi->kernel);
                 goto error;
         }
 
@@ -490,9 +491,8 @@ static int check_fill_0x83_id(struct udev *udev,
         if ((page_83[1] & 0x30) == 0x10) {
                 if (id_search->id_type != SCSI_ID_TGTGROUP)
                         return 1;
-        } else if ((page_83[1] & 0x30) != 0) {
+        } else if ((page_83[1] & 0x30) != 0)
                 return 1;
-        }
 
         if ((page_83[1] & 0x0f) != id_search->id_type)
                 return 1;
@@ -577,9 +577,8 @@ static int check_fill_0x83_id(struct udev *udev,
 
         if (id_search->id_type == SCSI_ID_NAA && wwn != NULL) {
                 strncpy(wwn, &serial[s], 16);
-                if (wwn_vendor_extension != NULL) {
+                if (wwn_vendor_extension != NULL)
                         strncpy(wwn_vendor_extension, &serial[s + 16], 16);
-                }
         }
 
         return 0;
@@ -820,12 +819,12 @@ int scsi_std_inquiry(struct udev *udev,
 
         fd = open(devname, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) {
-                log_debug("scsi_id: cannot open %s: %m", devname);
+                log_debug_errno(errno, "scsi_id: cannot open %s: %m", devname);
                 return 1;
         }
 
         if (fstat(fd, &statbuf) < 0) {
-                log_debug("scsi_id: cannot stat %s: %m", devname);
+                log_debug_errno(errno, "scsi_id: cannot stat %s: %m", devname);
                 err = 2;
                 goto out;
         }
@@ -862,7 +861,7 @@ int scsi_get_serial(struct udev *udev,
         int retval;
 
         memzero(dev_scsi->serial, len);
-        srand((unsigned int)getpid());
+        initialize_srand();
         for (cnt = 20; cnt > 0; cnt--) {
                 struct timespec duration;
 

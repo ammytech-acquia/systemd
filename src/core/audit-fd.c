@@ -21,13 +21,15 @@
 
 
 #include <errno.h>
+
 #include "audit-fd.h"
 
 #ifdef HAVE_AUDIT
 
-#include <stdbool.h>
 #include <libaudit.h>
+#include <stdbool.h>
 
+#include "fd-util.h"
 #include "log.h"
 #include "util.h"
 
@@ -41,7 +43,7 @@ int get_audit_fd(void) {
 
                 if (audit_fd < 0) {
                         if (errno != EAFNOSUPPORT && errno != EPROTONOSUPPORT)
-                                log_error("Failed to connect to audit log: %m");
+                                log_error_errno(errno, "Failed to connect to audit log: %m");
 
                         audit_fd = errno ? -errno : -EINVAL;
                 }

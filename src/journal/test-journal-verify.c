@@ -19,15 +19,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <fcntl.h>
 
-#include "util.h"
-#include "log.h"
+#include "fd-util.h"
 #include "journal-file.h"
 #include "journal-verify.h"
-#include "journal-authenticate.h"
+#include "log.h"
+#include "rm-rf.h"
+#include "terminal-util.h"
+#include "util.h"
 
 #define N_ENTRIES 6000
 #define RANDOM_RANGE 77
@@ -38,15 +40,15 @@ static void bit_toggle(const char *fn, uint64_t p) {
         int fd;
 
         fd = open(fn, O_RDWR|O_CLOEXEC);
-        assert(fd >= 0);
+        assert_se(fd >= 0);
 
         r = pread(fd, &b, 1, p/8);
-        assert(r == 1);
+        assert_se(r == 1);
 
         b ^= 1 << (p % 8);
 
         r = pwrite(fd, &b, 1, p/8);
-        assert(r == 1);
+        assert_se(r == 1);
 
         safe_close(fd);
 }
@@ -117,12 +119,11 @@ int main(int argc, char *argv[]) {
 
         assert_se(journal_file_verify(f, verification_key, &from, &to, &total, true) >= 0);
 
-        if (verification_key && JOURNAL_HEADER_SEALED(f->header)) {
+        if (verification_key && JOURNAL_HEADER_SEALED(f->header))
                 log_info("=> Validated from %s to %s, %s missing",
                          format_timestamp(a, sizeof(a), from),
                          format_timestamp(b, sizeof(b), to),
                          format_timespan(c, sizeof(c), total > to ? total - to : 0, 0));
-        }
 
         journal_file_close(f);
 
@@ -137,7 +138,7 @@ int main(int argc, char *argv[]) {
                         log_info("[ %"PRIu64"+%"PRIu64"]", p / 8, p % 8);
 
                         if (raw_verify("test.journal", verification_key) >= 0)
-                                log_notice(ANSI_HIGHLIGHT_RED_ON ">>>> %"PRIu64" (bit %"PRIu64") can be toggled without detection." ANSI_HIGHLIGHT_OFF, p / 8, p % 8);
+                                log_notice(ANSI_HIGHLIGHT_RED ">>>> %"PRIu64" (bit %"PRIu64") can be toggled without detection." ANSI_NORMAL, p / 8, p % 8);
 
                         bit_toggle("test.journal", p);
                 }
@@ -145,7 +146,7 @@ int main(int argc, char *argv[]) {
 
         log_info("Exiting...");
 
-        assert_se(rm_rf_dangerous(t, false, true, false) >= 0);
+        assert_se(rm_rf(t, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
 
         return 0;
 }

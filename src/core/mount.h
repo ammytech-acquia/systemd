@@ -23,28 +23,8 @@
 
 typedef struct Mount Mount;
 
-#include "unit.h"
 #include "kill.h"
 #include "execute.h"
-#include "cgroup.h"
-
-typedef enum MountState {
-        MOUNT_DEAD,
-        MOUNT_MOUNTING,               /* /bin/mount is running, but the mount is not done yet. */
-        MOUNT_MOUNTING_DONE,          /* /bin/mount is running, and the mount is done. */
-        MOUNT_MOUNTED,
-        MOUNT_REMOUNTING,
-        MOUNT_UNMOUNTING,
-        MOUNT_MOUNTING_SIGTERM,
-        MOUNT_MOUNTING_SIGKILL,
-        MOUNT_REMOUNTING_SIGTERM,
-        MOUNT_REMOUNTING_SIGKILL,
-        MOUNT_UNMOUNTING_SIGTERM,
-        MOUNT_UNMOUNTING_SIGKILL,
-        MOUNT_FAILED,
-        _MOUNT_STATE_MAX,
-        _MOUNT_STATE_INVALID = -1
-} MountState;
 
 typedef enum MountExecCommand {
         MOUNT_EXEC_MOUNT,
@@ -88,6 +68,8 @@ struct Mount {
         bool just_mounted:1;
         bool just_changed:1;
 
+        bool reset_cpu_usage:1;
+
         bool sloppy_options;
 
         MountResult result;
@@ -112,19 +94,16 @@ struct Mount {
         pid_t control_pid;
 
         sd_event_source *timer_event_source;
+
+        unsigned n_retry_umount;
 };
 
 extern const UnitVTable mount_vtable;
 
 void mount_fd_event(Manager *m, int events);
 
-const char* mount_state_to_string(MountState i) _const_;
-MountState mount_state_from_string(const char *s) _pure_;
-
 const char* mount_exec_command_to_string(MountExecCommand i) _const_;
 MountExecCommand mount_exec_command_from_string(const char *s) _pure_;
 
 const char* mount_result_to_string(MountResult i) _const_;
 MountResult mount_result_from_string(const char *s) _pure_;
-
-void warn_if_dir_nonempty(const char *unit, const char* where);

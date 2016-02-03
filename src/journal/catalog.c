@@ -19,27 +19,31 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <fcntl.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <locale.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <locale.h>
-#include <libgen.h>
+#include <unistd.h>
 
-#include "util.h"
-#include "log.h"
-#include "sparse-endian.h"
 #include "sd-id128.h"
-#include "hashmap.h"
-#include "strv.h"
-#include "strbuf.h"
-#include "strxcpyx.h"
-#include "conf-files.h"
-#include "mkdir.h"
+
+#include "alloc-util.h"
 #include "catalog.h"
+#include "conf-files.h"
+#include "fd-util.h"
+#include "fileio.h"
+#include "hashmap.h"
+#include "log.h"
+#include "mkdir.h"
+#include "path-util.h"
 #include "siphash24.h"
+#include "sparse-endian.h"
+#include "strbuf.h"
+#include "string-util.h"
+#include "strv.h"
+#include "util.h"
 
 const char * const catalog_file_dirs[] = {
         "/usr/local/lib/systemd/catalog/",
@@ -64,24 +68,14 @@ typedef struct CatalogItem {
         le64_t offset;
 } CatalogItem;
 
-unsigned long catalog_hash_func(const void *p, const uint8_t hash_key[HASH_KEY_SIZE]) {
+static void catalog_hash_func(const void *p, struct siphash *state) {
         const CatalogItem *i = p;
-        uint64_t u;
-        size_t l, sz;
-        void *v;
 
-        l = strlen(i->language);
-        sz = sizeof(i->id) + l;
-        v = alloca(sz);
-
-        memcpy(mempcpy(v, &i->id, sizeof(i->id)), i->language, l);
-
-        siphash24((uint8_t*) &u, v, sz, hash_key);
-
-        return (unsigned long) u;
+        siphash24_compress(&i->id, sizeof(i->id), state);
+        siphash24_compress(i->language, strlen(i->language), state);
 }
 
-int catalog_compare_func(const void *a, const void *b) {
+static int catalog_compare_func(const void *a, const void *b) {
         const CatalogItem *i = a, *j = b;
         unsigned k;
 
@@ -94,6 +88,11 @@ int catalog_compare_func(const void *a, const void *b) {
 
         return strcmp(i->language, j->language);
 }
+
+const struct hash_ops catalog_hash_ops = {
+        .hash = catalog_hash_func,
+        .compare = catalog_compare_func
+};
 
 static int finish_item(
                 Hashmap *h,
@@ -204,14 +203,12 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
         assert(path);
 
         f = fopen(path, "re");
-        if (!f) {
-                log_error("Failed to open file %s: %m", path);
-                return -errno;
-        }
+        if (!f)
+                return log_error_errno(errno, "Failed to open file %s: %m", path);
 
         r = catalog_file_lang(path, &deflang);
         if (r < 0)
-                log_error("Failed to determine language for file %s: %m", path);
+                log_error_errno(r, "Failed to determine language for file %s: %m", path);
         if (r == 1)
                 log_debug("File %s has language %s.", path, deflang);
 
@@ -224,8 +221,7 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
                         if (feof(f))
                                 break;
 
-                        log_error("Failed to read file %s: %m", path);
-                        return -errno;
+                        return log_error_errno(errno, "Failed to read file %s: %m", path);
                 }
 
                 n++;
@@ -262,8 +258,7 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
                                         if (r < 0)
                                                 return r;
 
-                                        free(lang);
-                                        lang = NULL;
+                                        lang = mfree(lang);
                                 }
 
                                 if (with_language) {
@@ -323,8 +318,8 @@ int catalog_import_file(Hashmap *h, struct strbuf *sb, const char *path) {
         return 0;
 }
 
-static long write_catalog(const char *database, Hashmap *h, struct strbuf *sb,
-                          CatalogItem *items, size_t n) {
+static int64_t write_catalog(const char *database, struct strbuf *sb,
+                             CatalogItem *items, size_t n) {
         CatalogHeader header;
         _cleanup_fclose_ FILE *w = NULL;
         int r;
@@ -336,23 +331,19 @@ static long write_catalog(const char *database, Hashmap *h, struct strbuf *sb,
                 return log_oom();
 
         r = mkdir_p(d, 0775);
-        if (r < 0) {
-                log_error("Recursive mkdir %s: %s", d, strerror(-r));
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Recursive mkdir %s: %m", d);
 
         r = fopen_temporary(database, &w, &p);
-        if (r < 0) {
-                log_error("Failed to open database for writing: %s: %s",
-                          database, strerror(-r));
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to open database for writing: %s: %m",
+                                       database);
 
         zero(header);
         memcpy(header.signature, CATALOG_SIGNATURE, sizeof(header.signature));
         header.header_size = htole64(ALIGN_TO(sizeof(CatalogHeader), 8));
         header.catalog_item_size = htole64(sizeof(CatalogItem));
-        header.n_items = htole64(hashmap_size(h));
+        header.n_items = htole64(n);
 
         r = -EIO;
 
@@ -374,25 +365,23 @@ static long write_catalog(const char *database, Hashmap *h, struct strbuf *sb,
                 goto error;
         }
 
-        fflush(w);
-
-        if (ferror(w)) {
-                log_error("%s: failed to write database.", p);
+        r = fflush_and_check(w);
+        if (r < 0) {
+                log_error_errno(r, "%s: failed to write database: %m", p);
                 goto error;
         }
 
         fchmod(fileno(w), 0644);
 
         if (rename(p, database) < 0) {
-                log_error("rename (%s -> %s) failed: %m", p, database);
-                r = -errno;
+                r = log_error_errno(errno, "rename (%s -> %s) failed: %m", p, database);
                 goto error;
         }
 
-        return ftell(w);
+        return ftello(w);
 
 error:
-        unlink(p);
+        (void) unlink(p);
         return r;
 }
 
@@ -405,9 +394,10 @@ int catalog_update(const char* database, const char* root, const char* const* di
         CatalogItem *i;
         Iterator j;
         unsigned n;
-        long r;
+        int r;
+        int64_t sz;
 
-        h = hashmap_new(catalog_hash_func, catalog_compare_func);
+        h = hashmap_new(&catalog_hash_ops);
         sb = strbuf_new();
 
         if (!h || !sb) {
@@ -417,7 +407,7 @@ int catalog_update(const char* database, const char* root, const char* const* di
 
         r = conf_files_list_strv(&files, ".catalog", root, dirs);
         if (r < 0) {
-                log_error("Failed to get catalog files: %s", strerror(-r));
+                log_error_errno(r, "Failed to get catalog files: %m");
                 goto finish;
         }
 
@@ -425,8 +415,7 @@ int catalog_update(const char* database, const char* root, const char* const* di
                 log_debug("Reading file '%s'", *f);
                 r = catalog_import_file(h, sb, *f);
                 if (r < 0) {
-                        log_error("Failed to import file '%s': %s.",
-                                  *f, strerror(-r));
+                        log_error_errno(r, "Failed to import file '%s': %m", *f);
                         goto finish;
                 }
         }
@@ -456,18 +445,19 @@ int catalog_update(const char* database, const char* root, const char* const* di
         assert(n == hashmap_size(h));
         qsort_safe(items, n, sizeof(CatalogItem), catalog_compare_func);
 
-        r = write_catalog(database, h, sb, items, n);
-        if (r < 0)
-                log_error("Failed to write %s: %s", database, strerror(-r));
-        else
-                log_debug("%s: wrote %u items, with %zu bytes of strings, %ld total size.",
-                          database, n, sb->len, r);
+        sz = write_catalog(database, sb, items, n);
+        if (sz < 0)
+                r = log_error_errno(sz, "Failed to write %s: %m", database);
+        else {
+                r = 0;
+                log_debug("%s: wrote %u items, with %zu bytes of strings, %"PRIi64" total size.",
+                          database, n, sb->len, sz);
+        }
 
 finish:
-        if (sb)
-                strbuf_cleanup(sb);
+        strbuf_cleanup(sb);
 
-        return r < 0 ? r : 0;
+        return r;
 }
 
 static int open_mmap(const char *database, int *_fd, struct stat *_st, void **_p) {
@@ -561,7 +551,7 @@ static const char *find_id(void *p, sd_id128_t id) {
 int catalog_get(const char* database, sd_id128_t id, char **_text) {
         _cleanup_close_ int fd = -1;
         void *p = NULL;
-        struct stat st;
+        struct stat st = {};
         char *text = NULL;
         int r;
         const char *s;
@@ -682,8 +672,7 @@ int catalog_list_items(FILE *f, const char *database, bool oneline, char **items
 
                 k = sd_id128_from_string(*item, &id);
                 if (k < 0) {
-                        log_error("Failed to parse id128 '%s': %s",
-                                  *item, strerror(-k));
+                        log_error_errno(k, "Failed to parse id128 '%s': %m", *item);
                         if (r == 0)
                                 r = k;
                         continue;
@@ -691,9 +680,8 @@ int catalog_list_items(FILE *f, const char *database, bool oneline, char **items
 
                 k = catalog_get(database, id, &msg);
                 if (k < 0) {
-                        log_full(k == -ENOENT ? LOG_NOTICE : LOG_ERR,
-                                 "Failed to retrieve catalog entry for '%s': %s",
-                                  *item, strerror(-k));
+                        log_full_errno(k == -ENOENT ? LOG_NOTICE : LOG_ERR, k,
+                                       "Failed to retrieve catalog entry for '%s': %m", *item);
                         if (r == 0)
                                 r = k;
                         continue;

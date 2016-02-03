@@ -23,11 +23,16 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "util.h"
-#include "macro.h"
 #include "sd-id128.h"
 
-_public_ char *sd_id128_to_string(sd_id128_t id, char s[33]) {
+#include "fd-util.h"
+#include "hexdecoct.h"
+#include "io-util.h"
+#include "macro.h"
+#include "random-util.h"
+#include "util.h"
+
+_public_ char *sd_id128_to_string(sd_id128_t id, char s[SD_ID128_STRING_MAX]) {
         unsigned n;
 
         assert_return(s, NULL);
@@ -108,9 +113,9 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
         static thread_local bool saved_machine_id_valid = false;
         _cleanup_close_ int fd = -1;
         char buf[33];
-        ssize_t k;
         unsigned j;
         sd_id128_t t;
+        int r;
 
         assert_return(ret, -EINVAL);
 
@@ -123,13 +128,9 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
         if (fd < 0)
                 return -errno;
 
-        k = loop_read(fd, buf, 33, false);
-        if (k < 0)
-                return (int) k;
-
-        if (k != 33)
-                return -EIO;
-
+        r = loop_read_exact(fd, buf, 33, false);
+        if (r < 0)
+                return r;
         if (buf[32] !='\n')
                 return -EIO;
 
@@ -157,10 +158,10 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
         static thread_local bool saved_boot_id_valid = false;
         _cleanup_close_ int fd = -1;
         char buf[36];
-        ssize_t k;
         unsigned j;
         sd_id128_t t;
         char *p;
+        int r;
 
         assert_return(ret, -EINVAL);
 
@@ -173,21 +174,21 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
         if (fd < 0)
                 return -errno;
 
-        k = loop_read(fd, buf, 36, false);
-        if (k < 0)
-                return (int) k;
-
-        if (k != 36)
-                return -EIO;
+        r = loop_read_exact(fd, buf, 36, false);
+        if (r < 0)
+                return r;
 
         for (j = 0, p = buf; j < 16; j++) {
                 int a, b;
 
-                if (p >= buf + k)
+                if (p >= buf + 35)
                         return -EIO;
 
-                if (*p == '-')
+                if (*p == '-') {
                         p++;
+                        if (p >= buf + 35)
+                                return -EIO;
+                }
 
                 a = unhexchar(p[0]);
                 b = unhexchar(p[1]);
@@ -219,7 +220,7 @@ _public_ int sd_id128_randomize(sd_id128_t *ret) {
 
         /* Turn this into a valid v4 UUID, to be nice. Note that we
          * only guarantee this for newly generated UUIDs, not for
-         * pre-existing ones.*/
+         * pre-existing ones. */
 
         *ret = make_v4_uuid(t);
         return 0;
