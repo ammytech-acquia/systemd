@@ -5,7 +5,6 @@ Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
 Uploaders: Michael Biebl <biebl@debian.org>,
            Marco d'Itri <md@linux.it>,
-           Michael Stapelberg <stapelberg@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>
 Standards-Version: 3.9.6
@@ -66,7 +65,6 @@ Depends: ${shlibs:Depends},
          libsystemd0 (= ${binary:Version}),
          util-linux (>= 2.27.1),
          mount (>= 2.26),
-         sysv-rc,
          adduser,
          libcap2-bin
 Breaks: lvm2 (<< 2.02.104-1),
@@ -74,8 +72,11 @@ Breaks: lvm2 (<< 2.02.104-1),
         apparmor (<< 2.9.2-1),
         systemd-shim (<< 8-2),
         ifupdown (<< 0.8.5~),
-Conflicts: klogd, systemd-services
-Replaces: systemd-services
+        udev (<< 228-5),
+Replaces: udev (<< 228-5),
+          systemd-services,
+Conflicts: klogd,
+           systemd-services,
 Provides: systemd-services
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
@@ -97,12 +98,14 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Conflicts: sysvinit-core,
-           upstart-sysv,
            upstart (<< 1.13.2-0ubuntu10~),
+           upstart-sysv,
+           openrc,
+           file-rc,
 Replaces: sysvinit (<< 2.88dsf-44~),
           sysvinit-core,
-          upstart-sysv,
           upstart (<< 1.13.2-0ubuntu10~),
+          upstart-sysv,
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
          ${misc:Depends}
@@ -127,11 +130,11 @@ Architecture: linux-any
 Multi-Arch: foreign
 Section: admin
 Priority: optional
-Conflicts: systemd (<< 224-2)
-Replaces: systemd (<< 224-2)
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd
+Breaks: systemd (<< 224-2)
+Replaces: systemd (<< 224-2)
 Description: systemd container/nspawn tools
  This package provides systemd's tools for nspawn and container/VM management:
   * systemd-nspawn
@@ -197,7 +200,8 @@ Multi-Arch: same
 Section: admin
 Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
 Breaks: systemd (<< 222-1)
 Replaces: systemd (<< 222-1)
 Description: nss module providing fallback resolution for the current hostname
@@ -219,7 +223,8 @@ Multi-Arch: same
 Section: admin
 Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
 Breaks: systemd (<< 222-1)
 Replaces: systemd (<< 222-1)
 Description: nss module to resolve hostnames for local container instances
@@ -233,12 +238,14 @@ Description: nss module to resolve hostnames for local container instances
 Package: libnss-resolve
 Architecture: linux-any
 Multi-Arch: same
-Replaces: systemd (<< 227-3)
-Breaks: systemd (<< 227-3)
 Section: admin
 Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
-Depends: ${shlibs:Depends}, ${misc:Depends}, systemd
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd,
+Breaks: systemd (<< 227-3)
+Replaces: systemd (<< 227-3)
 Description: nss module to resolve names via systemd-resolved
  nss-resolve is a plugin for the GNU Name Service Switch (NSS) functionality
  of the GNU C Library (glibc) providing DNS and LLMNR resolution to programs via
