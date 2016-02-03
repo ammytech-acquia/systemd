@@ -1,8 +1,7 @@
-From 0037a669ac9a2bbedccdb2f483111351e8ff4659 Mon Sep 17 00:00:00 2001
 From: Dimitri John Ledkov <xnox@ubuntu.com>
 Date: Fri, 29 Jan 2016 17:54:30 +0100
-Subject: [PATCH] udev: net_id - for ccw bus, shorten the identifier and stip
- leading zeros
+Subject: udev: net_id - for ccw bus,
+ shorten the identifier and stip leading zeros
 
 The commmon case default qeth link is enccw0.0.0600 is rather long.
 
@@ -20,10 +19,10 @@ Thus enccw0.0.0600 becomes enc600.
  1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
-index 104d511..4f8a759 100644
+index bf5c9c6..d6fb876 100644
 --- a/src/udev/udev-builtin-net_id.c
 +++ b/src/udev/udev-builtin-net_id.c
-@@ -36,7 +36,7 @@
+@@ -34,7 +34,7 @@
   *
   * Type of names:
   *   b<number>                             -- BCMA bus core number
@@ -32,7 +31,7 @@ index 104d511..4f8a759 100644
   *   o<index>[d<dev_port>]                 -- on-board device index number
   *   s<slot>[f<function>][d<dev_port>]     -- hotplug slot index number
   *   x<MAC>                                -- MAC address
-@@ -430,8 +430,15 @@ static int names_ccw(struct  udev_device *dev, struct netnames *names) {
+@@ -418,8 +418,15 @@ static int names_ccw(struct  udev_device *dev, struct netnames *names) {
          if (!bus_id_len || bus_id_len < 8 || bus_id_len > 9)
                  return -EINVAL;
  
