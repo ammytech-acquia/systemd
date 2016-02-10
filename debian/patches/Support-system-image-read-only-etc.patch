@@ -84,10 +84,10 @@ index dde2baf..bf9096a 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 2199f29..34b968c 100644
+index 9df38b1..eba63a2 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -180,6 +180,25 @@ static int context_read_data(Context *c) {
+@@ -86,6 +86,25 @@ static int context_read_data(Context *c) {
          return 0;
  }
  
@@ -113,7 +113,7 @@ index 2199f29..34b968c 100644
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
-@@ -188,10 +207,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -94,10 +113,10 @@ static int context_write_data_timezone(Context *c) {
          assert(c);
  
          if (isempty(c->zone)) {
@@ -126,12 +126,12 @@ index 2199f29..34b968c 100644
                          r = -errno;
  
                  return r;
-@@ -201,12 +220,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -107,12 +126,12 @@ static int context_write_data_timezone(Context *c) {
          if (!p)
                  return log_oom();
  
--        r = symlink_or_copy_atomic(p, "/etc/localtime");
-+        r = symlink_or_copy_atomic(p, writable_filename("/etc/localtime"));
+-        r = symlink_atomic(p, "/etc/localtime");
++        r = symlink_atomic(p, writable_filename("/etc/localtime"));
          if (r < 0)
                  return r;
  
@@ -142,7 +142,7 @@ index 2199f29..34b968c 100644
                  if (r < 0)
                          return r;
          }
-@@ -258,7 +277,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -164,7 +183,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {
