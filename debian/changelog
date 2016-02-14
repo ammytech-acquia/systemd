@@ -1,9 +1,16 @@
-systemd (228-6ubuntu1) xenial; urgency=medium
+systemd (229-1ubuntu2) xenial; urgency=medium
+
+  * time-util: map ALARM clockids to non-ALARM clockids in now(), to work on
+    architectures which don't support CLOCK_BOOTTIME_ALARM. Fixes FTBFS on
+    many architectures.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 14 Feb 2016 13:18:57 +0100
+
+systemd (229-1ubuntu1) xenial; urgency=medium
 
   * Merge with Debian unstable. Remaining Ubuntu changes:
     - Hack to support system-image read-only /etc, and modify files in
       /etc/writable/ instead.
-    - Build using libseccomp on powerpc and ppc64el (See Debian #800818).
 
     Upgrade fixes, keep until 16.04 LTS release:
     - systemd Conflicts/Replaces/Provides systemd-services.
@@ -26,14 +33,22 @@ systemd (228-6ubuntu1) xenial; urgency=medium
     - systemd.postinst: Bump Version comparison for migrating the UTC setting
       from /etc/default/rcS to /etc/adjtime, to run it for upgrades to 16.04.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 11 Feb 2016 00:31:51 +0100
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 11 Feb 2016 22:01:48 +0100
 
-systemd (228-7) UNRELEASED; urgency=medium
+systemd (229-1) unstable; urgency=medium
 
+  * New upstream release 229.
+    - Fix systemctl behaviour in chroots. (Closes: #802780)
+    - Fix SELinux context of /run/user/$UID. (Closes: #775651)
+    - Add option to optionally turn of color output. (Closes: #783692)
+    - Don't git-ignore src/journal-remote/browse.html. (Closes: #805514)
+    - Do not warn about Wants depencencies on masked units. (LP: #1543282)
+  * debian/systemd.install: Ship the new systemd-resolve.
+  * libsystemd0.symbols: Add new symbols from this release.
+  * systemd-coredump.postinst: Create systemd-coredump system user.
   * debian/tests/systemd-fsckd: Tame overly strict test for failed plymouth
     unit, which is a race condition with plymouthd auto-stopping.
     (LP: #1543144)
-  * Do not warn about Wants depencencies on masked units. (LP: #1543282)
   * Drop timedated-don-t-rely-on-usr-being-mounted-in-the-ini.patch.
     initramfs-tools has mounted /usr since Jessie, and tzdata now creates
     /etc/localtime as a symlink too (see #803144).
@@ -67,8 +82,9 @@ systemd (228-7) UNRELEASED; urgency=medium
      source with a checkout of an upstream pull request, branch, or commit,
      and remove debian/patches/. Call from debian/rules if $TEST_UPSTREAM is
      set. This will be used for upstream CI.
+  * Enable seccomp support on powerpc, ppc64el, and s390x.
 
- -- Martin Pitt <mpitt@debian.org>  Mon, 08 Feb 2016 22:43:55 +0100
+ -- Martin Pitt <mpitt@debian.org>  Thu, 11 Feb 2016 21:02:39 +0100
 
 systemd (228-6) unstable; urgency=medium
 
