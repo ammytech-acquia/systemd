@@ -1,27 +1,27 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-  This file is part of systemd.
+This file is part of systemd.
 
-  Copyright 2014 Zbigniew Jędrzejewski-Szmek
+Copyright 2014 Zbigniew Jędrzejewski-Szmek
 
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
+systemd is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
 
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
+systemd is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Lesser General Public License for more details.
 
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Lesser General Public License
+along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
-<refentry id="sd_bus_path_encode">
+<refentry id="sd_bus_path_encode" conditional="ENABLE_KDBUS">
 
   <refentryinfo>
     <title>sd_bus_path_encode</title>
@@ -44,9 +44,7 @@
 
   <refnamediv>
     <refname>sd_bus_path_encode</refname>
-    <refname>sd_bus_path_encode_many</refname>
     <refname>sd_bus_path_decode</refname>
-    <refname>sd_bus_path_decode_many</refname>
 
     <refpurpose>Convert an external identifier into an object path and back</refpurpose>
   </refnamediv>
@@ -63,24 +61,10 @@
       </funcprototype>
 
       <funcprototype>
-        <funcdef>int <function>sd_bus_path_encode_many</function></funcdef>
-        <paramdef>char **<parameter>out</parameter></paramdef>
-        <paramdef>const char *<parameter>path_template</parameter></paramdef>
-        <paramdef>...</paramdef>
-      </funcprototype>
-
-      <funcprototype>
         <funcdef>int <function>sd_bus_path_decode</function></funcdef>
-        <paramdef>const char *<parameter>path</parameter></paramdef>
         <paramdef>const char *<parameter>prefix</parameter></paramdef>
-        <paramdef>char **<parameter>ret_external_id</parameter></paramdef>
-      </funcprototype>
-
-      <funcprototype>
-        <funcdef>int <function>sd_bus_path_decode_many</function></funcdef>
         <paramdef>const char *<parameter>path</parameter></paramdef>
-        <paramdef>const char *<parameter>path_template</parameter></paramdef>
-        <paramdef>...</paramdef>
+        <paramdef>char **<parameter>ret_external_id</parameter></paramdef>
       </funcprototype>
     </funcsynopsis>
   </refsynopsisdiv>
@@ -125,28 +109,6 @@
     invalid in a bus object path by <literal>_</literal>, followed by a
     hexadecimal value. As a special case, the empty string will be
     replaced by a lone <literal>_</literal>.</para>
-
-    <para><function>sd_bus_path_encode_many()</function> works like
-    its counterpart <function>sd_bus_path_encode()</function>, but
-    takes a path template as argument and encodes multiple labels
-    according to its embedded directives. For each
-    <literal>%</literal> character found in the template, the caller
-    must provide a string via varargs, which will be encoded and
-    embedded at the position of the <literal>%</literal> character.
-    Any other character in the template is copied verbatim into the
-    encoded path.</para>
-
-    <para><function>sd_bus_path_decode_many()</function> does the
-    reverse of <function>sd_bus_path_encode_many()</function>. It
-    decodes the passed object path according to the given
-    path template. For each <literal>%</literal> character in the
-    template, the caller must provide an output storage
-    (<literal>char **</literal>) via varargs. The decoded label
-    will be stored there. Each <literal>%</literal> character will
-    only match the current label. It will never match across labels.
-    Furthermore, only a single directive is allowed per label.
-    If <literal>NULL</literal> is passed as output storage, the
-    label is verified but not returned to the caller.</para>
   </refsect1>
 
   <refsect1>
@@ -161,7 +123,7 @@
     the return parameter. On failure, a negative errno-style error
     number is returned by either function. The returned strings must
     be
-    <citerefentry project='man-pages'><refentrytitle>free</refentrytitle><manvolnum>3</manvolnum></citerefentry>'d
+    <citerefentry><refentrytitle>free</refentrytitle><manvolnum>3</manvolnum></citerefentry>'d
     by the caller.</para>
   </refsect1>
 
@@ -171,7 +133,7 @@
     <para><function>sd_bus_path_encode()</function> and
     <function>sd_bus_path_decode()</function> are available as a
     shared library, which can be compiled and linked to with the
-    <constant>libsystemd</constant> <citerefentry project='die-net'><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    <constant>libsystemd</constant> <citerefentry><refentrytitle>pkg-config</refentrytitle><manvolnum>1</manvolnum></citerefentry>
     file.</para>
   </refsect1>
 
@@ -181,7 +143,7 @@
     <para>
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd-bus</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>free</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+      <citerefentry><refentrytitle>free</refentrytitle><manvolnum>3</manvolnum></citerefentry>
     </para>
   </refsect1>
 

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -19,10 +21,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
 #include <sys/types.h>
-
-#include "libudev.h"
+#include <stdbool.h>
+#include <libudev.h>
 
 #ifdef HAVE_ACL
 

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,24 +19,25 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "architecture.h"
-#include "log.h"
-#include "util.h"
 #include "virt.h"
+#include "architecture.h"
+#include "util.h"
+#include "log.h"
 
 int main(int argc, char *argv[]) {
-        int a, v;
+        Architecture a;
+        int v;
+        const char *id = NULL;
 
-        v = detect_virtualization();
+        v = detect_virtualization(&id);
         if (v == -EPERM || v == -EACCES)
                 return EXIT_TEST_SKIP;
 
         assert_se(v >= 0);
 
         log_info("virtualization=%s id=%s",
-                 VIRTUALIZATION_IS_CONTAINER(v) ? "container" :
-                 VIRTUALIZATION_IS_VM(v)        ? "vm" : "n/a",
-                 virtualization_to_string(v));
+                 v == VIRTUALIZATION_CONTAINER ? "container" : v == VIRTUALIZATION_VM ? "vm" : "n/a",
+                 strna(id));
 
         a = uname_architecture();
         assert_se(a >= 0);

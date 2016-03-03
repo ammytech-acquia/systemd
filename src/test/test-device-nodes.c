@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,9 +21,7 @@
 
 #include <sys/types.h>
 
-#include "alloc-util.h"
 #include "device-nodes.h"
-#include "string-util.h"
 #include "util.h"
 
 /* helpers for test_encode_devnode_name */

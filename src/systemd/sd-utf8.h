@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #ifndef foosdutf8hfoo
 #define foosdutf8hfoo
 

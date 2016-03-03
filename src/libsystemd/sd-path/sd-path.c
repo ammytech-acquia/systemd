@@ -17,18 +17,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "sd-path.h"
-
-#include "alloc-util.h"
-#include "architecture.h"
-#include "fd-util.h"
-#include "fileio.h"
-#include "missing.h"
-#include "path-util.h"
-#include "string-util.h"
-#include "strv.h"
-#include "user-util.h"
 #include "util.h"
+#include "architecture.h"
+#include "path-util.h"
+#include "strv.h"
+#include "sd-path.h"
 
 static int from_environment(const char *envname, const char *fallback, const char **ret) {
         assert(ret);
@@ -329,10 +322,10 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return from_user_dir("XDG_DESKTOP_DIR", buffer, ret);
         }
 
-        return -EOPNOTSUPP;
+        return -ENOTSUP;
 }
 
-_public_ int sd_path_home(uint64_t type, const char *suffix, char **path) {
+int sd_path_home(uint64_t type, const char *suffix, char **path) {
         char *buffer = NULL, *cc;
         const char *ret;
         int r;
@@ -558,10 +551,10 @@ static int get_search(uint64_t type, char ***list) {
                                                NULL);
         }
 
-        return -EOPNOTSUPP;
+        return -ENOTSUP;
 }
 
-_public_ int sd_path_search(uint64_t type, const char *suffix, char ***paths) {
+int sd_path_search(uint64_t type, const char *suffix, char ***paths) {
         char **l, **i, **j, **n;
         int r;
 

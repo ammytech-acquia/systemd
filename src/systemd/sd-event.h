@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #ifndef foosdeventhfoo
 #define foosdeventhfoo
 
@@ -20,11 +22,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/types.h>
+#include <sys/signalfd.h>
+#include <sys/epoll.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <sys/epoll.h>
-#include <sys/signalfd.h>
-#include <sys/types.h>
 
 #include "_sd-common.h"
 
@@ -49,13 +51,10 @@ enum {
 };
 
 enum {
-        SD_EVENT_INITIAL,
-        SD_EVENT_ARMED,
-        SD_EVENT_PENDING,
+        SD_EVENT_PASSIVE,
         SD_EVENT_RUNNING,
         SD_EVENT_EXITING,
-        SD_EVENT_FINISHED,
-        SD_EVENT_PREPARING,
+        SD_EVENT_FINISHED
 };
 
 enum {
@@ -85,16 +84,12 @@ int sd_event_add_defer(sd_event *e, sd_event_source **s, sd_event_handler_t call
 int sd_event_add_post(sd_event *e, sd_event_source **s, sd_event_handler_t callback, void *userdata);
 int sd_event_add_exit(sd_event *e, sd_event_source **s, sd_event_handler_t callback, void *userdata);
 
-int sd_event_prepare(sd_event *e);
-int sd_event_wait(sd_event *e, uint64_t usec);
-int sd_event_dispatch(sd_event *e);
-int sd_event_run(sd_event *e, uint64_t usec);
+int sd_event_run(sd_event *e, uint64_t timeout);
 int sd_event_loop(sd_event *e);
 int sd_event_exit(sd_event *e, int code);
 
 int sd_event_now(sd_event *e, clockid_t clock, uint64_t *usec);
 
-int sd_event_get_fd(sd_event *e);
 int sd_event_get_state(sd_event *e);
 int sd_event_get_tid(sd_event *e, pid_t *tid);
 int sd_event_get_exit_code(sd_event *e, int *code);
@@ -108,8 +103,6 @@ sd_event *sd_event_source_get_event(sd_event_source *s);
 void* sd_event_source_get_userdata(sd_event_source *s);
 void* sd_event_source_set_userdata(sd_event_source *s, void *userdata);
 
-int sd_event_source_set_description(sd_event_source *s, const char *description);
-int sd_event_source_get_description(sd_event_source *s, const char **description);
 int sd_event_source_set_prepare(sd_event_source *s, sd_event_handler_t callback);
 int sd_event_source_get_pending(sd_event_source *s);
 int sd_event_source_get_priority(sd_event_source *s, int64_t *priority);
@@ -128,10 +121,6 @@ int sd_event_source_set_time_accuracy(sd_event_source *s, uint64_t usec);
 int sd_event_source_get_time_clock(sd_event_source *s, clockid_t *clock);
 int sd_event_source_get_signal(sd_event_source *s);
 int sd_event_source_get_child_pid(sd_event_source *s, pid_t *pid);
-
-/* Define helpers so that __attribute__((cleanup(sd_event_unrefp))) and similar may be used. */
-_SD_DEFINE_POINTER_CLEANUP_FUNC(sd_event, sd_event_unref);
-_SD_DEFINE_POINTER_CLEANUP_FUNC(sd_event_source, sd_event_source_unref);
 
 _SD_END_DECLARATIONS;
 

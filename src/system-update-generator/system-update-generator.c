@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -20,10 +22,10 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "fs-util.h"
 #include "log.h"
-#include "string-util.h"
 #include "util.h"
+#include "unit-name.h"
+#include "path-util.h"
 
 /*
  * Implements the logic described in
@@ -35,17 +37,19 @@ static const char *arg_dest = "/tmp";
 static int generate_symlink(void) {
         const char *p = NULL;
 
-        if (laccess("/system-update", F_OK) < 0) {
+        if (access("/system-update", F_OK) < 0) {
                 if (errno == ENOENT)
                         return 0;
 
-                log_error_errno(errno, "Failed to check for system update: %m");
+                log_error("Failed to check for system update: %m");
                 return -EINVAL;
         }
 
-        p = strjoina(arg_dest, "/default.target");
-        if (symlink(SYSTEM_DATA_UNIT_PATH "/system-update.target", p) < 0)
-                return log_error_errno(errno, "Failed to create symlink %s: %m", p);
+        p = strappenda(arg_dest, "/default.target");
+        if (symlink(SYSTEM_DATA_UNIT_PATH "/system-update.target", p) < 0) {
+                log_error("Failed to create symlink %s: %m", p);
+                return -errno;
+        }
 
         return 0;
 }

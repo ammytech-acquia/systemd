@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,16 +21,15 @@
 
 #include <unistd.h>
 
-#include "sd-bus.h"
-
-#include "bus-util.h"
-#include "fd-util.h"
 #include "macro.h"
 #include "util.h"
+#include "sd-bus.h"
+#include "bus-util.h"
+#include "bus-error.h"
 
 static int inhibit(sd_bus *bus, const char *what) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
+        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *who = "Test Tool", *reason = "Just because!", *mode = "block";
         int fd;
         int r;
@@ -41,18 +42,18 @@ static int inhibit(sd_bus *bus, const char *what) {
                         &error,
                         &reply,
                         "ssss", what, who, reason, mode);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         r = sd_bus_message_read_basic(reply, SD_BUS_TYPE_UNIX_FD, &fd);
-        assert_se(r >= 0);
-        assert_se(fd >= 0);
+        assert(r >= 0);
+        assert(fd >= 0);
 
         return dup(fd);
 }
 
 static void print_inhibitors(sd_bus *bus) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
+        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *what, *who, *why, *mode;
         uint32_t uid, pid;
         unsigned n = 0;
@@ -66,38 +67,38 @@ static void print_inhibitors(sd_bus *bus) {
                         &error,
                         &reply,
                         "");
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         r = sd_bus_message_enter_container(reply, SD_BUS_TYPE_ARRAY, "(ssssuu)");
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         while ((r = sd_bus_message_read(reply, "(ssssuu)", &what, &who, &why, &mode, &uid, &pid)) > 0) {
-                printf("what=<%s> who=<%s> why=<%s> mode=<%s> uid=<%"PRIu32"> pid=<%"PRIu32">\n",
+                printf("what=<%s> who=<%s> why=<%s> mode=<%s> uid=<"UID_FMT"> pid=<"PID_FMT">\n",
                        what, who, why, mode, uid, pid);
 
                 n++;
         }
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         printf("%u inhibitors\n", n);
 }
 
 int main(int argc, char*argv[]) {
-        _cleanup_(sd_bus_unrefp) sd_bus *bus = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         int fd1, fd2;
         int r;
 
         r = sd_bus_open_system(&bus);
-        assert_se(r >= 0);
+        assert(r >= 0);
 
         print_inhibitors(bus);
 
         fd1 = inhibit(bus, "sleep");
-        assert_se(fd1 >= 0);
+        assert(fd1 >= 0);
         print_inhibitors(bus);
 
         fd2 = inhibit(bus, "idle:shutdown");
-        assert_se(fd2 >= 0);
+        assert(fd2 >= 0);
         print_inhibitors(bus);
 
         safe_close(fd1);

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,37 +19,44 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
+#include <assert.h>
+#include <stdlib.h>
 
-#include "formats-util.h"
-#include "install-printf.h"
-#include "install.h"
-#include "macro.h"
 #include "specifier.h"
 #include "unit-name.h"
-#include "user-util.h"
+#include "util.h"
+#include "install-printf.h"
 
 static int specifier_prefix_and_instance(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
+        char *n;
 
         assert(i);
 
-        return unit_name_to_prefix_and_instance(i->name, ret);
+        n = unit_name_to_prefix_and_instance(i->name);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_prefix(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
+        char *n;
 
         assert(i);
 
-        return unit_name_to_prefix(i->name, ret);
+        n = unit_name_to_prefix(i->name);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
 }
 
 static int specifier_instance(char specifier, void *data, void *userdata, char **ret) {
-        UnitFileInstallInfo *i = userdata;
+        InstallInfo *i = userdata;
         char *instance;
         int r;
 
@@ -68,30 +77,44 @@ static int specifier_instance(char specifier, void *data, void *userdata, char *
 }
 
 static int specifier_user_name(char specifier, void *data, void *userdata, char **ret) {
-        char *t;
+        InstallInfo *i = userdata;
+        const char *username;
+        _cleanup_free_ char *tmp = NULL;
+        char *printed = NULL;
 
-        /* If we are UID 0 (root), this will not result in NSS,
-         * otherwise it might. This is good, as we want to be able to
-         * run this in PID 1, where our user ID is 0, but where NSS
-         * lookups are not allowed. */
+        assert(i);
 
-        t = getusername_malloc();
-        if (!t)
-                return -ENOMEM;
+        if (i->user)
+                username = i->user;
+        else
+                /* get USER env from env or our own uid */
+                username = tmp = getusername_malloc();
 
-        *ret = t;
+        switch (specifier) {
+        case 'u':
+                printed = strdup(username);
+                break;
+        case 'U': {
+                /* fish username from passwd */
+                uid_t uid;
+                int r;
+
+                r = get_user_creds(&username, &uid, NULL, NULL, NULL);
+                if (r < 0)
+                        return r;
+
+                if (asprintf(&printed, "%d", uid) < 0)
+                        return -ENOMEM;
+                break;
+        }}
+
+
+        *ret = printed;
         return 0;
 }
 
-static int specifier_user_id(char specifier, void *data, void *userdata, char **ret) {
 
-        if (asprintf(ret, UID_FMT, getuid()) < 0)
-                return -ENOMEM;
-
-        return 0;
-}
-
-int install_full_printf(UnitFileInstallInfo *i, const char *format, char **ret) {
+int install_full_printf(InstallInfo *i, const char *format, char **ret) {
 
         /* This is similar to unit_full_printf() but does not support
          * anything path-related.
@@ -101,8 +124,8 @@ int install_full_printf(UnitFileInstallInfo *i, const char *format, char **ret) 
          * %p: the prefix                              (foo)
          * %i: the instance                            (bar)
 
-         * %U the UID of the running user
-         * %u the username of running user
+         * %U the UID of the configured user or running user
+         * %u the username of the configured user or running user
          * %m the machine ID of the running system
          * %H the host name of the running system
          * %b the boot ID of the running system
@@ -115,7 +138,7 @@ int install_full_printf(UnitFileInstallInfo *i, const char *format, char **ret) 
                 { 'p', specifier_prefix,              NULL },
                 { 'i', specifier_instance,            NULL },
 
-                { 'U', specifier_user_id,             NULL },
+                { 'U', specifier_user_name,           NULL },
                 { 'u', specifier_user_name,           NULL },
 
                 { 'm', specifier_machine_id,          NULL },

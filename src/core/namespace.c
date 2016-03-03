@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -18,31 +20,29 @@
 ***/
 
 #include <errno.h>
-#include <sched.h>
-#include <stdio.h>
-#include <string.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
+#include <string.h>
+#include <stdio.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sched.h>
+#include <sys/syscall.h>
+#include <limits.h>
 #include <linux/fs.h>
+#include <sys/file.h>
 
-#include "alloc-util.h"
-#include "dev-setup.h"
-#include "fd-util.h"
-#include "loopback-setup.h"
-#include "missing.h"
-#include "mkdir.h"
-#include "mount-util.h"
-#include "namespace.h"
-#include "path-util.h"
-#include "selinux-util.h"
-#include "socket-util.h"
-#include "string-table.h"
-#include "string-util.h"
 #include "strv.h"
-#include "umask-util.h"
-#include "user-util.h"
 #include "util.h"
+#include "path-util.h"
+#include "namespace.h"
+#include "missing.h"
+#include "execute.h"
+#include "loopback-setup.h"
+#include "mkdir.h"
+#include "dev-setup.h"
+#include "def.h"
+#include "label.h"
 
 typedef enum MountMode {
         /* This is ordered by priority! */
@@ -51,7 +51,6 @@ typedef enum MountMode {
         PRIVATE_TMP,
         PRIVATE_VAR_TMP,
         PRIVATE_DEV,
-        PRIVATE_BUS_ENDPOINT,
         READWRITE
 } MountMode;
 
@@ -90,11 +89,9 @@ static int append_mounts(BindMount **p, char **strv, MountMode mode) {
 
 static int mount_path_compare(const void *a, const void *b) {
         const BindMount *p = a, *q = b;
-        int d;
 
-        d = path_compare(p->path, q->path);
+        if (path_equal(p->path, q->path)) {
 
-        if (d == 0) {
                 /* If the paths are equal, check the mode */
                 if (p->mode < q->mode)
                         return -1;
@@ -106,7 +103,13 @@ static int mount_path_compare(const void *a, const void *b) {
         }
 
         /* If the paths are not equal, then order prefixes first */
-        return d;
+        if (path_startswith(p->path, q->path))
+                return 1;
+
+        if (path_startswith(q->path, p->path))
+                return -1;
+
+        return 0;
 }
 
 static void drop_duplicates(BindMount *m, unsigned *n) {
@@ -121,7 +124,8 @@ static void drop_duplicates(BindMount *m, unsigned *n) {
                 if (previous && path_equal(f->path, previous->path))
                         continue;
 
-                *t = *f;
+                t->path = f->path;
+                t->mode = f->mode;
 
                 previous = t;
 
@@ -141,7 +145,7 @@ static int mount_dev(BindMount *m) {
                 "/dev/tty\0";
 
         char temporary_mount[] = "/tmp/namespace-dev-XXXXXX";
-        const char *d, *dev = NULL, *devpts = NULL, *devshm = NULL, *devhugepages = NULL, *devmqueue = NULL, *devlog = NULL, *devptmx = NULL;
+        const char *d, *dev = NULL, *devpts = NULL, *devshm = NULL, *devkdbus = NULL, *devhugepages = NULL, *devmqueue = NULL, *devlog = NULL, *devptmx = NULL;
         _cleanup_umask_ mode_t u;
         int r;
 
@@ -152,44 +156,45 @@ static int mount_dev(BindMount *m) {
         if (!mkdtemp(temporary_mount))
                 return -errno;
 
-        dev = strjoina(temporary_mount, "/dev");
-        (void) mkdir(dev, 0755);
+        dev = strappenda(temporary_mount, "/dev");
+        mkdir(dev, 0755);
         if (mount("tmpfs", dev, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=755") < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devpts = strjoina(temporary_mount, "/dev/pts");
-        (void) mkdir(devpts, 0755);
+        devpts = strappenda(temporary_mount, "/dev/pts");
+        mkdir(devpts, 0755);
         if (mount("/dev/pts", devpts, NULL, MS_BIND, NULL) < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devptmx = strjoina(temporary_mount, "/dev/ptmx");
-        if (symlink("pts/ptmx", devptmx) < 0) {
-                r = -errno;
-                goto fail;
-        }
+        devptmx = strappenda(temporary_mount, "/dev/ptmx");
+        symlink("pts/ptmx", devptmx);
 
-        devshm = strjoina(temporary_mount, "/dev/shm");
-        (void) mkdir(devshm, 01777);
+        devshm = strappenda(temporary_mount, "/dev/shm");
+        mkdir(devshm, 01777);
         r = mount("/dev/shm", devshm, NULL, MS_BIND, NULL);
         if (r < 0) {
                 r = -errno;
                 goto fail;
         }
 
-        devmqueue = strjoina(temporary_mount, "/dev/mqueue");
-        (void) mkdir(devmqueue, 0755);
-        (void) mount("/dev/mqueue", devmqueue, NULL, MS_BIND, NULL);
+        devmqueue = strappenda(temporary_mount, "/dev/mqueue");
+        mkdir(devmqueue, 0755);
+        mount("/dev/mqueue", devmqueue, NULL, MS_BIND, NULL);
 
-        devhugepages = strjoina(temporary_mount, "/dev/hugepages");
-        (void) mkdir(devhugepages, 0755);
-        (void) mount("/dev/hugepages", devhugepages, NULL, MS_BIND, NULL);
+        devkdbus = strappenda(temporary_mount, "/dev/kdbus");
+        mkdir(devkdbus, 0755);
+        mount("/dev/kdbus", devkdbus, NULL, MS_BIND, NULL);
 
-        devlog = strjoina(temporary_mount, "/dev/log");
-        (void) symlink("/run/systemd/journal/dev-log", devlog);
+        devhugepages = strappenda(temporary_mount, "/dev/hugepages");
+        mkdir(devhugepages, 0755);
+        mount("/dev/hugepages", devhugepages, NULL, MS_BIND, NULL);
+
+        devlog = strappenda(temporary_mount, "/dev/log");
+        symlink("/run/systemd/journal/dev-log", devlog);
 
         NULSTR_FOREACH(d, devnodes) {
                 _cleanup_free_ char *dn = NULL;
@@ -220,9 +225,9 @@ static int mount_dev(BindMount *m) {
                         goto fail;
                 }
 
-                mac_selinux_create_file_prepare(d, st.st_mode);
+                label_context_set(d, st.st_mode);
                 r = mknod(dn, st.st_mode, st.st_rdev);
-                mac_selinux_create_file_clear();
+                label_context_clear();
 
                 if (r < 0) {
                         r = -errno;
@@ -230,15 +235,9 @@ static int mount_dev(BindMount *m) {
                 }
         }
 
-        dev_setup(temporary_mount, UID_INVALID, GID_INVALID);
+        dev_setup(temporary_mount);
 
-        /* Create the /dev directory if missing. It is more likely to be
-         * missing when the service is started with RootDirectory. This is
-         * consistent with mount units creating the mount points when missing.
-         */
-        (void) mkdir_p_label(m->path, 0755);
-
-        if (mount(dev, m->path, NULL, MS_MOVE, NULL) < 0) {
+        if (mount(dev, "/dev/", NULL, MS_MOVE, NULL) < 0) {
                 r = -errno;
                 goto fail;
         }
@@ -255,86 +254,20 @@ fail:
         if (devshm)
                 umount(devshm);
 
+        if (devkdbus)
+                umount(devkdbus);
+
         if (devhugepages)
                 umount(devhugepages);
 
         if (devmqueue)
                 umount(devmqueue);
 
-        umount(dev);
-        rmdir(dev);
-        rmdir(temporary_mount);
-
-        return r;
-}
-
-static int mount_kdbus(BindMount *m) {
-
-        char temporary_mount[] = "/tmp/kdbus-dev-XXXXXX";
-        _cleanup_free_ char *basepath = NULL;
-        _cleanup_umask_ mode_t u;
-        char *busnode = NULL, *root;
-        struct stat st;
-        int r;
-
-        assert(m);
-
-        u = umask(0000);
-
-        if (!mkdtemp(temporary_mount))
-                return log_error_errno(errno, "Failed create temp dir: %m");
-
-        root = strjoina(temporary_mount, "/kdbus");
-        (void) mkdir(root, 0755);
-        if (mount("tmpfs", root, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=777") < 0) {
-                r = -errno;
-                goto fail;
+        if (dev) {
+                umount(dev);
+                rmdir(dev);
         }
 
-        /* create a new /dev/null dev node copy so we have some fodder to
-         * bind-mount the custom endpoint over. */
-        if (stat("/dev/null", &st) < 0) {
-                r = log_error_errno(errno, "Failed to stat /dev/null: %m");
-                goto fail;
-        }
-
-        busnode = strjoina(root, "/bus");
-        if (mknod(busnode, (st.st_mode & ~07777) | 0600, st.st_rdev) < 0) {
-                r = log_error_errno(errno, "mknod() for %s failed: %m",
-                                    busnode);
-                goto fail;
-        }
-
-        r = mount(m->path, busnode, NULL, MS_BIND, NULL);
-        if (r < 0) {
-                r = log_error_errno(errno, "bind mount of %s failed: %m",
-                                    m->path);
-                goto fail;
-        }
-
-        basepath = dirname_malloc(m->path);
-        if (!basepath) {
-                r = -ENOMEM;
-                goto fail;
-        }
-
-        if (mount(root, basepath, NULL, MS_MOVE, NULL) < 0) {
-                r = log_error_errno(errno, "bind mount of %s failed: %m",
-                                    basepath);
-                goto fail;
-        }
-
-        rmdir(temporary_mount);
-        return 0;
-
-fail:
-        if (busnode) {
-                umount(busnode);
-                unlink(busnode);
-        }
-
-        umount(root);
-        rmdir(root);
         rmdir(temporary_mount);
 
         return r;
@@ -379,9 +312,6 @@ static int apply_mount(
         case PRIVATE_DEV:
                 return mount_dev(m);
 
-        case PRIVATE_BUS_ENDPOINT:
-                return mount_kdbus(m);
-
         default:
                 assert_not_reached("Unknown mode");
         }
@@ -416,17 +346,15 @@ static int make_read_only(BindMount *m) {
 }
 
 int setup_namespace(
-                const char* root_directory,
                 char** read_write_dirs,
                 char** read_only_dirs,
                 char** inaccessible_dirs,
-                const char* tmp_dir,
-                const char* var_tmp_dir,
-                const char* bus_endpoint_path,
+                char* tmp_dir,
+                char* var_tmp_dir,
                 bool private_dev,
                 ProtectHome protect_home,
                 ProtectSystem protect_system,
-                unsigned long mount_flags) {
+                unsigned mount_flags) {
 
         BindMount *m, *mounts = NULL;
         unsigned n;
@@ -438,7 +366,7 @@ int setup_namespace(
         if (unshare(CLONE_NEWNS) < 0)
                 return -errno;
 
-        n = !!tmp_dir + !!var_tmp_dir + !!bus_endpoint_path +
+        n = !!tmp_dir + !!var_tmp_dir +
                 strv_length(read_write_dirs) +
                 strv_length(read_only_dirs) +
                 strv_length(inaccessible_dirs) +
@@ -462,56 +390,31 @@ int setup_namespace(
                         return r;
 
                 if (tmp_dir) {
-                        m->path = prefix_roota(root_directory, "/tmp");
+                        m->path = "/tmp";
                         m->mode = PRIVATE_TMP;
                         m++;
                 }
 
                 if (var_tmp_dir) {
-                        m->path = prefix_roota(root_directory, "/var/tmp");
+                        m->path = "/var/tmp";
                         m->mode = PRIVATE_VAR_TMP;
                         m++;
                 }
 
                 if (private_dev) {
-                        m->path = prefix_roota(root_directory, "/dev");
+                        m->path = "/dev";
                         m->mode = PRIVATE_DEV;
                         m++;
                 }
 
-                if (bus_endpoint_path) {
-                        m->path = prefix_roota(root_directory, bus_endpoint_path);
-                        m->mode = PRIVATE_BUS_ENDPOINT;
-                        m++;
-                }
-
                 if (protect_home != PROTECT_HOME_NO) {
-                        const char *home_dir, *run_user_dir, *root_dir;
-
-                        home_dir = prefix_roota(root_directory, "/home");
-                        home_dir = strjoina("-", home_dir);
-                        run_user_dir = prefix_roota(root_directory, "/run/user");
-                        run_user_dir = strjoina("-", run_user_dir);
-                        root_dir = prefix_roota(root_directory, "/root");
-                        root_dir = strjoina("-", root_dir);
-
-                        r = append_mounts(&m, STRV_MAKE(home_dir, run_user_dir, root_dir),
-                                protect_home == PROTECT_HOME_READ_ONLY ? READONLY : INACCESSIBLE);
+                        r = append_mounts(&m, STRV_MAKE("-/home", "-/run/user", "-/root"), protect_home == PROTECT_HOME_READ_ONLY ? READONLY : INACCESSIBLE);
                         if (r < 0)
                                 return r;
                 }
 
                 if (protect_system != PROTECT_SYSTEM_NO) {
-                        const char *usr_dir, *boot_dir, *etc_dir;
-
-                        usr_dir = prefix_roota(root_directory, "/usr");
-                        boot_dir = prefix_roota(root_directory, "/boot");
-                        boot_dir = strjoina("-", boot_dir);
-                        etc_dir = prefix_roota(root_directory, "/etc");
-
-                        r = append_mounts(&m, protect_system == PROTECT_SYSTEM_FULL
-                                ? STRV_MAKE(usr_dir, boot_dir, etc_dir)
-                                : STRV_MAKE(usr_dir, boot_dir), READONLY);
+                        r = append_mounts(&m, protect_system == PROTECT_SYSTEM_FULL ? STRV_MAKE("/usr", "-/boot", "/etc") : STRV_MAKE("/usr", "-/boot"), READONLY);
                         if (r < 0)
                                 return r;
                 }
@@ -522,20 +425,12 @@ int setup_namespace(
                 drop_duplicates(mounts, &n);
         }
 
-        if (n > 0 || root_directory) {
+        if (n > 0) {
                 /* Remount / as SLAVE so that nothing now mounted in the namespace
                    shows up in the parent */
                 if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL) < 0)
                         return -errno;
-        }
 
-        if (root_directory) {
-                /* Turn directory into bind mount */
-                if (mount(root_directory, root_directory, NULL, MS_BIND|MS_REC, NULL) < 0)
-                        return -errno;
-        }
-
-        if (n > 0) {
                 for (m = mounts; m < mounts + n; ++m) {
                         r = apply_mount(m, tmp_dir, var_tmp_dir);
                         if (r < 0)
@@ -549,21 +444,13 @@ int setup_namespace(
                 }
         }
 
-        if (root_directory) {
-                /* MS_MOVE does not work on MS_SHARED so the remount MS_SHARED will be done later */
-                r = mount_move_root(root_directory);
-
-                /* at this point, we cannot rollback */
-                if (r < 0)
-                        return r;
-        }
-
         /* Remount / as the desired mode. Not that this will not
          * reestablish propagation from our side to the host, since
          * what's disconnected is disconnected. */
-        if (mount(NULL, "/", NULL, mount_flags | MS_REC, NULL) < 0)
-                /* at this point, we cannot rollback */
-                return -errno;
+        if (mount(NULL, "/", NULL, mount_flags | MS_REC, NULL) < 0) {
+                r = -errno;
+                goto fail;
+        }
 
         return 0;
 
@@ -571,7 +458,7 @@ fail:
         if (n > 0) {
                 for (m = mounts; m < mounts + n; ++m)
                         if (m->done)
-                                (void) umount2(m->path, MNT_DETACH);
+                                umount2(m->path, MNT_DETACH);
         }
 
         return r;
@@ -605,7 +492,7 @@ static int setup_one_tmp_dir(const char *id, const char *prefix, char **path) {
         RUN_WITH_UMASK(0000) {
                 char *y;
 
-                y = strjoina(x, "/tmp");
+                y = strappenda(x, "/tmp");
 
                 if (mkdir(y, 0777 | S_ISVTX) < 0)
                         return -errno;
@@ -633,7 +520,7 @@ int setup_tmp_dirs(const char *id, char **tmp_dir, char **var_tmp_dir) {
         if (r < 0) {
                 char *t;
 
-                t = strjoina(a, "/tmp");
+                t = strappenda(a, "/tmp");
                 rmdir(t);
                 rmdir(a);
 
@@ -649,7 +536,16 @@ int setup_tmp_dirs(const char *id, char **tmp_dir, char **var_tmp_dir) {
 
 int setup_netns(int netns_storage_socket[2]) {
         _cleanup_close_ int netns = -1;
-        int r, q;
+        union {
+                struct cmsghdr cmsghdr;
+                uint8_t buf[CMSG_SPACE(sizeof(int))];
+        } control = {};
+        struct msghdr mh = {
+                .msg_control = &control,
+                .msg_controllen = sizeof(control),
+        };
+        struct cmsghdr *cmsg;
+        int r;
 
         assert(netns_storage_socket);
         assert(netns_storage_socket[0] >= 0);
@@ -666,8 +562,12 @@ int setup_netns(int netns_storage_socket[2]) {
         if (lockf(netns_storage_socket[0], F_LOCK, 0) < 0)
                 return -errno;
 
-        netns = receive_one_fd(netns_storage_socket[0], MSG_DONTWAIT);
-        if (netns == -EAGAIN) {
+        if (recvmsg(netns_storage_socket[0], &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC) < 0) {
+                if (errno != EAGAIN) {
+                        r = -errno;
+                        goto fail;
+                }
+
                 /* Nothing stored yet, so let's create a new namespace */
 
                 if (unshare(CLONE_NEWNET) < 0) {
@@ -684,13 +584,16 @@ int setup_netns(int netns_storage_socket[2]) {
                 }
 
                 r = 1;
-
-        } else if (netns < 0) {
-                r = netns;
-                goto fail;
-
         } else {
                 /* Yay, found something, so let's join the namespace */
+
+                for (cmsg = CMSG_FIRSTHDR(&mh); cmsg; cmsg = CMSG_NXTHDR(&mh, cmsg)) {
+                        if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+                                assert(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
+                                netns = *(int*) CMSG_DATA(cmsg);
+                        }
+                }
+
                 if (setns(netns, CLONE_NEWNET) < 0) {
                         r = -errno;
                         goto fail;
@@ -699,14 +602,21 @@ int setup_netns(int netns_storage_socket[2]) {
                 r = 0;
         }
 
-        q = send_one_fd(netns_storage_socket[1], netns, MSG_DONTWAIT);
-        if (q < 0) {
-                r = q;
+        cmsg = CMSG_FIRSTHDR(&mh);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(cmsg), &netns, sizeof(int));
+        mh.msg_controllen = cmsg->cmsg_len;
+
+        if (sendmsg(netns_storage_socket[1], &mh, MSG_DONTWAIT|MSG_NOSIGNAL) < 0) {
+                r = -errno;
                 goto fail;
         }
 
 fail:
         lockf(netns_storage_socket[0], F_ULOCK, 0);
+
         return r;
 }
 

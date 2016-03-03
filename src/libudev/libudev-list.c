@@ -17,12 +17,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
+#include <unistd.h>
+#include <errno.h>
 #include <string.h>
 
-#include "alloc-util.h"
+#include "libudev.h"
 #include "libudev-private.h"
 
 /**
@@ -247,7 +249,8 @@ void udev_list_cleanup(struct udev_list *list)
         struct udev_list_entry *entry_loop;
         struct udev_list_entry *entry_tmp;
 
-        list->entries = mfree(list->entries);
+        free(list->entries);
+        list->entries = NULL;
         list->entries_cur = 0;
         list->entries_max = 0;
         udev_list_entry_foreach_safe(entry_loop, entry_tmp, udev_list_get_entry(list))

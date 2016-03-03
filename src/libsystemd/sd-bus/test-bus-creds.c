@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -18,24 +20,18 @@
 ***/
 
 #include "sd-bus.h"
-
 #include "bus-dump.h"
 #include "bus-util.h"
-#include "cgroup-util.h"
+#include "util.h"
 
 int main(int argc, char *argv[]) {
-        _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
+        _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
         int r;
-
-        if (cg_unified() == -ENOMEDIUM) {
-                puts("Skipping test: /sys/fs/cgroup/ not available");
-                return EXIT_TEST_SKIP;
-        }
 
         r = sd_bus_creds_new_from_pid(&creds, 0, _SD_BUS_CREDS_ALL);
         assert_se(r >= 0);
 
-        bus_creds_dump(creds, NULL, true);
+        bus_creds_dump(creds, NULL);
 
         creds = sd_bus_creds_unref(creds);
 
@@ -43,7 +39,7 @@ int main(int argc, char *argv[]) {
         if (r != -EACCES) {
                 assert_se(r >= 0);
                 putchar('\n');
-                bus_creds_dump(creds, NULL, true);
+                bus_creds_dump(creds, NULL);
         }
 
         return 0;

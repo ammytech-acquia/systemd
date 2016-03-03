@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -20,6 +22,7 @@
 ***/
 
 #include <stdbool.h>
+#include <sys/types.h>
 
 bool signature_is_single(const char *s, bool allow_dict_entry);
 bool signature_is_pair(const char *s);

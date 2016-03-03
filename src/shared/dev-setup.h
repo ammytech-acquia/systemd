@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -19,6 +21,4 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <sys/types.h>
-
-int dev_setup(const char *prefix, uid_t uid, gid_t gid);
+int dev_setup(const char *pathprefix);

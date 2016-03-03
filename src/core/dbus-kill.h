@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -20,9 +22,8 @@
 ***/
 
 #include "sd-bus.h"
-
-#include "kill.h"
 #include "unit.h"
+#include "kill.h"
 
 extern const sd_bus_vtable bus_kill_vtable[];
 

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,25 +19,19 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <signal.h>
 #include <sys/wait.h>
+#include <signal.h>
+#include <errno.h>
 #include <unistd.h>
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "formats-util.h"
-#include "killall.h"
-#include "parse-util.h"
-#include "process-util.h"
-#include "set.h"
-#include "string-util.h"
-#include "terminal-util.h"
 #include "util.h"
+#include "def.h"
+#include "killall.h"
+#include "set.h"
 
 #define TIMEOUT_USEC (10 * USEC_PER_SEC)
 
-static bool ignore_proc(pid_t pid, bool warn_rootfs) {
+static bool ignore_proc(pid_t pid) {
         _cleanup_fclose_ FILE *f = NULL;
         char c;
         const char *p;
@@ -70,22 +66,7 @@ static bool ignore_proc(pid_t pid, bool warn_rootfs) {
          * spree.
          *
          * http://www.freedesktop.org/wiki/Software/systemd/RootStorageDaemons */
-        if (c == '@' && warn_rootfs) {
-                _cleanup_free_ char *comm = NULL;
-
-                r = pid_from_same_root_fs(pid);
-                if (r < 0)
-                        return true;
-
-                get_process_comm(pid, &comm);
-
-                if (r)
-                        log_notice("Process " PID_FMT " (%s) has been been marked to be excluded from killing. It is "
-                                   "running from the root file system, and thus likely to block re-mounting of the "
-                                   "root file system to read-only. Please consider moving it into an initrd file "
-                                   "system instead.", pid, strna(comm));
-                return true;
-        } else if (c == '@')
+        if (count == 1 && c == '@')
                 return true;
 
         return false;
@@ -121,11 +102,11 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
                                 if (errno == ECHILD)
                                         break;
 
-                                log_error_errno(errno, "waitpid() failed: %m");
+                                log_error("waitpid() failed: %m");
                                 return;
                         }
 
-                        (void) set_remove(pids, PID_TO_PTR(pid));
+                        set_remove(pids, ULONG_TO_PTR(pid));
                 }
 
                 /* Now explicitly check who might be remaining, who
@@ -134,7 +115,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
 
                         /* We misuse getpgid as a check whether a
                          * process still exists. */
-                        if (getpgid(PTR_TO_PID(p)) >= 0)
+                        if (getpgid((pid_t) PTR_TO_ULONG(p)) >= 0)
                                 continue;
 
                         if (errno != ESRCH)
@@ -155,7 +136,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
                 if (k != SIGCHLD) {
 
                         if (k < 0 && errno != EAGAIN) {
-                                log_error_errno(errno, "sigtimedwait() failed: %m");
+                                log_error("sigtimedwait() failed: %m");
                                 return;
                         }
 
@@ -175,7 +156,6 @@ static int killall(int sig, Set *pids, bool send_sighup) {
 
         while ((d = readdir(dir))) {
                 pid_t pid;
-                int r;
 
                 if (d->d_type != DT_DIR &&
                     d->d_type != DT_UNKNOWN)
@@ -184,7 +164,7 @@ static int killall(int sig, Set *pids, bool send_sighup) {
                 if (parse_pid(d->d_name, &pid) < 0)
                         continue;
 
-                if (ignore_proc(pid, sig == SIGKILL && !in_initrd()))
+                if (ignore_proc(pid))
                         continue;
 
                 if (sig == SIGKILL) {
@@ -195,13 +175,10 @@ static int killall(int sig, Set *pids, bool send_sighup) {
                 }
 
                 if (kill(pid, sig) >= 0) {
-                        if (pids) {
-                                r = set_put(pids, PID_TO_PTR(pid));
-                                if (r < 0)
-                                        log_oom();
-                        }
+                        if (pids)
+                                set_put(pids, ULONG_TO_PTR(pid));
                 } else if (errno != ENOENT)
-                        log_warning_errno(errno, "Could not kill %d: %m", pid);
+                        log_warning("Could not kill %d: %m", pid);
 
                 if (send_sighup) {
                         /* Optionally, also send a SIGHUP signal, but
@@ -228,19 +205,19 @@ void broadcast_signal(int sig, bool wait_for_exit, bool send_sighup) {
         _cleanup_set_free_ Set *pids = NULL;
 
         if (wait_for_exit)
-                pids = set_new(NULL);
+                pids = set_new(trivial_hash_func, trivial_compare_func);
 
         assert_se(sigemptyset(&mask) == 0);
         assert_se(sigaddset(&mask, SIGCHLD) == 0);
         assert_se(sigprocmask(SIG_BLOCK, &mask, &oldmask) == 0);
 
         if (kill(-1, SIGSTOP) < 0 && errno != ESRCH)
-                log_warning_errno(errno, "kill(-1, SIGSTOP) failed: %m");
+                log_warning("kill(-1, SIGSTOP) failed: %m");
 
         killall(sig, pids, send_sighup);
 
         if (kill(-1, SIGCONT) < 0 && errno != ESRCH)
-                log_warning_errno(errno, "kill(-1, SIGCONT) failed: %m");
+                log_warning("kill(-1, SIGCONT) failed: %m");
 
         if (wait_for_exit)
                 wait_for_children(pids, &mask);

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -21,4 +23,4 @@
 
 #include <stdbool.h>
 
-int mac_selinux_setup(bool *loaded_policy);
+int selinux_setup(bool *loaded_policy);

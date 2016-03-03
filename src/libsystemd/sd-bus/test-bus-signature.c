@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,10 +19,12 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "bus-internal.h"
-#include "bus-signature.h"
+#include <assert.h>
+#include <stdlib.h>
+
 #include "log.h"
-#include "string-util.h"
+#include "bus-signature.h"
+#include "bus-internal.h"
 
 int main(int argc, char *argv[]) {
         char prefix[256];
@@ -93,28 +97,23 @@ int main(int argc, char *argv[]) {
         assert_se(!namespace_complex_pattern("foo.", ""));
 
         assert_se(path_complex_pattern("", ""));
-        assert_se(!path_complex_pattern("", "/"));
-        assert_se(!path_complex_pattern("/", ""));
+        assert_se(path_complex_pattern("", "/"));
+        assert_se(path_complex_pattern("/", ""));
         assert_se(path_complex_pattern("/", "/"));
         assert_se(path_complex_pattern("/foobar/", "/"));
-        assert_se(!path_complex_pattern("/foobar/", "/foobar"));
+        assert_se(path_complex_pattern("/foobar/", "/foobar"));
         assert_se(path_complex_pattern("/foobar", "/foobar"));
-        assert_se(!path_complex_pattern("/foobar", "/foobar/"));
+        assert_se(path_complex_pattern("/foobar", "/foobar/"));
         assert_se(!path_complex_pattern("/foobar", "/foobar/waldo"));
         assert_se(path_complex_pattern("/foobar/", "/foobar/waldo"));
-        assert_se(path_complex_pattern("/foobar/waldo", "/foobar/"));
-
-        assert_se(path_simple_pattern("/foo/", "/foo/bar/waldo"));
 
         assert_se(namespace_simple_pattern("", ""));
-        assert_se(namespace_simple_pattern("", ".foobar"));
         assert_se(namespace_simple_pattern("foobar", "foobar"));
         assert_se(namespace_simple_pattern("foobar.waldo", "foobar.waldo"));
         assert_se(namespace_simple_pattern("foobar", "foobar.waldo"));
         assert_se(!namespace_simple_pattern("foobar.waldo", "foobar"));
         assert_se(!namespace_simple_pattern("", "foo"));
         assert_se(!namespace_simple_pattern("foo", ""));
-        assert_se(namespace_simple_pattern("foo.", "foo.bar.waldo"));
 
         assert_se(streq(object_path_startswith("/foo/bar", "/foo"), "bar"));
         assert_se(streq(object_path_startswith("/foo", "/foo"), ""));

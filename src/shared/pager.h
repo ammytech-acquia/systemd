@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -26,5 +28,3 @@
 int pager_open(bool jump_to_end);
 void pager_close(void);
 bool pager_have(void) _pure_;
-
-int show_man_page(const char *page, bool null_stdio);

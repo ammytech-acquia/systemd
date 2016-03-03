@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,22 +19,21 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 #include <pwd.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
+#include <unistd.h>
 #include <linux/vt.h>
 
-#include "alloc-util.h"
-#include "bus-error.h"
-#include "bus-util.h"
-#include "cgroup-util.h"
-#include "fd-util.h"
-#include "logind.h"
 #include "strv.h"
-#include "terminal-util.h"
+#include "cgroup-util.h"
+#include "audit.h"
+#include "bus-util.h"
+#include "bus-error.h"
 #include "udev-util.h"
-#include "user-util.h"
+#include "logind.h"
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **_device) {
         Device *d;
@@ -96,16 +97,15 @@ int manager_add_session(Manager *m, const char *id, Session **_session) {
 
 int manager_add_user(Manager *m, uid_t uid, gid_t gid, const char *name, User **_user) {
         User *u;
-        int r;
 
         assert(m);
         assert(name);
 
-        u = hashmap_get(m->users, UID_TO_PTR(uid));
+        u = hashmap_get(m->users, ULONG_TO_PTR((unsigned long) uid));
         if (!u) {
-                r = user_new(&u, m, uid, gid, name);
-                if (r < 0)
-                        return r;
+                u = user_new(m, uid, gid, name);
+                if (!u)
+                        return -ENOMEM;
         }
 
         if (_user)
@@ -137,7 +137,7 @@ int manager_add_user_by_uid(Manager *m, uid_t uid, User **_user) {
         errno = 0;
         p = getpwuid(uid);
         if (!p)
-                return errno > 0 ? -errno : -ENOENT;
+                return errno ? -errno : -ENOENT;
 
         return manager_add_user(m, uid, p->pw_gid, p->pw_name, _user);
 }
@@ -183,6 +183,44 @@ int manager_add_button(Manager *m, const char *name, Button **_button) {
                 *_button = b;
 
         return 0;
+}
+
+int manager_watch_busname(Manager *m, const char *name) {
+        char *n;
+        int r;
+
+        assert(m);
+        assert(name);
+
+        if (set_get(m->busnames, (char*) name))
+                return 0;
+
+        n = strdup(name);
+        if (!n)
+                return -ENOMEM;
+
+        r = set_put(m->busnames, n);
+        if (r < 0) {
+                free(n);
+                return r;
+        }
+
+        return 0;
+}
+
+void manager_drop_busname(Manager *m, const char *name) {
+        Session *session;
+        Iterator i;
+
+        assert(m);
+        assert(name);
+
+        /* keep it if the name still owns a controller */
+        HASHMAP_FOREACH(session, m->sessions, i)
+                if (session_is_controller(session, name))
+                        return;
+
+        free(set_remove(m->busnames, (char*) name));
 }
 
 int manager_process_seat_device(Manager *m, struct udev_device *d) {
@@ -281,6 +319,7 @@ int manager_get_session_by_pid(Manager *m, pid_t pid, Session **session) {
         int r;
 
         assert(m);
+        assert(session);
 
         if (pid < 1)
                 return -EINVAL;
@@ -293,8 +332,7 @@ int manager_get_session_by_pid(Manager *m, pid_t pid, Session **session) {
         if (!s)
                 return 0;
 
-        if (session)
-                *session = s;
+        *session = s;
         return 1;
 }
 
@@ -324,7 +362,7 @@ int manager_get_user_by_pid(Manager *m, pid_t pid, User **user) {
 int manager_get_idle_hint(Manager *m, dual_timestamp *t) {
         Session *s;
         bool idle_hint;
-        dual_timestamp ts = DUAL_TIMESTAMP_NULL;
+        dual_timestamp ts = { 0, 0 };
         Iterator i;
 
         assert(m);
@@ -402,7 +440,7 @@ static int vt_is_busy(unsigned int vtnr) {
 }
 
 int manager_spawn_autovt(Manager *m, unsigned int vtnr) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         char name[sizeof("autovt@tty.service") + DECIMAL_STR_MAX(unsigned int)];
         int r;
 
@@ -441,7 +479,7 @@ int manager_spawn_autovt(Manager *m, unsigned int vtnr) {
         return r;
 }
 
-static bool manager_is_docked(Manager *m) {
+bool manager_is_docked(Manager *m) {
         Iterator i;
         Button *b;
 
@@ -452,7 +490,7 @@ static bool manager_is_docked(Manager *m) {
         return false;
 }
 
-static int manager_count_external_displays(Manager *m) {
+int manager_count_displays(Manager *m) {
         _cleanup_udev_enumerate_unref_ struct udev_enumerate *e = NULL;
         struct udev_list_entry *item = NULL, *first = NULL;
         int r;
@@ -474,8 +512,7 @@ static int manager_count_external_displays(Manager *m) {
         udev_list_entry_foreach(item, first) {
                 _cleanup_udev_device_unref_ struct udev_device *d = NULL;
                 struct udev_device *p;
-                const char *status, *enabled, *dash, *nn, *i;
-                bool external = false;
+                const char *status;
 
                 d = udev_device_new_from_syspath(m->udev, udev_list_entry_get_name(item));
                 if (!d)
@@ -491,40 +528,6 @@ static int manager_count_external_displays(Manager *m) {
                 if (!streq_ptr(udev_device_get_subsystem(p), "drm"))
                         continue;
 
-                nn = udev_device_get_sysname(d);
-                if (!nn)
-                        continue;
-
-                /* Ignore internal displays: the type is encoded in
-                 * the sysfs name, as the second dash seperated item
-                 * (the first is the card name, the last the connector
-                 * number). We implement a whitelist of external
-                 * displays here, rather than a whitelist, to ensure
-                 * we don't block suspends too eagerly. */
-                dash = strchr(nn, '-');
-                if (!dash)
-                        continue;
-
-                dash++;
-                FOREACH_STRING(i, "VGA-", "DVI-I-", "DVI-D-", "DVI-A-"
-                               "Composite-", "SVIDEO-", "Component-",
-                               "DIN-", "DP-", "HDMI-A-", "HDMI-B-", "TV-") {
-
-                        if (startswith(dash, i)) {
-                                external = true;
-                                break;
-                        }
-                }
-                if (!external)
-                        continue;
-
-                /* Ignore ports that are not enabled */
-                enabled = udev_device_get_sysattr_value(d, "enabled");
-                if (!enabled)
-                        continue;
-                if (!streq_ptr(enabled, "enabled"))
-                        continue;
-
                 /* We count any connector which is not explicitly
                  * "disconnected" as connected. */
                 status = udev_device_get_sysattr_value(d, "status");
@@ -533,26 +536,4 @@ static int manager_count_external_displays(Manager *m) {
         }
 
         return n;
-}
-
-bool manager_is_docked_or_external_displays(Manager *m) {
-        int n;
-
-        /* If we are docked don't react to lid closing */
-        if (manager_is_docked(m)) {
-                log_debug("System is docked.");
-                return true;
-        }
-
-        /* If we have more than one display connected,
-         * assume that we are docked. */
-        n = manager_count_external_displays(m);
-        if (n < 0)
-                log_warning_errno(n, "Display counting failed: %m");
-        else if (n >= 1) {
-                log_debug("External (%i) displays connected.", n);
-                return true;
-        }
-
-        return false;
 }

@@ -15,25 +15,25 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
+#include <grp.h>
+#include <dirent.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-#include "formats-util.h"
-#include "fs-util.h"
-#include "selinux-util.h"
-#include "smack-util.h"
-#include "stdio-util.h"
-#include "string-util.h"
 #include "udev.h"
+#include "smack-util.h"
 
-static int node_symlink(struct udev_device *dev, const char *node, const char *slink) {
+static int node_symlink(struct udev_device *dev, const char *node, const char *slink)
+{
         struct stat stats;
         char target[UTIL_PATH_SIZE];
         char *s;
@@ -89,11 +89,11 @@ static int node_symlink(struct udev_device *dev, const char *node, const char *s
                         err = mkdir_parents_label(slink, 0755);
                         if (err != 0 && err != -ENOENT)
                                 break;
-                        mac_selinux_create_file_prepare(slink, S_IFLNK);
+                        label_context_set(slink, S_IFLNK);
                         err = symlink(target, slink);
                         if (err != 0)
                                 err = -errno;
-                        mac_selinux_create_file_clear();
+                        label_context_clear();
                 } while (err == -ENOENT);
                 if (err == 0)
                         goto exit;
@@ -106,19 +106,19 @@ static int node_symlink(struct udev_device *dev, const char *node, const char *s
                 err = mkdir_parents_label(slink_tmp, 0755);
                 if (err != 0 && err != -ENOENT)
                         break;
-                mac_selinux_create_file_prepare(slink_tmp, S_IFLNK);
+                label_context_set(slink_tmp, S_IFLNK);
                 err = symlink(target, slink_tmp);
                 if (err != 0)
                         err = -errno;
-                mac_selinux_create_file_clear();
+                label_context_clear();
         } while (err == -ENOENT);
         if (err != 0) {
-                log_error_errno(errno, "symlink '%s' '%s' failed: %m", target, slink_tmp);
+                log_error("symlink '%s' '%s' failed: %m", target, slink_tmp);
                 goto exit;
         }
         err = rename(slink_tmp, slink);
         if (err != 0) {
-                log_error_errno(errno, "rename '%s' '%s' failed: %m", slink_tmp, slink);
+                log_error("rename '%s' '%s' failed: %m", slink_tmp, slink);
                 unlink(slink_tmp);
         }
 exit:
@@ -126,7 +126,8 @@ exit:
 }
 
 /* find device node of device with highest priority */
-static const char *link_find_prioritized(struct udev_device *dev, bool add, const char *stackdir, char *buf, size_t bufsize) {
+static const char *link_find_prioritized(struct udev_device *dev, bool add, const char *stackdir, char *buf, size_t bufsize)
+{
         struct udev *udev = udev_device_get_udev(dev);
         DIR *dir;
         int priority = 0;
@@ -179,7 +180,9 @@ static const char *link_find_prioritized(struct udev_device *dev, bool add, cons
 }
 
 /* manage "stack of names" with possibly specified device priorities */
-static void link_update(struct udev_device *dev, const char *slink, bool add) {
+static void link_update(struct udev_device *dev, const char *slink, bool add)
+{
+        struct udev *udev = udev_device_get_udev(dev);
         char name_enc[UTIL_PATH_SIZE];
         char filename[UTIL_PATH_SIZE * 2];
         char dirname[UTIL_PATH_SIZE];
@@ -197,7 +200,7 @@ static void link_update(struct udev_device *dev, const char *slink, bool add) {
         if (target == NULL) {
                 log_debug("no reference left, remove '%s'", slink);
                 if (unlink(slink) == 0)
-                        rmdir_parents(slink, "/");
+                        util_delete_path(udev, slink);
         } else {
                 log_debug("creating link '%s' to '%s'", slink, target);
                 node_symlink(dev, target, slink);
@@ -221,7 +224,8 @@ static void link_update(struct udev_device *dev, const char *slink, bool add) {
         }
 }
 
-void udev_node_update_old_links(struct udev_device *dev, struct udev_device *dev_old) {
+void udev_node_update_old_links(struct udev_device *dev, struct udev_device *dev_old)
+{
         struct udev_list_entry *list_entry;
 
         /* update possible left-over symlinks */
@@ -264,7 +268,8 @@ static int node_permissions_apply(struct udev_device *dev, bool apply,
                 mode |= S_IFCHR;
 
         if (lstat(devnode, &stats) != 0) {
-                err = log_debug_errno(errno, "can not stat() node '%s' (%m)", devnode);
+                err = -errno;
+                log_debug("can not stat() node '%s' (%m)", devnode);
                 goto out;
         }
 
@@ -281,12 +286,8 @@ static int node_permissions_apply(struct udev_device *dev, bool apply,
 
                 if ((stats.st_mode & 0777) != (mode & 0777) || stats.st_uid != uid || stats.st_gid != gid) {
                         log_debug("set permissions %s, %#o, uid=%u, gid=%u", devnode, mode, uid, gid);
-                        err = chmod(devnode, mode);
-                        if (err < 0)
-                                log_warning_errno(errno, "setting mode of %s to %#o failed: %m", devnode, mode);
-                        err = chown(devnode, uid, gid);
-                        if (err < 0)
-                                log_warning_errno(errno, "setting owner of %s to uid=%u, gid=%u failed: %m", devnode, uid, gid);
+                        chmod(devnode, mode);
+                        chown(devnode, uid, gid);
                 } else {
                         log_debug("preserve permissions %s, %#o, uid=%u, gid=%u", devnode, mode, uid, gid);
                 }
@@ -294,26 +295,21 @@ static int node_permissions_apply(struct udev_device *dev, bool apply,
                 /* apply SECLABEL{$module}=$label */
                 udev_list_entry_foreach(entry, udev_list_get_entry(seclabel_list)) {
                         const char *name, *label;
-                        int r;
 
                         name = udev_list_entry_get_name(entry);
                         label = udev_list_entry_get_value(entry);
 
                         if (streq(name, "selinux")) {
                                 selinux = true;
-
-                                r = mac_selinux_apply(devnode, label);
-                                if (r < 0)
-                                        log_error_errno(r, "SECLABEL: failed to set SELinux label '%s': %m", label);
+                                if (label_apply(devnode, label) < 0)
+                                        log_error("SECLABEL: failed to set SELinux label '%s'", label);
                                 else
                                         log_debug("SECLABEL: set SELinux label '%s'", label);
 
                         } else if (streq(name, "smack")) {
                                 smack = true;
-
-                                r = mac_smack_apply(devnode, SMACK_ATTR_ACCESS, label);
-                                if (r < 0)
-                                        log_error_errno(r, "SECLABEL: failed to set SMACK label '%s': %m", label);
+                                if (smack_label_path(devnode, label) < 0)
+                                        log_error("SECLABEL: failed to set SMACK label '%s'", label);
                                 else
                                         log_debug("SECLABEL: set SMACK label '%s'", label);
 
@@ -323,9 +319,9 @@ static int node_permissions_apply(struct udev_device *dev, bool apply,
 
                 /* set the defaults */
                 if (!selinux)
-                        mac_selinux_fix(devnode, true, false);
+                        label_fix(devnode, true, false);
                 if (!smack)
-                        mac_smack_apply(devnode, SMACK_ATTR_ACCESS, NULL);
+                        smack_label_path(devnode, NULL);
         }
 
         /* always update timestamp when we re-use the node, like on media change events */
@@ -340,17 +336,16 @@ void udev_node_add(struct udev_device *dev, bool apply,
         char filename[UTIL_PATH_SIZE];
         struct udev_list_entry *list_entry;
 
-        log_debug("handling device node '%s', devnum=%s, mode=%#o, uid="UID_FMT", gid="GID_FMT,
+        log_debug("handling device node '%s', devnum=%s, mode=%#o, uid=%d, gid=%d",
                   udev_device_get_devnode(dev), udev_device_get_id_filename(dev), mode, uid, gid);
 
         if (node_permissions_apply(dev, apply, mode, uid, gid, seclabel_list) < 0)
                 return;
 
         /* always add /dev/{block,char}/$major:$minor */
-        xsprintf(filename, "/dev/%s/%u:%u",
+        snprintf(filename, sizeof(filename), "/dev/%s/%u:%u",
                  streq(udev_device_get_subsystem(dev), "block") ? "block" : "char",
-                 major(udev_device_get_devnum(dev)),
-                 minor(udev_device_get_devnum(dev)));
+                 major(udev_device_get_devnum(dev)), minor(udev_device_get_devnum(dev)));
         node_symlink(dev, udev_device_get_devnode(dev), filename);
 
         /* create/update symlinks, add symlinks to name index */
@@ -358,7 +353,8 @@ void udev_node_add(struct udev_device *dev, bool apply,
                         link_update(dev, udev_list_entry_get_name(list_entry), true);
 }
 
-void udev_node_remove(struct udev_device *dev) {
+void udev_node_remove(struct udev_device *dev)
+{
         struct udev_list_entry *list_entry;
         char filename[UTIL_PATH_SIZE];
 
@@ -367,9 +363,8 @@ void udev_node_remove(struct udev_device *dev) {
                 link_update(dev, udev_list_entry_get_name(list_entry), false);
 
         /* remove /dev/{block,char}/$major:$minor */
-        xsprintf(filename, "/dev/%s/%u:%u",
+        snprintf(filename, sizeof(filename), "/dev/%s/%u:%u",
                  streq(udev_device_get_subsystem(dev), "block") ? "block" : "char",
-                 major(udev_device_get_devnum(dev)),
-                 minor(udev_device_get_devnum(dev)));
+                 major(udev_device_get_devnum(dev)), minor(udev_device_get_devnum(dev)));
         unlink(filename);
 }

@@ -18,15 +18,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <sys/inotify.h>
+#include <stddef.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <limits.h>
+#include <sys/stat.h>
+#include <sys/inotify.h>
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "io-util.h"
+#include "libudev.h"
 #include "libudev-private.h"
 
 /**

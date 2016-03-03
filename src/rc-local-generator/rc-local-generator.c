@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -22,11 +24,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "alloc-util.h"
 #include "log.h"
-#include "mkdir.h"
-#include "string-util.h"
 #include "util.h"
+#include "mkdir.h"
 
 #ifndef RC_LOCAL_SCRIPT_PATH_START
 #define RC_LOCAL_SCRIPT_PATH_START "/etc/rc.d/rc.local"
@@ -60,7 +60,8 @@ static int add_symlink(const char *service, const char *where) {
                 if (errno == EEXIST)
                         return 0;
 
-                return log_error_errno(errno, "Failed to create symlink %s: %m", to);
+                log_error("Failed to create symlink %s: %m", to);
+                return -errno;
         }
 
         return 1;

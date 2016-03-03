@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -20,26 +22,27 @@
 ***/
 
 #include "sd-bus.h"
-
+#include "bus-error.h"
 #include "bus-util.h"
-#include "manager.h"
 
-int mac_selinux_generic_access_check(sd_bus_message *message, const char *path, const char *permission, sd_bus_error *error);
+void selinux_access_free(void);
+
+int selinux_generic_access_check(sd_bus_message *message, const char *path, const char *permission, sd_bus_error *error);
 
 #ifdef HAVE_SELINUX
 
-#define mac_selinux_access_check(message, permission, error) \
-        mac_selinux_generic_access_check((message), NULL, (permission), (error))
+#define selinux_access_check(message, permission, error) \
+        selinux_generic_access_check((message), NULL, (permission), (error))
 
-#define mac_selinux_unit_access_check(unit, message, permission, error) \
+#define selinux_unit_access_check(unit, message, permission, error) \
         ({                                                              \
                 Unit *_unit = (unit);                                   \
-                mac_selinux_generic_access_check((message), _unit->source_path ?: _unit->fragment_path, (permission), (error)); \
+                selinux_generic_access_check((message), _unit->fragment_path ?: _unit->fragment_path, (permission), (error)); \
         })
 
 #else
 
-#define mac_selinux_access_check(message, permission, error) 0
-#define mac_selinux_unit_access_check(unit, message, permission, error) 0
+#define selinux_access_check(message, permission, error) 0
+#define selinux_unit_access_check(unit, message, permission, error) 0
 
 #endif

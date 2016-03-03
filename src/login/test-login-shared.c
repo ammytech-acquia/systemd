@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,8 +19,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "login-util.h"
 #include "macro.h"
+#include "login-shared.h"
 
 static void test_session_id_valid(void) {
         assert_se(session_id_valid("c1"));

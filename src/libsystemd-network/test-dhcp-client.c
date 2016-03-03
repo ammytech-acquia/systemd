@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,38 +19,45 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <stdlib.h>
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "sd-dhcp-client.h"
-#include "sd-event.h"
-
-#include "alloc-util.h"
-#include "dhcp-identifier.h"
-#include "dhcp-internal.h"
-#include "dhcp-protocol.h"
-#include "fd-util.h"
 #include "util.h"
+#include "socket-util.h"
+#include "sd-event.h"
+#include "event-util.h"
 
-static uint8_t mac_addr[] = {'A', 'B', 'C', '1', '2', '3'};
+#include "dhcp-protocol.h"
+#include "dhcp-internal.h"
+#include "sd-dhcp-client.h"
+
+static struct ether_addr mac_addr = {
+        .ether_addr_octet = {'A', 'B', 'C', '1', '2', '3'}
+};
 
 typedef int (*test_callback_recv_t)(size_t size, DHCPMessage *dhcp);
 
-static bool verbose = true;
+static bool verbose = false;
 static int test_fd[2];
 static test_callback_recv_t callback_recv;
 static be32_t xid;
 static sd_event_source *test_hangcheck;
 
-static int test_dhcp_hangcheck(sd_event_source *s, uint64_t usec, void *userdata) {
+static int test_dhcp_hangcheck(sd_event_source *s, uint64_t usec,
+                               void *userdata)
+{
         assert_not_reached("Test case should have completed in 2 seconds");
 
         return 0;
 }
 
-static void test_request_basic(sd_event *e) {
+static void test_request_basic(sd_event *e)
+{
         int r;
 
         sd_dhcp_client *client;
@@ -75,26 +84,29 @@ static void test_request_basic(sd_event *e) {
         assert_se(sd_dhcp_client_set_index(client, 1) == 0);
 
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_SUBNET_MASK) == -EEXIST);
+                                        DHCP_OPTION_SUBNET_MASK) == -EEXIST);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_ROUTER) == -EEXIST);
+                                        DHCP_OPTION_ROUTER) == -EEXIST);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_HOST_NAME) == -EEXIST);
+                                        DHCP_OPTION_HOST_NAME) == -EEXIST);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_DOMAIN_NAME) == -EEXIST);
+                                        DHCP_OPTION_DOMAIN_NAME) == -EEXIST);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_DOMAIN_NAME_SERVER) == -EEXIST);
+                                        DHCP_OPTION_DOMAIN_NAME_SERVER)
+                        == -EEXIST);
+        assert_se(sd_dhcp_client_set_request_option(client,
+                                        DHCP_OPTION_NTP_SERVER) == -EEXIST);
 
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_PAD) == -EINVAL);
+                                        DHCP_OPTION_PAD) == -EINVAL);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_END) == -EINVAL);
+                                        DHCP_OPTION_END) == -EINVAL);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_MESSAGE_TYPE) == -EINVAL);
+                                        DHCP_OPTION_MESSAGE_TYPE) == -EINVAL);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_OVERLOAD) == -EINVAL);
+                                        DHCP_OPTION_OVERLOAD) == -EINVAL);
         assert_se(sd_dhcp_client_set_request_option(client,
-                                        SD_DHCP_OPTION_PARAMETER_REQUEST_LIST)
+                                        DHCP_OPTION_PARAMETER_REQUEST_LIST)
                         == -EINVAL);
 
         assert_se(sd_dhcp_client_set_request_option(client, 33) == 0);
@@ -105,7 +117,8 @@ static void test_request_basic(sd_event *e) {
         sd_dhcp_client_unref(client);
 }
 
-static void test_checksum(void) {
+static void test_checksum(void)
+{
         uint8_t buf[20] = {
                 0x45, 0x00, 0x02, 0x40, 0x00, 0x00, 0x00, 0x00,
                 0x40, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -118,25 +131,15 @@ static void test_checksum(void) {
         assert_se(dhcp_packet_checksum((uint8_t*)&buf, 20) == be16toh(0x78ae));
 }
 
-static int check_options(uint8_t code, uint8_t len, const void *option, void *userdata) {
+static int check_options(uint8_t code, uint8_t len, const uint8_t *option,
+                void *user_data)
+{
         switch(code) {
-        case SD_DHCP_OPTION_CLIENT_IDENTIFIER:
-        {
-                uint32_t iaid;
-                struct duid duid;
-                size_t duid_len;
-
-                assert_se(dhcp_identifier_set_duid_en(&duid, &duid_len) >= 0);
-                assert_se(dhcp_identifier_set_iaid(42, mac_addr, ETH_ALEN, &iaid) >= 0);
-
-                assert_se(len == sizeof(uint8_t) + sizeof(uint32_t) + duid_len);
-                assert_se(len == 19);
-                assert_se(((uint8_t*) option)[0] == 0xff);
-
-                assert_se(memcmp((uint8_t*) option + 1, &iaid, sizeof(iaid)) == 0);
-                assert_se(memcmp((uint8_t*) option + 5, &duid, duid_len) == 0);
+        case DHCP_OPTION_CLIENT_IDENTIFIER:
+                assert_se(len == 7);
+                assert_se(option[0] == 0x01);
+                assert_se(memcmp(&option[1], &mac_addr, ETH_ALEN) == 0);
                 break;
-        }
 
         default:
                 break;
@@ -145,7 +148,9 @@ static int check_options(uint8_t code, uint8_t len, const void *option, void *us
         return 0;
 }
 
-int dhcp_network_send_raw_socket(int s, const union sockaddr_union *link, const void *packet, size_t len) {
+int dhcp_network_send_raw_socket(int s, const union sockaddr_union *link,
+                                 const void *packet, size_t len)
+{
         size_t size;
         _cleanup_free_ DHCPPacket *discover;
         uint16_t ip_check, udp_check;
@@ -180,7 +185,8 @@ int dhcp_network_send_raw_socket(int s, const union sockaddr_union *link, const 
         assert_se(ip_check == 0xffff);
 
         assert_se(discover->dhcp.xid);
-        assert_se(memcmp(discover->dhcp.chaddr, &mac_addr, ETH_ALEN) == 0);
+        assert_se(memcmp(discover->dhcp.chaddr,
+                      &mac_addr.ether_addr_octet, 6) == 0);
 
         size = len - sizeof(struct iphdr) - sizeof(struct udphdr);
 
@@ -190,37 +196,30 @@ int dhcp_network_send_raw_socket(int s, const union sockaddr_union *link, const 
         return 575;
 }
 
-int dhcp_network_bind_raw_socket(
-                int index,
-                union sockaddr_union *link,
-                uint32_t id,
-                const uint8_t *addr, size_t addr_len,
-                uint16_t arp_type) {
-
+int dhcp_network_bind_raw_socket(int index, union sockaddr_union *link, uint32_t id)
+{
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, test_fd) < 0)
                 return -errno;
 
         return test_fd[0];
 }
 
-int dhcp_network_bind_udp_socket(be32_t address, uint16_t port) {
-        int fd;
-
-        fd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, 0);
-        if (fd < 0)
-                return -errno;
-
-        return fd;
-}
-
-int dhcp_network_send_udp_socket(int s, be32_t address, uint16_t port, const void *packet, size_t len) {
+int dhcp_network_bind_udp_socket(be32_t address, uint16_t port)
+{
         return 0;
 }
 
-static int test_discover_message_verify(size_t size, struct DHCPMessage *dhcp) {
+int dhcp_network_send_udp_socket(int s, be32_t address, uint16_t port,
+                                 const void *packet, size_t len)
+{
+        return 0;
+}
+
+static int test_discover_message_verify(size_t size, struct DHCPMessage *dhcp)
+{
         int res;
 
-        res = dhcp_option_parse(dhcp, size, check_options, NULL, NULL);
+        res = dhcp_option_parse(dhcp, size, check_options, NULL);
         assert_se(res == DHCP_DISCOVER);
 
         if (verbose)
@@ -229,7 +228,8 @@ static int test_discover_message_verify(size_t size, struct DHCPMessage *dhcp) {
         return 0;
 }
 
-static void test_discover_message(sd_event *e) {
+static void test_discover_message(sd_event *e)
+{
         sd_dhcp_client *client;
         int res, r;
 
@@ -244,7 +244,7 @@ static void test_discover_message(sd_event *e) {
         assert_se(r >= 0);
 
         assert_se(sd_dhcp_client_set_index(client, 42) >= 0);
-        assert_se(sd_dhcp_client_set_mac(client, mac_addr, ETH_ALEN, ARPHRD_ETHER) >= 0);
+        assert_se(sd_dhcp_client_set_mac(client, &mac_addr) >= 0);
 
         assert_se(sd_dhcp_client_set_request_option(client, 248) >= 0);
 
@@ -359,7 +359,7 @@ static void test_addr_acq_acquired(sd_dhcp_client *client, int event,
         struct in_addr addr;
 
         assert_se(client);
-        assert_se(event == SD_DHCP_CLIENT_EVENT_IP_ACQUIRE);
+        assert_se(event == DHCP_EVENT_IP_ACQUIRE);
 
         assert_se(sd_dhcp_client_get_lease(client, &lease) >= 0);
         assert_se(lease);
@@ -379,6 +379,7 @@ static void test_addr_acq_acquired(sd_dhcp_client *client, int event,
         if (verbose)
                 printf("  DHCP address acquired\n");
 
+        sd_dhcp_lease_unref(lease);
         sd_event_exit(e, 0);
 }
 
@@ -387,18 +388,19 @@ static int test_addr_acq_recv_request(size_t size, DHCPMessage *request) {
         uint8_t *msg_bytes = (uint8_t *)request;
         int res;
 
-        res = dhcp_option_parse(request, size, check_options, NULL, NULL);
+        res = dhcp_option_parse(request, size, check_options, NULL);
         assert_se(res == DHCP_REQUEST);
         assert_se(xid == request->xid);
 
-        assert_se(msg_bytes[size - 1] == SD_DHCP_OPTION_END);
+        assert_se(msg_bytes[size - 1] == DHCP_OPTION_END);
 
         if (verbose)
                 printf("  recv DHCP Request  0x%08x\n", be32toh(xid));
 
         memcpy(&test_addr_acq_ack[26], &udp_check, sizeof(udp_check));
         memcpy(&test_addr_acq_ack[32], &xid, sizeof(xid));
-        memcpy(&test_addr_acq_ack[56], &mac_addr, ETHER_ADDR_LEN);
+        memcpy(&test_addr_acq_ack[56], &mac_addr.ether_addr_octet,
+               ETHER_ADDR_LEN);
 
         callback_recv = NULL;
 
@@ -417,10 +419,10 @@ static int test_addr_acq_recv_discover(size_t size, DHCPMessage *discover) {
         uint8_t *msg_bytes = (uint8_t *)discover;
         int res;
 
-        res = dhcp_option_parse(discover, size, check_options, NULL, NULL);
+        res = dhcp_option_parse(discover, size, check_options, NULL);
         assert_se(res == DHCP_DISCOVER);
 
-        assert_se(msg_bytes[size - 1] == SD_DHCP_OPTION_END);
+        assert_se(msg_bytes[size - 1] == DHCP_OPTION_END);
 
         xid = discover->xid;
 
@@ -429,7 +431,8 @@ static int test_addr_acq_recv_discover(size_t size, DHCPMessage *discover) {
 
         memcpy(&test_addr_acq_offer[26], &udp_check, sizeof(udp_check));
         memcpy(&test_addr_acq_offer[32], &xid, sizeof(xid));
-        memcpy(&test_addr_acq_offer[56], &mac_addr, ETHER_ADDR_LEN);
+        memcpy(&test_addr_acq_offer[56], &mac_addr.ether_addr_octet,
+               ETHER_ADDR_LEN);
 
         callback_recv = test_addr_acq_recv_request;
 
@@ -444,7 +447,7 @@ static int test_addr_acq_recv_discover(size_t size, DHCPMessage *discover) {
 }
 
 static void test_addr_acq(sd_event *e) {
-        usec_t time_now = now(clock_boottime_or_monotonic());
+        usec_t time_now = now(CLOCK_MONOTONIC);
         sd_dhcp_client *client;
         int res, r;
 
@@ -459,26 +462,27 @@ static void test_addr_acq(sd_event *e) {
         assert_se(r >= 0);
 
         assert_se(sd_dhcp_client_set_index(client, 42) >= 0);
-        assert_se(sd_dhcp_client_set_mac(client, mac_addr, ETH_ALEN, ARPHRD_ETHER) >= 0);
+        assert_se(sd_dhcp_client_set_mac(client, &mac_addr) >= 0);
 
-        assert_se(sd_dhcp_client_set_callback(client, test_addr_acq_acquired, e) >= 0);
+        assert_se(sd_dhcp_client_set_callback(client, test_addr_acq_acquired, e)
+                >= 0);
 
         callback_recv = test_addr_acq_recv_discover;
 
         assert_se(sd_event_add_time(e, &test_hangcheck,
-                                    clock_boottime_or_monotonic(),
+                                    CLOCK_MONOTONIC,
                                     time_now + 2 * USEC_PER_SEC, 0,
                                     test_dhcp_hangcheck, NULL) >= 0);
 
         res = sd_dhcp_client_start(client);
         assert_se(res == 0 || res == -EINPROGRESS);
 
-        assert_se(sd_event_loop(e) >= 0);
+        sd_event_loop(e);
 
         test_hangcheck = sd_event_source_unref(test_hangcheck);
 
-        assert_se(sd_dhcp_client_set_callback(client, NULL, NULL) >= 0);
-        assert_se(sd_dhcp_client_stop(client) >= 0);
+        sd_dhcp_client_set_callback(client, NULL, NULL);
+        sd_dhcp_client_stop(client);
         sd_dhcp_client_unref(client);
 
         test_fd[1] = safe_close(test_fd[1]);
@@ -488,7 +492,7 @@ static void test_addr_acq(sd_event *e) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_(sd_event_unrefp) sd_event *e;
+        _cleanup_event_unref_ sd_event *e;
 
         log_set_max_level(LOG_DEBUG);
         log_parse_environment();
@@ -501,13 +505,6 @@ int main(int argc, char *argv[]) {
 
         test_discover_message(e);
         test_addr_acq(e);
-
-#ifdef VALGRIND
-        /* Make sure the async_close thread has finished.
-         * valgrind would report some of the phread_* structures
-         * as not cleaned up properly. */
-        sleep(1);
-#endif
 
         return 0;
 }

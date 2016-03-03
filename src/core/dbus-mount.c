@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,14 +19,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "bus-util.h"
-#include "dbus-cgroup.h"
+#include "unit.h"
+#include "mount.h"
+#include "dbus-unit.h"
 #include "dbus-execute.h"
 #include "dbus-kill.h"
+#include "dbus-cgroup.h"
 #include "dbus-mount.h"
-#include "mount.h"
-#include "string-util.h"
-#include "unit.h"
+#include "bus-util.h"
 
 static int property_get_what(
                 sd_bus *bus,

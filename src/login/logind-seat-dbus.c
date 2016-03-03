@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,16 +21,15 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/capability.h>
 
-#include "alloc-util.h"
-#include "bus-common-errors.h"
-#include "bus-label.h"
-#include "bus-util.h"
-#include "logind-seat.h"
-#include "logind.h"
-#include "strv.h"
-#include "user-util.h"
 #include "util.h"
+#include "bus-util.h"
+#include "strv.h"
+#include "bus-errors.h"
+#include "bus-label.h"
+#include "logind.h"
+#include "logind-seat.h"
 
 static int property_get_active_session(
                 sd_bus *bus,
@@ -193,26 +194,13 @@ static int property_get_idle_since_hint(
         return sd_bus_message_append(reply, "t", u);
 }
 
-int bus_seat_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_terminate(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
         int r;
 
+        assert(bus);
         assert(message);
         assert(s);
-
-        r = bus_verify_polkit_async(
-                        message,
-                        CAP_KILL,
-                        "org.freedesktop.login1.manage",
-                        NULL,
-                        false,
-                        UID_INVALID,
-                        &s->manager->polkit_registry,
-                        error);
-        if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* Will call us back */
 
         r = seat_stop_sessions(s, true);
         if (r < 0)
@@ -221,12 +209,13 @@ int bus_seat_method_terminate(sd_bus_message *message, void *userdata, sd_bus_er
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_activate_session(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_activate_session(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
         const char *name;
         Session *session;
         int r;
 
+        assert(bus);
         assert(message);
         assert(s);
 
@@ -248,11 +237,12 @@ static int method_activate_session(sd_bus_message *message, void *userdata, sd_b
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_switch_to(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_switch_to(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
         unsigned int to;
         int r;
 
+        assert(bus);
         assert(message);
         assert(s);
 
@@ -270,10 +260,11 @@ static int method_switch_to(sd_bus_message *message, void *userdata, sd_bus_erro
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_switch_to_next(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_switch_to_next(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
         int r;
 
+        assert(bus);
         assert(message);
         assert(s);
 
@@ -284,10 +275,11 @@ static int method_switch_to_next(sd_bus_message *message, void *userdata, sd_bus
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_switch_to_previous(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int method_switch_to_previous(sd_bus *bus, sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
         int r;
 
+        assert(bus);
         assert(message);
         assert(s);
 
@@ -311,7 +303,7 @@ const sd_bus_vtable seat_vtable[] = {
         SD_BUS_PROPERTY("IdleSinceHint", "t", property_get_idle_since_hint, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("IdleSinceHintMonotonic", "t", property_get_idle_since_hint, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
 
-        SD_BUS_METHOD("Terminate", NULL, NULL, bus_seat_method_terminate, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Terminate", NULL, NULL, method_terminate, SD_BUS_VTABLE_CAPABILITY(CAP_KILL)),
         SD_BUS_METHOD("ActivateSession", "s", NULL, method_activate_session, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SwitchTo", "u", NULL, method_switch_to, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SwitchToNext", NULL, NULL, method_switch_to_next, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -332,25 +324,28 @@ int seat_object_find(sd_bus *bus, const char *path, const char *interface, void 
         assert(m);
 
         if (streq(path, "/org/freedesktop/login1/seat/self")) {
-                _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
+                _cleanup_bus_creds_unref_ sd_bus_creds *creds = NULL;
                 sd_bus_message *message;
                 Session *session;
-                const char *name;
+                pid_t pid;
 
                 message = sd_bus_get_current_message(bus);
                 if (!message)
                         return 0;
 
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
+                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_PID, &creds);
                 if (r < 0)
                         return r;
 
-                r = sd_bus_creds_get_session(creds, &name);
+                r = sd_bus_creds_get_pid(creds, &pid);
                 if (r < 0)
                         return r;
 
-                session = hashmap_get(m->sessions, name);
-                if (!session)
+                r = manager_get_session_by_pid(m, pid, &session);
+                if (r <= 0)
+                        return 0;
+
+                if (!session->seat)
                         return 0;
 
                 seat = session->seat;
@@ -367,10 +362,9 @@ int seat_object_find(sd_bus *bus, const char *path, const char *interface, void 
                         return -ENOMEM;
 
                 seat = hashmap_get(m->seats, e);
+                if (!seat)
+                        return 0;
         }
-
-        if (!seat)
-                return 0;
 
         *found = seat;
         return 1;
@@ -390,7 +384,6 @@ char *seat_bus_path(Seat *s) {
 
 int seat_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error) {
         _cleanup_strv_free_ char **l = NULL;
-        sd_bus_message *message;
         Manager *m = userdata;
         Seat *seat;
         Iterator i;
@@ -410,26 +403,6 @@ int seat_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***
                 r = strv_consume(&l, p);
                 if (r < 0)
                         return r;
-        }
-
-        message = sd_bus_get_current_message(bus);
-        if (message) {
-                _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-                const char *name;
-                Session *session;
-
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
-                if (r >= 0) {
-                        r = sd_bus_creds_get_session(creds, &name);
-                        if (r >= 0) {
-                                session = hashmap_get(m->sessions, name);
-                                if (session && session->seat) {
-                                        r = strv_extend(&l, "/org/freedesktop/login1/seat/self");
-                                        if (r < 0)
-                                                return r;
-                                }
-                        }
-                }
         }
 
         *nodes = l;

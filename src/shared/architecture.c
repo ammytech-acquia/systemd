@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -20,11 +22,8 @@
 #include <sys/utsname.h>
 
 #include "architecture.h"
-#include "macro.h"
-#include "string-table.h"
-#include "string-util.h"
 
-int uname_architecture(void) {
+Architecture uname_architecture(void) {
 
         /* Return a sanitized enum identifying the architecture we are
          * running on. This is based on uname(), and the user may
@@ -36,13 +35,13 @@ int uname_architecture(void) {
          * 1:1. Instead we try to clean it up and break down the
          * confusion on x86 and arm in particular.
          *
-         * We do not try to distinguish CPUs not CPU features, but
+         * We do not try to distuingish CPUs not CPU features, but
          * actual architectures, i.e. that have genuinely different
          * code. */
 
         static const struct {
                 const char *machine;
-                int arch;
+                Architecture arch;
         } arch_map[] = {
 #if defined(__x86_64__) || defined(__i386__)
                 { "x86_64",     ARCHITECTURE_X86_64   },
@@ -109,24 +108,21 @@ int uname_architecture(void) {
                 { "armv8l",     ARCHITECTURE_ARM      },
                 { "armv8b",     ARCHITECTURE_ARM_BE   },
 #elif defined(__sh__) || defined(__sh64__)
-                { "sh5",        ARCHITECTURE_SH64     },
-                { "sh2",        ARCHITECTURE_SH       },
-                { "sh2a",       ARCHITECTURE_SH       },
-                { "sh3",        ARCHITECTURE_SH       },
-                { "sh4",        ARCHITECTURE_SH       },
-                { "sh4a",       ARCHITECTURE_SH       },
+                { "sh64",       ARCHITECTURE_SH64     },
+                { "sh",         ARCHITECTURE_SH       },
 #elif defined(__m68k__)
                 { "m68k",       ARCHITECTURE_M68K     },
 #elif defined(__tilegx__)
                 { "tilegx",     ARCHITECTURE_TILEGX   },
 #elif defined(__cris__)
+                { "cris",       ARCHITECTURE_CRIS     },
                 { "crisv32",    ARCHITECTURE_CRIS     },
 #else
 #error "Please register your architecture here!"
 #endif
         };
 
-        static int cached = _ARCHITECTURE_INVALID;
+        static Architecture cached = _ARCHITECTURE_INVALID;
         struct utsname u;
         unsigned i;
 
@@ -158,9 +154,7 @@ static const char *const architecture_table[_ARCHITECTURE_MAX] = {
         [ARCHITECTURE_SPARC] = "sparc",
         [ARCHITECTURE_SPARC64] = "sparc64",
         [ARCHITECTURE_MIPS] = "mips",
-        [ARCHITECTURE_MIPS_LE] = "mips-le",
         [ARCHITECTURE_MIPS64] = "mips64",
-        [ARCHITECTURE_MIPS64_LE] = "mips64-le",
         [ARCHITECTURE_ALPHA] = "alpha",
         [ARCHITECTURE_ARM] = "arm",
         [ARCHITECTURE_ARM_BE] = "arm-be",
@@ -173,4 +167,4 @@ static const char *const architecture_table[_ARCHITECTURE_MAX] = {
         [ARCHITECTURE_CRIS] = "cris",
 };
 
-DEFINE_STRING_TABLE_LOOKUP(architecture, int);
+DEFINE_STRING_TABLE_LOOKUP(architecture, Architecture);

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -19,19 +21,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #include "sd-bus.h"
 
-enum {
-        BUS_MESSAGE_DUMP_WITH_HEADER = 1,
-        BUS_MESSAGE_DUMP_SUBTREE_ONLY = 2,
-};
+int bus_message_dump(sd_bus_message *m, FILE *f, bool with_header);
 
-int bus_message_dump(sd_bus_message *m, FILE *f, unsigned flags);
-
-int bus_creds_dump(sd_bus_creds *c, FILE *f, bool terse);
-
-int bus_pcap_header(size_t snaplen, FILE *f);
-int bus_message_pcap_frame(sd_bus_message *m, size_t snaplen, FILE *f);
+int bus_creds_dump(sd_bus_creds *c, FILE *f);

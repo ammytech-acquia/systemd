@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,30 +19,19 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <mqueue.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
 #include <sys/ipc.h>
-#include <sys/msg.h>
-#include <sys/sem.h>
 #include <sys/shm.h>
+#include <sys/sem.h>
+#include <sys/msg.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <mqueue.h>
 
-#include "clean-ipc.h"
-#include "dirent-util.h"
-#include "fd-util.h"
-#include "fileio.h"
-#include "formats-util.h"
-#include "log.h"
-#include "macro.h"
-#include "string-util.h"
+#include "util.h"
 #include "strv.h"
+#include "clean-ipc.h"
 
 static int clean_sysvipc_shm(uid_t delete_uid) {
         _cleanup_fclose_ FILE *f = NULL;
@@ -53,7 +44,8 @@ static int clean_sysvipc_shm(uid_t delete_uid) {
                 if (errno == ENOENT)
                         return 0;
 
-                return log_warning_errno(errno, "Failed to open /proc/sysvipc/shm: %m");
+                log_warning("Failed to open /proc/sysvipc/shm: %m");
+                return -errno;
         }
 
         FOREACH_LINE(line, f, goto fail) {
@@ -86,16 +78,16 @@ static int clean_sysvipc_shm(uid_t delete_uid) {
                         if (errno == EIDRM || errno == EINVAL)
                                 continue;
 
-                        ret = log_warning_errno(errno,
-                                                "Failed to remove SysV shared memory segment %i: %m",
-                                                shmid);
+                        log_warning("Failed to remove SysV shared memory segment %i: %m", shmid);
+                        ret = -errno;
                 }
         }
 
         return ret;
 
 fail:
-        return log_warning_errno(errno, "Failed to read /proc/sysvipc/shm: %m");
+        log_warning("Failed to read /proc/sysvipc/shm: %m");
+        return -errno;
 }
 
 static int clean_sysvipc_sem(uid_t delete_uid) {
@@ -109,7 +101,8 @@ static int clean_sysvipc_sem(uid_t delete_uid) {
                 if (errno == ENOENT)
                         return 0;
 
-                return log_warning_errno(errno, "Failed to open /proc/sysvipc/sem: %m");
+                log_warning("Failed to open /proc/sysvipc/sem: %m");
+                return -errno;
         }
 
         FOREACH_LINE(line, f, goto fail) {
@@ -137,16 +130,16 @@ static int clean_sysvipc_sem(uid_t delete_uid) {
                         if (errno == EIDRM || errno == EINVAL)
                                 continue;
 
-                        ret = log_warning_errno(errno,
-                                                "Failed to remove SysV semaphores object %i: %m",
-                                                semid);
+                        log_warning("Failed to remove SysV semaphores object %i: %m", semid);
+                        ret = -errno;
                 }
         }
 
         return ret;
 
 fail:
-        return log_warning_errno(errno, "Failed to read /proc/sysvipc/sem: %m");
+        log_warning("Failed to read /proc/sysvipc/sem: %m");
+        return -errno;
 }
 
 static int clean_sysvipc_msg(uid_t delete_uid) {
@@ -160,7 +153,8 @@ static int clean_sysvipc_msg(uid_t delete_uid) {
                 if (errno == ENOENT)
                         return 0;
 
-                return log_warning_errno(errno, "Failed to open /proc/sysvipc/msg: %m");
+                log_warning("Failed to open /proc/sysvipc/msg: %m");
+                return -errno;
         }
 
         FOREACH_LINE(line, f, goto fail) {
@@ -189,16 +183,16 @@ static int clean_sysvipc_msg(uid_t delete_uid) {
                         if (errno == EIDRM || errno == EINVAL)
                                 continue;
 
-                        ret = log_warning_errno(errno,
-                                                "Failed to remove SysV message queue %i: %m",
-                                                msgid);
+                        log_warning("Failed to remove SysV message queue %i: %m", msgid);
+                        ret = -errno;
                 }
         }
 
         return ret;
 
 fail:
-        return log_warning_errno(errno, "Failed to read /proc/sysvipc/msg: %m");
+        log_warning("Failed to read /proc/sysvipc/msg: %m");
+        return -errno;
 }
 
 static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
@@ -217,7 +211,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
                         if (errno == ENOENT)
                                 continue;
 
-                        log_warning_errno(errno, "Failed to stat() POSIX shared memory segment %s: %m", de->d_name);
+                        log_warning("Failed to stat() POSIX shared memory segment %s: %m", de->d_name);
                         ret = -errno;
                         continue;
                 }
@@ -231,7 +225,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
                         kid = xopendirat(dirfd(dir), de->d_name, O_NOFOLLOW|O_NOATIME);
                         if (!kid) {
                                 if (errno != ENOENT) {
-                                        log_warning_errno(errno, "Failed to enter shared memory directory %s: %m", de->d_name);
+                                        log_warning("Failed to enter shared memory directory %s: %m", de->d_name);
                                         ret = -errno;
                                 }
                         } else {
@@ -245,7 +239,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
                                 if (errno == ENOENT)
                                         continue;
 
-                                log_warning_errno(errno, "Failed to remove POSIX shared memory directory %s: %m", de->d_name);
+                                log_warning("Failed to remove POSIX shared memory directory %s: %m", de->d_name);
                                 ret = -errno;
                         }
                 } else {
@@ -255,7 +249,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
                                 if (errno == ENOENT)
                                         continue;
 
-                                log_warning_errno(errno, "Failed to remove POSIX shared memory segment %s: %m", de->d_name);
+                                log_warning("Failed to remove POSIX shared memory segment %s: %m", de->d_name);
                                 ret = -errno;
                         }
                 }
@@ -264,7 +258,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid) {
         return ret;
 
 fail:
-        log_warning_errno(errno, "Failed to read /dev/shm: %m");
+        log_warning("Failed to read /dev/shm: %m");
         return -errno;
 }
 
@@ -276,7 +270,8 @@ static int clean_posix_shm(uid_t uid) {
                 if (errno == ENOENT)
                         return 0;
 
-                return log_warning_errno(errno, "Failed to open /dev/shm: %m");
+                log_warning("Failed to open /dev/shm: %m");
+                return -errno;
         }
 
         return clean_posix_shm_internal(dir, uid);
@@ -292,7 +287,8 @@ static int clean_posix_mq(uid_t uid) {
                 if (errno == ENOENT)
                         return 0;
 
-                return log_warning_errno(errno, "Failed to open /dev/mqueue: %m");
+                log_warning("Failed to open /dev/mqueue: %m");
+                return -errno;
         }
 
         FOREACH_DIRENT(de, dir, goto fail) {
@@ -306,9 +302,8 @@ static int clean_posix_mq(uid_t uid) {
                         if (errno == ENOENT)
                                 continue;
 
-                        ret = log_warning_errno(errno,
-                                                "Failed to stat() MQ segment %s: %m",
-                                                de->d_name);
+                        log_warning("Failed to stat() MQ segment %s: %m", de->d_name);
+                        ret = -errno;
                         continue;
                 }
 
@@ -322,16 +317,16 @@ static int clean_posix_mq(uid_t uid) {
                         if (errno == ENOENT)
                                 continue;
 
-                        ret = log_warning_errno(errno,
-                                                "Failed to unlink POSIX message queue %s: %m",
-                                                fn);
+                        log_warning("Failed to unlink POSIX message queue %s: %m", fn);
+                        ret = -errno;
                 }
         }
 
         return ret;
 
 fail:
-        return log_warning_errno(errno, "Failed to read /dev/mqueue: %m");
+        log_warning("Failed to read /dev/mqueue: %m");
+        return -errno;
 }
 
 int clean_ipc(uid_t uid) {

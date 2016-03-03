@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,16 +19,20 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <pthread.h>
+#include <assert.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "log.h"
+#include "util.h"
+#include "macro.h"
 
 #include "sd-bus.h"
-
 #include "bus-internal.h"
+#include "bus-message.h"
 #include "bus-util.h"
-#include "log.h"
-#include "macro.h"
-#include "util.h"
 
 struct context {
         int fds[2];
@@ -55,18 +61,18 @@ static void *server(void *p) {
         assert_se(sd_bus_start(bus) >= 0);
 
         while (!quit) {
-                _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
+                _cleanup_bus_message_unref_ sd_bus_message *m = NULL, *reply = NULL;
 
                 r = sd_bus_process(bus, &m);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to process requests: %m");
+                        log_error("Failed to process requests: %s", strerror(-r));
                         goto fail;
                 }
 
                 if (r == 0) {
                         r = sd_bus_wait(bus, (uint64_t) -1);
                         if (r < 0) {
-                                log_error_errno(r, "Failed to wait: %m");
+                                log_error("Failed to wait: %s", strerror(-r));
                                 goto fail;
                         }
 
@@ -84,7 +90,7 @@ static void *server(void *p) {
 
                         r = sd_bus_message_new_method_return(m, &reply);
                         if (r < 0) {
-                                log_error_errno(r, "Failed to allocate return: %m");
+                                log_error("Failed to allocate return: %s", strerror(-r));
                                 goto fail;
                         }
 
@@ -96,7 +102,7 @@ static void *server(void *p) {
                                         &reply,
                                         &SD_BUS_ERROR_MAKE_CONST(SD_BUS_ERROR_UNKNOWN_METHOD, "Unknown method."));
                         if (r < 0) {
-                                log_error_errno(r, "Failed to allocate return: %m");
+                                log_error("Failed to allocate return: %s", strerror(-r));
                                 goto fail;
                         }
                 }
@@ -104,7 +110,7 @@ static void *server(void *p) {
                 if (reply) {
                         r = sd_bus_send(bus, reply, NULL);
                         if (r < 0) {
-                                log_error_errno(r, "Failed to send reply: %m");
+                                log_error("Failed to send reply: %s", strerror(-r));
                                 goto fail;
                         }
                 }
@@ -122,8 +128,8 @@ fail:
 }
 
 static int client(struct context *c) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
-        _cleanup_(sd_bus_unrefp) sd_bus *bus = NULL;
+        _cleanup_bus_message_unref_ sd_bus_message *m = NULL, *reply = NULL;
+        _cleanup_bus_unref_ sd_bus *bus = NULL;
         sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
@@ -140,8 +146,10 @@ static int client(struct context *c) {
                         "/",
                         "org.freedesktop.systemd.test",
                         "Exit");
-        if (r < 0)
-                return log_error_errno(r, "Failed to allocate method call: %m");
+        if (r < 0) {
+                log_error("Failed to allocate method call: %s", strerror(-r));
+                return r;
+        }
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
         if (r < 0) {

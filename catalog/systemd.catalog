@@ -23,35 +23,20 @@
 # For an explanation why we do all this, see https://xkcd.com/1024/
 
 -- f77379a8490b408bbe5f6940505a777b
-Subject: The journal has been started
+Subject: The Journal has been started
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
-The system journal process has started up, opened the journal
+The system journal process has been starting up, opened the journal
 files for writing and is now ready to process requests.
 
 -- d93fb3c9c24d451a97cea615ce59c00b
-Subject: The journal has been stopped
+Subject: The Journal has been stopped
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
 The system journal process has shut down and closed all currently
 active journal files.
-
--- ec387f577b844b8fa948f33cad9a75e6
-Subject: Disk space used by the journal
-Defined-By: systemd
-Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
-
-@JOURNAL_NAME@ (@JOURNAL_PATH@) is currently using @CURRENT_USE_PRETTY@.
-Maximum allowed usage is set to @MAX_USE_PRETTY@.
-Leaving at least @DISK_KEEP_FREE_PRETTY@ free (of currently available @DISK_AVAILABLE_PRETTY@ of disk space).
-Enforced usage limit is thus @LIMIT_PRETTY@, of which @AVAILABLE_PRETTY@ are still available.
-
-The limits controlling how much disk space is used by the journal may
-be configured with SystemMaxUse=, SystemKeepFree=, SystemMaxFileSize=,
-RuntimeMaxUse=, RuntimeKeepFree=, RuntimeMaxFileSize= settings in
-/etc/systemd/journald.conf. See journald.conf(5) for details.
 
 -- a596d6fe7bfa4994828e72309e95d61e
 Subject: Messages from a service have been suppressed
@@ -65,8 +50,8 @@ from the service have been dropped.
 Note that only messages from the service in question have been
 dropped, other services' messages are unaffected.
 
-The limits controlling when messages are dropped may be configured
-with RateLimitInterval= and RateLimitBurst= in
+The limits when messages are dropped may be configured with
+RateLimitInterval= and RateLimitBurst= in
 /etc/systemd/journald.conf. See journald.conf(5) for details.
 
 -- e9bf28e6e834481bb6f48f548ad13606
@@ -111,7 +96,7 @@ A new session with the ID @SESSION_ID@ has been created for the user @USER_ID@.
 The leading process of the session is @LEADER@.
 
 -- 3354939424b4456d9802ca8333ed424a
-Subject: Session @SESSION_ID@ has been terminated
+Subject: A session @SESSION_ID@ has been terminated
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
@@ -127,7 +112,7 @@ Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
 A new seat @SEAT_ID@ has been configured and is now available.
 
 -- e7852bfe46784ed0accde04bc864c2d5
-Subject: Seat @SEAT_ID@ has now been removed
+Subject: A seat @SEAT_ID@ has now been removed
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
@@ -193,7 +178,7 @@ Systemd shutdown has been initiated. The shutdown has now begun and
 all system services are terminated and all file systems unmounted.
 
 -- 7d4958e842da4a758f6c1cdc7b36dcc5
-Subject: Unit @UNIT@ has begun start-up
+Subject: Unit @UNIT@ has begun with start-up
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
@@ -232,11 +217,11 @@ Unit @UNIT@ has failed.
 The result is @RESULT@.
 
 -- d34d037fff1847e6ae669a370e694725
-Subject: Unit @UNIT@ has begun reloading its configuration
+Subject: Unit @UNIT@ has begun with reloading its configuration
 Defined-By: systemd
 Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
-Unit @UNIT@ has begun reloading its configuration
+Unit @UNIT@ has begun with reloading its configuration
 
 -- 7b05ebc668384222baa8881179cfda54
 Subject: Unit @UNIT@ has finished reloading its configuration
@@ -254,7 +239,7 @@ Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
 The process @EXECUTABLE@ could not be executed and failed.
 
-The error number returned by this process is @ERRNO@.
+The error number returned while executing this process is @ERRNO@.
 
 -- 0027229ca0644181a76c4e92458afa2e
 Subject: One or more messages could not be forwarded to syslog
@@ -293,42 +278,3 @@ Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
 
 The virtual machine @NAME@ with its leader PID @LEADER@ has been
 shut down.
-
--- 36db2dfa5a9045e1bd4af5f93e1cf057
-Subject: DNSSEC mode has been turned off, as server doesn't support it
-Defined-By: systemd
-Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
-Documentation: man:systemd-resolved.service(8) resolved.conf(5)
-
-The resolver service (systemd-resolved.service) has detected that the
-configured DNS server does not support DNSSEC, and DNSSEC validation has been
-turned off as result.
-
-This event will take place if DNSSEC=allow-downgrade is configured in
-resolved.conf and the configured DNS server is incompatible with DNSSEC. Note
-that using this mode permits DNSSEC downgrade attacks, as an attacker might be
-able turn off DNSSEC validation on the system by inserting DNS replies in the
-communication channel that result in a downgrade like this.
-
-This event might be indication that the DNS server is indeed incompatible with
-DNSSEC or that an attacker has successfully managed to stage such a downgrade
-attack.
-
--- 1675d7f172174098b1108bf8c7dc8f5d
-Subject: DNSSEC validation failed
-Defined-By: systemd
-Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
-Documentation: man:systemd-resolved.service(8)
-
-A DNS query or resource record set failed DNSSEC validation. This is usually
-indication that the communication channel used was tampered with.
-
--- 4d4408cfd0d144859184d1e65d7c8a65
-Subject: A DNSSEC trust anchor has been revoked
-Defined-By: systemd
-Support: http://lists.freedesktop.org/mailman/listinfo/systemd-devel
-Documentation: man:systemd-resolved.service(8)
-
-A DNSSEC trust anchor has been revoked. A new trust anchor has to be
-configured, or the operating system needs to be updated, to provide an updated
-DNSSEC trust anchor.

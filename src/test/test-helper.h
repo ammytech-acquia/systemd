@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -21,21 +23,9 @@
 
 #include "sd-daemon.h"
 
-#include "macro.h"
-
 #define TEST_REQ_RUNNING_SYSTEMD(x)                                 \
         if (sd_booted() > 0) {                                      \
                 x;                                                  \
         } else {                                                    \
                 printf("systemd not booted skipping '%s'\n", #x);   \
         }
-
-#define MANAGER_SKIP_TEST(r)                                    \
-        IN_SET(r,                                               \
-               -EPERM,                                          \
-               -EACCES,                                         \
-               -EADDRINUSE,                                     \
-               -EHOSTDOWN,                                      \
-               -ENOENT,                                         \
-               -ENOMEDIUM /* cannot determine cgroup */         \
-               )

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -20,5 +22,4 @@
 #pragma once
 
 #include "install.h"
-
-int install_full_printf(UnitFileInstallInfo *i, const char *format, char **ret);
+int install_full_printf(InstallInfo *i, const char *format, char **ret);

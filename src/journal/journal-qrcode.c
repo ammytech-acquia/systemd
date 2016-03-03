@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -18,11 +20,12 @@
 ***/
 
 #include <assert.h>
-#include <errno.h>
-#include <qrencode.h>
-#include <stdbool.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
+#include <qrencode.h>
 
 #include "journal-qrcode.h"
 

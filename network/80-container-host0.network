@@ -10,8 +10,5 @@ Virtualization=container
 Name=host0
 
 [Network]
-DHCP=yes
-LinkLocalAddressing=yes
-
-[DHCP]
-UseTimezone=yes
+DHCP=both
+IPv4LL=yes

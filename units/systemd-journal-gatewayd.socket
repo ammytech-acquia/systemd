@@ -7,7 +7,6 @@
 
 [Unit]
 Description=Journal Gateway Service Socket
-Documentation=man:systemd-journal-gatewayd(8)
 
 [Socket]
 ListenStream=19531

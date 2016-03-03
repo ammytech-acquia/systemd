@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,11 +19,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <assert.h>
 #include <string.h>
 
-#include "alloc-util.h"
-#include "logind-device.h"
 #include "util.h"
+#include "logind-device.h"
 
 Device* device_new(Manager *m, const char *sysfs, bool master) {
         Device *d;

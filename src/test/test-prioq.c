@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,11 +21,10 @@
 
 #include <stdlib.h>
 
-#include "alloc-util.h"
-#include "prioq.h"
-#include "set.h"
-#include "siphash24.h"
 #include "util.h"
+#include "set.h"
+#include "prioq.h"
+#include "siphash24.h"
 
 #define SET_SIZE 1024*4
 
@@ -88,16 +89,14 @@ static int test_compare(const void *a, const void *b) {
         return 0;
 }
 
-static void test_hash(const void *a, struct siphash *state) {
+static unsigned long test_hash(const void *a, const uint8_t hash_key[HASH_KEY_SIZE]) {
         const struct test *x = a;
+        uint64_t u;
 
-        siphash24_compress(&x->value, sizeof(x->value), state);
+        siphash24((uint8_t*) &u, &x->value, sizeof(x->value), hash_key);
+
+        return (unsigned long) u;
 }
-
-static const struct hash_ops test_hash_ops = {
-        .hash = test_hash,
-        .compare = test_compare
-};
 
 static void test_struct(void) {
         Prioq *q;
@@ -110,7 +109,7 @@ static void test_struct(void) {
         q = prioq_new(test_compare);
         assert_se(q);
 
-        s = set_new(&test_hash_ops);
+        s = set_new(test_hash, test_compare);
         assert_se(s);
 
         for (i = 0; i < SET_SIZE; i++) {

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,13 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
-
-#include "alloc-util.h"
-#include "utf8.h"
+#include <errno.h>
+#include <stdio.h>
 
 #include "dhcp-internal.h"
 
@@ -32,14 +31,14 @@ static int option_append(uint8_t options[], size_t size, size_t *offset,
         assert(options);
         assert(offset);
 
-        if (code != SD_DHCP_OPTION_END)
+        if (code != DHCP_OPTION_END)
                 /* always make sure there is space for an END option */
                 size --;
 
         switch (code) {
 
-        case SD_DHCP_OPTION_PAD:
-        case SD_DHCP_OPTION_END:
+        case DHCP_OPTION_PAD:
+        case DHCP_OPTION_END:
                 if (size < *offset + 1)
                         return -ENOBUFS;
 
@@ -89,7 +88,7 @@ int dhcp_option_append(DHCPMessage *message, size_t size, size_t *offset,
                 else if (r == -ENOBUFS && (file || sname)) {
                         /* did not fit, but we have more buffers to try
                            close the options array and move the offset to its end */
-                        r = option_append(message->options, size, offset, SD_DHCP_OPTION_END, 0, NULL);
+                        r = option_append(message->options, size, offset, DHCP_OPTION_END, 0, NULL);
                         if (r < 0)
                                 return r;
 
@@ -110,7 +109,7 @@ int dhcp_option_append(DHCPMessage *message, size_t size, size_t *offset,
                         } else if (r == -ENOBUFS && sname) {
                                 /* did not fit, but we have more buffers to try
                                    close the file array and move the offset to its end */
-                                r = option_append(message->options, size, offset, SD_DHCP_OPTION_END, 0, NULL);
+                                r = option_append(message->options, size, offset, DHCP_OPTION_END, 0, NULL);
                                 if (r < 0)
                                         return r;
 
@@ -140,84 +139,72 @@ int dhcp_option_append(DHCPMessage *message, size_t size, size_t *offset,
 }
 
 static int parse_options(const uint8_t options[], size_t buflen, uint8_t *overload,
-                         uint8_t *message_type, char **error_message, dhcp_option_cb_t cb,
-                         void *userdata) {
+                         uint8_t *message_type, dhcp_option_cb_t cb,
+                         void *user_data) {
         uint8_t code, len;
-        const uint8_t *option;
         size_t offset = 0;
 
         while (offset < buflen) {
-                code = options[offset ++];
+                switch (options[offset]) {
+                case DHCP_OPTION_PAD:
+                        offset++;
 
-                switch (code) {
-                case SD_DHCP_OPTION_PAD:
-                        continue;
+                        break;
 
-                case SD_DHCP_OPTION_END:
+                case DHCP_OPTION_END:
                         return 0;
-                }
 
-                if (buflen < offset + 1)
-                        return -ENOBUFS;
+                case DHCP_OPTION_MESSAGE_TYPE:
+                        if (buflen < offset + 3)
+                                return -ENOBUFS;
 
-                len = options[offset ++];
-
-                if (buflen < offset + len)
-                        return -EINVAL;
-
-                option = &options[offset];
-
-                switch (code) {
-                case SD_DHCP_OPTION_MESSAGE_TYPE:
+                        len = options[++offset];
                         if (len != 1)
                                 return -EINVAL;
 
                         if (message_type)
-                                *message_type = *option;
+                                *message_type = options[++offset];
+                        else
+                                offset++;
+
+                        offset++;
 
                         break;
 
-                case SD_DHCP_OPTION_ERROR_MESSAGE:
-                        if (len == 0)
-                                return -EINVAL;
+                case DHCP_OPTION_OVERLOAD:
+                        if (buflen < offset + 3)
+                                return -ENOBUFS;
 
-                        if (error_message) {
-                                _cleanup_free_ char *string = NULL;
-
-                                /* Accept a trailing NUL byte */
-                                if (memchr(option, 0, len - 1))
-                                        return -EINVAL;
-
-                                string = strndup((const char *) option, len);
-                                if (!string)
-                                        return -ENOMEM;
-
-                                if (!ascii_is_valid(string))
-                                        return -EINVAL;
-
-                                free(*error_message);
-                                *error_message = string;
-                                string = NULL;
-                        }
-
-                        break;
-                case SD_DHCP_OPTION_OVERLOAD:
+                        len = options[++offset];
                         if (len != 1)
                                 return -EINVAL;
 
                         if (overload)
-                                *overload = *option;
+                                *overload = options[++offset];
+                        else
+                                offset++;
+
+                        offset++;
 
                         break;
 
                 default:
+                        if (buflen < offset + 3)
+                                return -ENOBUFS;
+
+                        code = options[offset];
+                        len = options[++offset];
+
+                        if (buflen < ++offset + len)
+                                return -EINVAL;
+
                         if (cb)
-                                cb(code, len, option, userdata);
+                                cb(code, len, &options[offset], user_data);
+
+                        offset += len;
 
                         break;
                 }
-
-                offset += len;
         }
 
         if (offset < buflen)
@@ -226,8 +213,8 @@ static int parse_options(const uint8_t options[], size_t buflen, uint8_t *overlo
         return 0;
 }
 
-int dhcp_option_parse(DHCPMessage *message, size_t len, dhcp_option_cb_t cb, void *userdata, char **_error_message) {
-        _cleanup_free_ char *error_message = NULL;
+int dhcp_option_parse(DHCPMessage *message, size_t len,
+                      dhcp_option_cb_t cb, void *user_data) {
         uint8_t overload = 0;
         uint8_t message_type = 0;
         int r;
@@ -240,29 +227,27 @@ int dhcp_option_parse(DHCPMessage *message, size_t len, dhcp_option_cb_t cb, voi
 
         len -= sizeof(DHCPMessage);
 
-        r = parse_options(message->options, len, &overload, &message_type, &error_message, cb, userdata);
+        r = parse_options(message->options, len, &overload, &message_type,
+                          cb, user_data);
         if (r < 0)
                 return r;
 
         if (overload & DHCP_OVERLOAD_FILE) {
-                r = parse_options(message->file, sizeof(message->file), NULL, &message_type, &error_message, cb, userdata);
+                r = parse_options(message->file, sizeof(message->file),
+                                NULL, &message_type, cb, user_data);
                 if (r < 0)
                         return r;
         }
 
         if (overload & DHCP_OVERLOAD_SNAME) {
-                r = parse_options(message->sname, sizeof(message->sname), NULL, &message_type, &error_message, cb, userdata);
+                r = parse_options(message->sname, sizeof(message->sname),
+                                NULL, &message_type, cb, user_data);
                 if (r < 0)
                         return r;
         }
 
-        if (message_type == 0)
-                return -ENOMSG;
+        if (message_type)
+                return message_type;
 
-        if (_error_message && IN_SET(message_type, DHCP_NAK, DHCP_DECLINE)) {
-                *_error_message = error_message;
-                error_message = NULL;
-        }
-
-        return message_type;
+        return -ENOMSG;
 }

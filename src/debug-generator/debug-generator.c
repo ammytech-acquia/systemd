@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,17 +19,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "alloc-util.h"
-#include "mkdir.h"
-#include "parse-util.h"
-#include "proc-cmdline.h"
-#include "special.h"
-#include "string-util.h"
+#include "util.h"
 #include "strv.h"
 #include "unit-name.h"
-#include "util.h"
+#include "mkdir.h"
 
-static char *arg_default_unit = NULL;
 static const char *arg_dest = "/tmp";
 static char **arg_mask = NULL;
 static char **arg_wants = NULL;
@@ -45,9 +41,9 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                 else {
                         char *n;
 
-                        r = unit_name_mangle(value, UNIT_NAME_NOGLOB, &n);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to glob unit name: %m");
+                        n = unit_name_mangle(value, MANGLE_NOGLOB);
+                        if (!n)
+                                return log_oom();
 
                         r = strv_consume(&arg_mask, n);
                         if (r < 0)
@@ -61,9 +57,9 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                 else {
                         char *n;
 
-                        r = unit_name_mangle(value, UNIT_NAME_NOGLOB, &n);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to glob unit name: %m");
+                        n = unit_name_mangle(value, MANGLE_NOGLOB);
+                        if (!n)
+                                return log_oom();
 
                         r = strv_consume(&arg_wants, n);
                         if (r < 0)
@@ -80,24 +76,6 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                                 arg_debug_shell = r;
                 } else
                         arg_debug_shell = true;
-        } else if (streq(key, "systemd.unit")) {
-
-                if (!value)
-                        log_error("Missing argument for systemd.unit= kernel command line parameter.");
-                else {
-                        r = free_and_strdup(&arg_default_unit, value);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to set default unit %s: %m", value);
-                }
-        } else if (!value) {
-                const char *target;
-
-                target = runlevel_to_target(key);
-                if (target) {
-                        r = free_and_strdup(&arg_default_unit, target);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to set default unit %s: %m", target);
-                }
         }
 
         return 0;
@@ -117,10 +95,10 @@ static int generate_mask_symlinks(void) {
                 if (!p)
                         return log_oom();
 
-                if (symlink("/dev/null", p) < 0)
-                        r = log_error_errno(errno,
-                                            "Failed to create mask symlink %s: %m",
-                                            p);
+                if (symlink("/dev/null", p) < 0) {
+                        log_error("Failed to create mask symlink %s: %m", p);
+                        r = -errno;
+                }
         }
 
         return r;
@@ -136,7 +114,7 @@ static int generate_wants_symlinks(void) {
         STRV_FOREACH(u, arg_wants) {
                 _cleanup_free_ char *p = NULL, *f = NULL;
 
-                p = strjoin(arg_dest, "/", arg_default_unit, ".wants/", *u, NULL);
+                p = strjoin(arg_dest, "/default.target.wants/", *u, NULL);
                 if (!p)
                         return log_oom();
 
@@ -146,10 +124,10 @@ static int generate_wants_symlinks(void) {
 
                 mkdir_parents_label(p, 0755);
 
-                if (symlink(f, p) < 0)
-                        r = log_error_errno(errno,
-                                            "Failed to create wants symlink %s: %m",
-                                            p);
+                if (symlink(f, p) < 0) {
+                        log_error("Failed to create wants symlink %s: %m", p);
+                        r = -errno;
+                }
         }
 
         return r;
@@ -172,15 +150,8 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
-        r = free_and_strdup(&arg_default_unit, SPECIAL_DEFAULT_TARGET);
-        if (r < 0) {
-                log_error_errno(r, "Failed to set default unit %s: %m", SPECIAL_DEFAULT_TARGET);
-                goto finish;
-        }
-
-        r = parse_proc_cmdline(parse_proc_cmdline_item);
-        if (r < 0)
-                log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
+        if (parse_proc_cmdline(parse_proc_cmdline_item) < 0)
+                return EXIT_FAILURE;
 
         if (arg_debug_shell) {
                 r = strv_extend(&arg_wants, "debug-shell.service");

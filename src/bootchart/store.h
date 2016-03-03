@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -23,14 +25,11 @@
 ***/
 
 #include <dirent.h>
-
 #include "bootchart.h"
+
+extern DIR *proc;
+extern int procfd;
 
 double gettime_ns(void);
 void log_uptime(void);
-int log_sample(DIR *proc,
-               int sample,
-               struct ps_struct *ps_first,
-               struct list_sample_data **ptr,
-               int *pscount,
-               int *cpus);
+void log_sample(int sample, struct list_sample_data **ptr);

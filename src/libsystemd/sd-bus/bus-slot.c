@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -18,12 +20,9 @@
 ***/
 
 #include "sd-bus.h"
-
-#include "alloc-util.h"
 #include "bus-control.h"
 #include "bus-objects.h"
 #include "bus-slot.h"
-#include "string-util.h"
 
 sd_bus_slot *bus_slot_allocate(
                 sd_bus *bus,
@@ -55,9 +54,7 @@ sd_bus_slot *bus_slot_allocate(
 }
 
 _public_ sd_bus_slot* sd_bus_slot_ref(sd_bus_slot *slot) {
-
-        if (!slot)
-                return NULL;
+        assert_return(slot, NULL);
 
         assert(slot->n_ref > 0);
 
@@ -78,7 +75,7 @@ void bus_slot_disconnect(sd_bus_slot *slot) {
         case BUS_REPLY_CALLBACK:
 
                 if (slot->reply_callback.cookie != 0)
-                        ordered_hashmap_remove(slot->bus->reply_callbacks, &slot->reply_callback.cookie);
+                        hashmap_remove(slot->bus->reply_callbacks, &slot->reply_callback.cookie);
 
                 if (slot->reply_callback.timeout != 0)
                         prioq_remove(slot->bus->reply_callbacks_prioq, &slot->reply_callback, &slot->reply_callback.prioq_idx);
@@ -92,7 +89,7 @@ void bus_slot_disconnect(sd_bus_slot *slot) {
 
         case BUS_MATCH_CALLBACK:
 
-                if (slot->match_added)
+                if (slot->bus->bus_client)
                         bus_remove_match_internal(slot->bus, slot->match_callback.match_string, slot->match_callback.cookie);
 
                 slot->bus->match_callbacks_modified = true;
@@ -211,7 +208,6 @@ _public_ sd_bus_slot* sd_bus_slot_unref(sd_bus_slot *slot) {
         }
 
         bus_slot_disconnect(slot);
-        free(slot->description);
         free(slot);
 
         return NULL;
@@ -248,39 +244,4 @@ _public_ sd_bus_message *sd_bus_slot_get_current_message(sd_bus_slot *slot) {
                 return NULL;
 
         return slot->bus->current_message;
-}
-
-_public_ sd_bus_message_handler_t sd_bus_slot_get_current_handler(sd_bus_slot *slot) {
-        assert_return(slot, NULL);
-        assert_return(slot->type >= 0, NULL);
-
-        if (slot->bus->current_slot != slot)
-                return NULL;
-
-        return slot->bus->current_handler;
-}
-
-_public_ void* sd_bus_slot_get_current_userdata(sd_bus_slot *slot) {
-        assert_return(slot, NULL);
-        assert_return(slot->type >= 0, NULL);
-
-        if (slot->bus->current_slot != slot)
-                return NULL;
-
-        return slot->bus->current_userdata;
-}
-
-_public_ int sd_bus_slot_set_description(sd_bus_slot *slot, const char *description) {
-        assert_return(slot, -EINVAL);
-
-        return free_and_strdup(&slot->description, description);
-}
-
-_public_ int sd_bus_slot_get_description(sd_bus_slot *slot, const char **description) {
-        assert_return(slot, -EINVAL);
-        assert_return(description, -EINVAL);
-        assert_return(slot->description, -ENXIO);
-
-        *description = slot->description;
-        return 0;
 }

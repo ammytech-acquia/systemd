@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -19,10 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdbool.h>
-
 #include "list.h"
-#include "time-util.h"
 
 typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
@@ -56,7 +55,7 @@ struct CGroupDeviceAllow {
 struct CGroupBlockIODeviceWeight {
         LIST_FIELDS(CGroupBlockIODeviceWeight, device_weights);
         char *path;
-        uint64_t weight;
+        unsigned long weight;
 };
 
 struct CGroupBlockIODeviceBandwidth {
@@ -70,14 +69,13 @@ struct CGroupContext {
         bool cpu_accounting;
         bool blockio_accounting;
         bool memory_accounting;
-        bool tasks_accounting;
 
-        uint64_t cpu_shares;
-        uint64_t startup_cpu_shares;
+        unsigned long cpu_shares;
+        unsigned long startup_cpu_shares;
         usec_t cpu_quota_per_sec_usec;
 
-        uint64_t blockio_weight;
-        uint64_t startup_blockio_weight;
+        unsigned long blockio_weight;
+        unsigned long startup_blockio_weight;
         LIST_HEAD(CGroupBlockIODeviceWeight, blockio_device_weights);
         LIST_HEAD(CGroupBlockIODeviceBandwidth, blockio_device_bandwidths);
 
@@ -85,45 +83,31 @@ struct CGroupContext {
 
         CGroupDevicePolicy device_policy;
         LIST_HEAD(CGroupDeviceAllow, device_allow);
-
-        uint64_t tasks_max;
-
-        bool delegate;
 };
 
-#include "cgroup-util.h"
 #include "unit.h"
+#include "manager.h"
+#include "cgroup-util.h"
 
 void cgroup_context_init(CGroupContext *c);
 void cgroup_context_done(CGroupContext *c);
 void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix);
-void cgroup_context_apply(CGroupContext *c, CGroupMask mask, const char *path, ManagerState state);
+void cgroup_context_apply(CGroupContext *c, CGroupControllerMask mask, const char *path, ManagerState state);
 
-CGroupMask cgroup_context_get_mask(CGroupContext *c);
+CGroupControllerMask cgroup_context_get_mask(CGroupContext *c);
 
 void cgroup_context_free_device_allow(CGroupContext *c, CGroupDeviceAllow *a);
 void cgroup_context_free_blockio_device_weight(CGroupContext *c, CGroupBlockIODeviceWeight *w);
 void cgroup_context_free_blockio_device_bandwidth(CGroupContext *c, CGroupBlockIODeviceBandwidth *b);
 
-CGroupMask unit_get_own_mask(Unit *u);
-CGroupMask unit_get_siblings_mask(Unit *u);
-CGroupMask unit_get_members_mask(Unit *u);
-CGroupMask unit_get_subtree_mask(Unit *u);
-
-CGroupMask unit_get_target_mask(Unit *u);
-CGroupMask unit_get_enable_mask(Unit *u);
+CGroupControllerMask unit_get_cgroup_mask(Unit *u);
+CGroupControllerMask unit_get_siblings_mask(Unit *u);
+CGroupControllerMask unit_get_members_mask(Unit *u);
+CGroupControllerMask unit_get_target_mask(Unit *u);
 
 void unit_update_cgroup_members_masks(Unit *u);
-
-char *unit_default_cgroup_path(Unit *u);
-int unit_set_cgroup_path(Unit *u, const char *path);
-
 int unit_realize_cgroup(Unit *u);
-void unit_release_cgroup(Unit *u);
-void unit_prune_cgroup(Unit *u);
-int unit_watch_cgroup(Unit *u);
-
-int unit_attach_pids_to_cgroup(Unit *u);
+void unit_destroy_cgroup(Unit *u);
 
 int manager_setup_cgroup(Manager *m);
 void manager_shutdown_cgroup(Manager *m, bool delete);
@@ -131,25 +115,11 @@ void manager_shutdown_cgroup(Manager *m, bool delete);
 unsigned manager_dispatch_cgroup_queue(Manager *m);
 
 Unit *manager_get_unit_by_cgroup(Manager *m, const char *cgroup);
-Unit *manager_get_unit_by_pid_cgroup(Manager *m, pid_t pid);
 Unit* manager_get_unit_by_pid(Manager *m, pid_t pid);
 
-int unit_search_main_pid(Unit *u, pid_t *ret);
-int unit_watch_all_pids(Unit *u);
+pid_t unit_search_main_pid(Unit *u);
 
-int unit_get_memory_current(Unit *u, uint64_t *ret);
-int unit_get_tasks_current(Unit *u, uint64_t *ret);
-int unit_get_cpu_usage(Unit *u, nsec_t *ret);
-int unit_reset_cpu_usage(Unit *u);
-
-bool unit_cgroup_delegate(Unit *u);
-
-int unit_notify_cgroup_empty(Unit *u);
 int manager_notify_cgroup_empty(Manager *m, const char *group);
-
-void unit_invalidate_cgroup(Unit *u, CGroupMask m);
-
-void manager_invalidate_startup_units(Manager *m);
 
 const char* cgroup_device_policy_to_string(CGroupDevicePolicy i) _const_;
 CGroupDevicePolicy cgroup_device_policy_from_string(const char *s) _pure_;

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,18 +21,13 @@
 
 #include <unistd.h>
 
-#include "alloc-util.h"
-#include "bus-error.h"
-#include "bus-util.h"
+#include "sd-messages.h"
 #include "conf-parser.h"
-#include "formats-util.h"
-#include "logind-action.h"
-#include "process-util.h"
-#include "sleep-config.h"
 #include "special.h"
-#include "string-table.h"
-#include "terminal-util.h"
-#include "user-util.h"
+#include "sleep-config.h"
+#include "bus-util.h"
+#include "bus-error.h"
+#include "logind-action.h"
 
 int manager_handle_action(
                 Manager *m,
@@ -59,7 +56,7 @@ int manager_handle_action(
                 [HANDLE_HYBRID_SLEEP] = SPECIAL_HYBRID_SLEEP_TARGET
         };
 
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
         InhibitWhat inhibit_operation;
         Inhibitor *offending = NULL;
         bool supported;
@@ -74,6 +71,24 @@ int manager_handle_action(
         }
 
         if (inhibit_key == INHIBIT_HANDLE_LID_SWITCH) {
+                int n;
+
+                /* If we are docked don't react to lid closing */
+                if (manager_is_docked(m)) {
+                        log_debug("Ignoring lid switch request, system is docked.");
+                        return 0;
+                }
+
+                /* If we have more than one display connected,
+                 * don't react to lid closing. */
+                n = manager_count_displays(m);
+                if (n < 0)
+                        log_warning("Display counting failed: %s", strerror(-n));
+                else if (n > 1) {
+                        log_debug("Ignoring lid switch request, %i displays connected.", n);
+                        return 0;
+                }
+
                 /* If the last system suspend or startup is too close,
                  * let's not suspend for now, to give USB docking
                  * stations some time to settle so that we can
@@ -116,7 +131,7 @@ int manager_handle_action(
 
         if (!supported) {
                 log_warning("Requested operation not supported, ignoring.");
-                return -EOPNOTSUPP;
+                return -ENOTSUP;
         }
 
         if (m->action_what) {
@@ -148,6 +163,7 @@ int manager_handle_action(
                           offending->uid, strna(u),
                           offending->pid, strna(comm));
 
+                warn_melody();
                 return -EPERM;
         }
 

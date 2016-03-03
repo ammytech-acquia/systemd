@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -21,6 +23,8 @@
 
 typedef struct Inhibitor Inhibitor;
 
+#include "list.h"
+#include "util.h"
 
 typedef enum InhibitWhat {
         INHIBIT_SHUTDOWN = 1,
@@ -42,6 +46,7 @@ typedef enum InhibitMode {
 } InhibitMode;
 
 #include "logind.h"
+#include "logind-seat.h"
 
 struct Inhibitor {
         Manager *manager;

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -17,14 +19,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <signal.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #include "log.h"
-#include "process-util.h"
-#include "spawn-ask-password-agent.h"
 #include "util.h"
+#include "spawn-ask-password-agent.h"
 
 static pid_t agent_pid = 0;
 
@@ -44,9 +49,9 @@ int ask_password_agent_open(void) {
                        SYSTEMD_TTY_ASK_PASSWORD_AGENT_BINARY_PATH,
                        SYSTEMD_TTY_ASK_PASSWORD_AGENT_BINARY_PATH, "--watch", NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to fork TTY ask password agent: %m");
+                log_error("Failed to fork TTY ask password agent: %s", strerror(-r));
 
-        return 1;
+        return r;
 }
 
 void ask_password_agent_close(void) {
@@ -55,8 +60,8 @@ void ask_password_agent_close(void) {
                 return;
 
         /* Inform agent that we are done */
-        (void) kill(agent_pid, SIGTERM);
-        (void) kill(agent_pid, SIGCONT);
-        (void) wait_for_terminate(agent_pid, NULL);
+        kill(agent_pid, SIGTERM);
+        kill(agent_pid, SIGCONT);
+        wait_for_terminate(agent_pid, NULL);
         agent_pid = 0;
 }

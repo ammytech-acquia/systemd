@@ -16,8 +16,8 @@ Before=getty.target
 
 [Service]
 Environment=HOME=/root
-WorkingDirectory=-/root
-ExecStart=-@SULOGIN@
+WorkingDirectory=/root
+ExecStart=-/sbin/sulogin
 ExecStopPost=-@SYSTEMCTL@ poweroff
 Type=idle
 StandardInput=tty-force

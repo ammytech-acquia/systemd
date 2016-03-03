@@ -19,6 +19,7 @@
 
 #include "logind-action.h"
 #include "logind-session.h"
+
 #include "test-tables.h"
 
 int main(int argc, char **argv) {

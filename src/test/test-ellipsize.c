@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,11 +21,9 @@
 
 #include <stdio.h>
 
-#include "alloc-util.h"
-#include "def.h"
-#include "string-util.h"
-#include "terminal-util.h"
 #include "util.h"
+#include "utf8.h"
+#include "def.h"
 
 static void test_one(const char *p) {
         _cleanup_free_ char *t;

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -18,9 +20,10 @@
 ***/
 
 #include <unistd.h>
+#include <string.h>
 
-#include "log.h"
 #include "watchdog.h"
+#include "log.h"
 
 int main(int argc, char *argv[]) {
         usec_t t = 10 * USEC_PER_SEC;
@@ -32,13 +35,13 @@ int main(int argc, char *argv[]) {
 
         r = watchdog_set_timeout(&t);
         if (r < 0)
-                log_warning_errno(r, "Failed to open watchdog: %m");
+                log_warning("Failed to open watchdog: %s", strerror(-r));
 
         for (i = 0; i < 5; i++) {
                 log_info("Pinging...");
                 r = watchdog_ping();
                 if (r < 0)
-                        log_warning_errno(r, "Failed to ping watchdog: %m");
+                        log_warning("Failed to ping watchdog: %s", strerror(-r));
 
                 usleep(t/2);
         }

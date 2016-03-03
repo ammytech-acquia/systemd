@@ -10,19 +10,22 @@ chrooted() {
 }
 
 kill_udevd() {
-  if [ -d /run/systemd/system ]; then
-    systemctl stop systemd-udevd-control.socket systemd-udevd-kernel.socket
-    systemctl stop systemd-udevd.service
-  else
-    invoke-rc.d udev stop
-  fi
+    start-stop-daemon --stop --name udevd --user root --oknodo --quiet --retry 5
 }
 
 case "$1" in
-    remove)
+    remove|deconfigure|failed-upgrade)
     if ! chrooted; then
       kill_udevd
     fi
+    ;;
+
+    upgrade|deconfigure)
+    ;;
+
+    *)
+    echo "$0 called with unknown argument '$1'" >&2
+    exit 1
     ;;
 esac
 

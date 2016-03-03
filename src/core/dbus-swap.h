@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -21,7 +23,6 @@
 ***/
 
 #include "sd-bus.h"
-
 #include "unit.h"
 
 extern const sd_bus_vtable bus_swap_vtable[];

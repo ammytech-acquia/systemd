@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 /***
   This file is part of systemd.
 
@@ -19,15 +21,13 @@
 
 
 #include <errno.h>
-
 #include "audit-fd.h"
 
 #ifdef HAVE_AUDIT
 
-#include <libaudit.h>
 #include <stdbool.h>
+#include <libaudit.h>
 
-#include "fd-util.h"
 #include "log.h"
 #include "util.h"
 
@@ -41,7 +41,7 @@ int get_audit_fd(void) {
 
                 if (audit_fd < 0) {
                         if (errno != EAFNOSUPPORT && errno != EPROTONOSUPPORT)
-                                log_error_errno(errno, "Failed to connect to audit log: %m");
+                                log_error("Failed to connect to audit log: %m");
 
                         audit_fd = errno ? -errno : -EINVAL;
                 }

@@ -1,3 +1,5 @@
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
+
 #pragma once
 
 /***
@@ -42,5 +44,4 @@ typedef enum OutputFlags {
         OUTPUT_COLOR          = 1 << 4,
         OUTPUT_CATALOG        = 1 << 5,
         OUTPUT_BEGIN_NEWLINE  = 1 << 6,
-        OUTPUT_UTC            = 1 << 7,
 } OutputFlags;
