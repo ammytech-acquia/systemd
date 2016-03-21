@@ -84,7 +84,7 @@ index c37e32e..e3012c5 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 115a378..346cca8 100644
+index 0d95316..520cb70 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -83,6 +83,25 @@ static int context_read_data(Context *c) {
@@ -142,8 +142,8 @@ index 115a378..346cca8 100644
                  if (r < 0)
                          return r;
          }
-@@ -161,7 +180,7 @@ static int context_write_data_local_rtc(Context *c) {
-                 *(char*) mempcpy(stpcpy(mempcpy(w, s, a), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
+@@ -175,7 +194,7 @@ static int context_write_data_local_rtc(Context *c) {
+                 *(char*) mempcpy(stpcpy(stpcpy(mempcpy(w, s, a), prepend), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {
 -                        if (unlink("/etc/adjtime") < 0)
