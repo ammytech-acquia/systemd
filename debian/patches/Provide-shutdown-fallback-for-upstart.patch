@@ -17,7 +17,7 @@ LP: #1370329
  1 file changed, 42 insertions(+), 2 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index c816779..a47f4db 100644
+index 52ca951..8a5b29e 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
 @@ -29,6 +29,7 @@
