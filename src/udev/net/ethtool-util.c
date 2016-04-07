@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
  This file is part of systemd.
 
@@ -19,17 +17,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <sys/ioctl.h>
 #include <net/if.h>
+#include <sys/ioctl.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 
+#include "conf-parser.h"
 #include "ethtool-util.h"
-
+#include "log.h"
+#include "string-table.h"
 #include "strxcpyx.h"
 #include "util.h"
-#include "log.h"
-#include "conf-parser.h"
 
 static const char* const duplex_table[_DUP_MAX] = {
         [DUP_FULL] = "full",
@@ -54,16 +52,15 @@ int ethtool_connect(int *ret) {
         assert_return(ret, -EINVAL);
 
         fd = socket(PF_INET, SOCK_DGRAM, 0);
-        if (fd < 0) {
+        if (fd < 0)
                 return -errno;
-        }
 
         *ret = fd;
 
         return 0;
 }
 
-int ethtool_get_driver(int fd, const char *ifname, char **ret) {
+int ethtool_get_driver(int *fd, const char *ifname, char **ret) {
         struct ethtool_drvinfo ecmd = {
                 .cmd = ETHTOOL_GDRVINFO
         };
@@ -73,9 +70,15 @@ int ethtool_get_driver(int fd, const char *ifname, char **ret) {
         char *d;
         int r;
 
+        if (*fd < 0) {
+                r = ethtool_connect(fd);
+                if (r < 0)
+                        return log_warning_errno(r, "link_config: could not connect to ethtool: %m");
+        }
+
         strscpy(ifr.ifr_name, IFNAMSIZ, ifname);
 
-        r = ioctl(fd, SIOCETHTOOL, &ifr);
+        r = ioctl(*fd, SIOCETHTOOL, &ifr);
         if (r < 0)
                 return -errno;
 
@@ -87,8 +90,7 @@ int ethtool_get_driver(int fd, const char *ifname, char **ret) {
         return 0;
 }
 
-int ethtool_set_speed(int fd, const char *ifname, unsigned int speed, Duplex duplex)
-{
+int ethtool_set_speed(int *fd, const char *ifname, unsigned int speed, Duplex duplex) {
         struct ethtool_cmd ecmd = {
                 .cmd = ETHTOOL_GSET
         };
@@ -101,9 +103,15 @@ int ethtool_set_speed(int fd, const char *ifname, unsigned int speed, Duplex dup
         if (speed == 0 && duplex == _DUP_INVALID)
                 return 0;
 
+        if (*fd < 0) {
+                r = ethtool_connect(fd);
+                if (r < 0)
+                        return log_warning_errno(r, "link_config: could not connect to ethtool: %m");
+        }
+
         strscpy(ifr.ifr_name, IFNAMSIZ, ifname);
 
-        r = ioctl(fd, SIOCETHTOOL, &ifr);
+        r = ioctl(*fd, SIOCETHTOOL, &ifr);
         if (r < 0)
                 return -errno;
 
@@ -132,7 +140,7 @@ int ethtool_set_speed(int fd, const char *ifname, unsigned int speed, Duplex dup
         if (need_update) {
                 ecmd.cmd = ETHTOOL_SSET;
 
-                r = ioctl(fd, SIOCETHTOOL, &ifr);
+                r = ioctl(*fd, SIOCETHTOOL, &ifr);
                 if (r < 0)
                         return -errno;
         }
@@ -140,7 +148,7 @@ int ethtool_set_speed(int fd, const char *ifname, unsigned int speed, Duplex dup
         return 0;
 }
 
-int ethtool_set_wol(int fd, const char *ifname, WakeOnLan wol) {
+int ethtool_set_wol(int *fd, const char *ifname, WakeOnLan wol) {
         struct ethtool_wolinfo ecmd = {
                 .cmd = ETHTOOL_GWOL
         };
@@ -153,9 +161,15 @@ int ethtool_set_wol(int fd, const char *ifname, WakeOnLan wol) {
         if (wol == _WOL_INVALID)
                 return 0;
 
+        if (*fd < 0) {
+                r = ethtool_connect(fd);
+                if (r < 0)
+                        return log_warning_errno(r, "link_config: could not connect to ethtool: %m");
+        }
+
         strscpy(ifr.ifr_name, IFNAMSIZ, ifname);
 
-        r = ioctl(fd, SIOCETHTOOL, &ifr);
+        r = ioctl(*fd, SIOCETHTOOL, &ifr);
         if (r < 0)
                 return -errno;
 
@@ -185,7 +199,7 @@ int ethtool_set_wol(int fd, const char *ifname, WakeOnLan wol) {
         if (need_update) {
                 ecmd.cmd = ETHTOOL_SWOL;
 
-                r = ioctl(fd, SIOCETHTOOL, &ifr);
+                r = ioctl(*fd, SIOCETHTOOL, &ifr);
                 if (r < 0)
                         return -errno;
         }

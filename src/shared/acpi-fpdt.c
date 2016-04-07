@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,18 +17,18 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdlib.h>
-#include <stdio.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/types.h>
 
-#include <util.h>
-#include <fileio.h>
-#include <time-util.h>
-#include <acpi-fpdt.h>
+#include "acpi-fpdt.h"
+#include "alloc-util.h"
+#include "fd-util.h"
+#include "fileio.h"
+#include "time-util.h"
 
 struct acpi_table_header {
         char signature[4];

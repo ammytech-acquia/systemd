@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,14 +17,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <arpa/inet.h>
-
+#include "alloc-util.h"
+#include "networkd-address-pool.h"
 #include "networkd.h"
+#include "set.h"
+#include "string-util.h"
 
 int address_pool_new(
                 Manager *m,
                 AddressPool **ret,
-                unsigned family,
+                int family,
                 const union in_addr_union *u,
                 unsigned prefixlen) {
 
@@ -54,7 +54,7 @@ int address_pool_new(
 int address_pool_new_from_string(
                 Manager *m,
                 AddressPool **ret,
-                unsigned family,
+                int family,
                 const char *p,
                 unsigned prefixlen) {
 
@@ -97,9 +97,10 @@ static bool address_pool_prefix_is_taken(
 
         HASHMAP_FOREACH(l, p->manager->links, i) {
                 Address *a;
+                Iterator j;
 
                 /* Don't clash with assigned addresses */
-                LIST_FOREACH(addresses, a, l->addresses) {
+                SET_FOREACH(a, l->addresses, j) {
                         if (a->family != p->family)
                                 continue;
 

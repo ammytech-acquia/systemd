@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,28 +17,22 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <locale.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/timex.h>
-#include <sys/utsname.h>
 
 #include "sd-bus.h"
-
-#include "bus-util.h"
-#include "bus-error.h"
-#include "util.h"
-#include "spawn-polkit-agent.h"
-#include "build.h"
-#include "clock-util.h"
-#include "strv.h"
 #include "sd-id128.h"
-#include "virt.h"
+
+#include "alloc-util.h"
 #include "architecture.h"
-#include "fileio.h"
+#include "bus-error.h"
+#include "bus-util.h"
+#include "hostname-util.h"
+#include "spawn-polkit-agent.h"
+#include "util.h"
 
 static bool arg_ask_password = true;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
@@ -67,6 +59,8 @@ typedef struct StatusInfo {
         char *pretty_hostname;
         char *icon_name;
         char *chassis;
+        char *deployment;
+        char *location;
         char *kernel_name;
         char *kernel_release;
         char *os_pretty_name;
@@ -91,10 +85,19 @@ static void print_status_info(StatusInfo *i) {
             !streq_ptr(i->hostname, i->static_hostname))
                 printf("Transient hostname: %s\n", i->hostname);
 
-        printf("         Icon name: %s\n"
-               "           Chassis: %s\n",
-               strna(i->icon_name),
-               strna(i->chassis));
+        if (!isempty(i->icon_name))
+                printf("         Icon name: %s\n",
+                       strna(i->icon_name));
+
+        if (!isempty(i->chassis))
+                printf("           Chassis: %s\n",
+                       strna(i->chassis));
+
+        if (!isempty(i->deployment))
+                printf("        Deployment: %s\n", i->deployment);
+
+        if (!isempty(i->location))
+                printf("          Location: %s\n", i->location);
 
         r = sd_id128_get_machine(&mid);
         if (r >= 0)
@@ -122,8 +125,8 @@ static void print_status_info(StatusInfo *i) {
 }
 
 static int show_one_name(sd_bus *bus, const char* attr) {
-        _cleanup_bus_message_unref_ sd_bus_message *reply = NULL;
-        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *s;
         int r;
 
@@ -152,21 +155,23 @@ static int show_all_names(sd_bus *bus) {
         StatusInfo info = {};
 
         static const struct bus_properties_map hostname_map[]  = {
-                { "Hostname",       "s", NULL, offsetof(StatusInfo, hostname) },
-                { "StaticHostname", "s", NULL, offsetof(StatusInfo, static_hostname) },
-                { "PrettyHostname", "s", NULL, offsetof(StatusInfo, pretty_hostname) },
-                { "IconName",       "s", NULL, offsetof(StatusInfo, icon_name) },
-                { "Chassis",        "s", NULL, offsetof(StatusInfo, chassis) },
-                { "KernelName",     "s", NULL, offsetof(StatusInfo, kernel_name) },
-                { "KernelRelease",     "s", NULL, offsetof(StatusInfo, kernel_release) },
-                { "OperatingSystemPrettyName",     "s", NULL, offsetof(StatusInfo, os_pretty_name) },
-                { "OperatingSystemCPEName",        "s", NULL, offsetof(StatusInfo, os_cpe_name) },
+                { "Hostname",                  "s", NULL, offsetof(StatusInfo, hostname)        },
+                { "StaticHostname",            "s", NULL, offsetof(StatusInfo, static_hostname) },
+                { "PrettyHostname",            "s", NULL, offsetof(StatusInfo, pretty_hostname) },
+                { "IconName",                  "s", NULL, offsetof(StatusInfo, icon_name)       },
+                { "Chassis",                   "s", NULL, offsetof(StatusInfo, chassis)         },
+                { "Deployment",                "s", NULL, offsetof(StatusInfo, deployment)      },
+                { "Location",                  "s", NULL, offsetof(StatusInfo, location)        },
+                { "KernelName",                "s", NULL, offsetof(StatusInfo, kernel_name)     },
+                { "KernelRelease",             "s", NULL, offsetof(StatusInfo, kernel_release)  },
+                { "OperatingSystemPrettyName", "s", NULL, offsetof(StatusInfo, os_pretty_name)  },
+                { "OperatingSystemCPEName",    "s", NULL, offsetof(StatusInfo, os_cpe_name)     },
                 {}
         };
 
         static const struct bus_properties_map manager_map[] = {
-                { "Virtualization", "s", NULL, offsetof(StatusInfo, virtualization) },
-                { "Architecture",   "s", NULL, offsetof(StatusInfo, architecture) },
+                { "Virtualization",            "s", NULL, offsetof(StatusInfo, virtualization)  },
+                { "Architecture",              "s", NULL, offsetof(StatusInfo, architecture)    },
                 {}
         };
 
@@ -194,6 +199,8 @@ fail:
         free(info.pretty_hostname);
         free(info.icon_name);
         free(info.chassis);
+        free(info.deployment);
+        free(info.location);
         free(info.kernel_name);
         free(info.kernel_release);
         free(info.os_pretty_name);
@@ -224,7 +231,7 @@ static int show_status(sd_bus *bus, char **args, unsigned n) {
 }
 
 static int set_simple_string(sd_bus *bus, const char *method, const char *value) {
-        _cleanup_bus_error_free_ sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r = 0;
 
         polkit_agent_open_if_enabled();
@@ -244,7 +251,7 @@ static int set_simple_string(sd_bus *bus, const char *method, const char *value)
 
 static int set_hostname(sd_bus *bus, char **args, unsigned n) {
         _cleanup_free_ char *h = NULL;
-        const char *hostname = args[1];
+        char *hostname = args[1];
         int r;
 
         assert(args);
@@ -262,17 +269,16 @@ static int set_hostname(sd_bus *bus, char **args, unsigned n) {
                  * just set the passed hostname as static/dynamic
                  * hostname. */
 
-                h = strdup(hostname);
-                if (!h)
-                        return log_oom();
-
-                hostname_cleanup(h, true);
-
-                if (arg_static && streq(h, hostname))
+                if (arg_static && hostname_is_valid(hostname, true)) {
                         p = "";
-                else {
-                        p = hostname;
-                        hostname = h;
+                        /* maybe get rid of trailing dot */
+                        hostname = hostname_cleanup(hostname);
+                } else {
+                        p = h = strdup(hostname);
+                        if (!p)
+                                return log_oom();
+
+                        hostname_cleanup(hostname);
                 }
 
                 r = set_simple_string(bus, "SetPrettyHostname", p);
@@ -309,8 +315,21 @@ static int set_chassis(sd_bus *bus, char **args, unsigned n) {
         return set_simple_string(bus, "SetChassis", args[1]);
 }
 
-static int help(void) {
+static int set_deployment(sd_bus *bus, char **args, unsigned n) {
+        assert(args);
+        assert(n == 2);
 
+        return set_simple_string(bus, "SetDeployment", args[1]);
+}
+
+static int set_location(sd_bus *bus, char **args, unsigned n) {
+        assert(args);
+        assert(n == 2);
+
+        return set_simple_string(bus, "SetLocation", args[1]);
+}
+
+static void help(void) {
         printf("%s [OPTIONS...] COMMAND ...\n\n"
                "Query or change system hostname.\n\n"
                "  -h --help              Show this help\n"
@@ -325,10 +344,10 @@ static int help(void) {
                "  status                 Show current hostname settings\n"
                "  set-hostname NAME      Set system hostname\n"
                "  set-icon-name NAME     Set icon name for host\n"
-               "  set-chassis NAME       Set chassis type for host\n",
-               program_invocation_short_name);
-
-        return 0;
+               "  set-chassis NAME       Set chassis type for host\n"
+               "  set-deployment NAME    Set deployment environment for host\n"
+               "  set-location NAME      Set location for host\n"
+               , program_invocation_short_name);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -358,17 +377,16 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
-                        puts(PACKAGE_STRING);
-                        puts(SYSTEMD_FEATURES);
-                        return 0;
+                        return version();
 
                 case 'H':
                         arg_transport = BUS_TRANSPORT_REMOTE;
@@ -376,7 +394,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'M':
-                        arg_transport = BUS_TRANSPORT_CONTAINER;
+                        arg_transport = BUS_TRANSPORT_MACHINE;
                         arg_host = optarg;
                         break;
 
@@ -402,7 +420,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         return 1;
 }
@@ -419,10 +436,12 @@ static int hostnamectl_main(sd_bus *bus, int argc, char *argv[]) {
                 const int argc;
                 int (* const dispatch)(sd_bus *bus, char **args, unsigned n);
         } verbs[] = {
-                { "status",        LESS,  1, show_status   },
-                { "set-hostname",  EQUAL, 2, set_hostname  },
-                { "set-icon-name", EQUAL, 2, set_icon_name },
-                { "set-chassis",   EQUAL, 2, set_chassis   },
+                { "status",           LESS,  1, show_status    },
+                { "set-hostname",     EQUAL, 2, set_hostname   },
+                { "set-icon-name",    EQUAL, 2, set_icon_name  },
+                { "set-chassis",      EQUAL, 2, set_chassis    },
+                { "set-deployment",   EQUAL, 2, set_deployment },
+                { "set-location",     EQUAL, 2, set_location   },
         };
 
         int left;
@@ -486,7 +505,7 @@ static int hostnamectl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_bus_unref_ sd_bus *bus = NULL;
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -497,14 +516,14 @@ int main(int argc, char *argv[]) {
         if (r <= 0)
                 goto finish;
 
-        r = bus_open_transport(arg_transport, arg_host, false, &bus);
+        r = bus_connect_transport(arg_transport, arg_host, false, &bus);
         if (r < 0) {
-                log_error("Failed to create bus connection: %s", strerror(-r));
+                log_error_errno(r, "Failed to create bus connection: %m");
                 goto finish;
         }
 
         r = hostnamectl_main(bus, argc, argv);
 
 finish:
-        return r < 0 ? EXIT_FAILURE : r;
+        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

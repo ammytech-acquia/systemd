@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /*
  * fsprg v0.1  -  (seekable) forward-secure pseudorandom generator
  * Copyright (C) 2012 B. Poettering
@@ -30,7 +28,6 @@
 
 #include <gcrypt.h>
 #include <string.h>
-#include <assert.h>
 
 #include "fsprg.h"
 

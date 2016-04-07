@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -21,6 +19,10 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <stdbool.h>
+
+#include "macro.h"
+
 /* Manager status */
 
 typedef enum ShowStatus {
@@ -32,3 +34,6 @@ typedef enum ShowStatus {
 } ShowStatus;
 
 int parse_show_status(const char *v, ShowStatus *ret);
+
+int status_vprintf(const char *status, bool ellipse, bool ephemeral, const char *format, va_list ap) _printf_(4,0);
+int status_printf(const char *status, bool ellipse, bool ephemeral, const char *format, ...) _printf_(4,5);

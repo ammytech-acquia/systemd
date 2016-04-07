@@ -18,27 +18,21 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdio.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <ctype.h>
 #include <errno.h>
-#include <unistd.h>
-#include <syslog.h>
-#include <grp.h>
 #include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/signalfd.h>
+#include <unistd.h>
 
+#include "fs-util.h"
 #include "missing.h"
-#include "udev.h"
+#include "selinux-util.h"
+#include "signal-util.h"
+#include "string-util.h"
 #include "udev-util.h"
-
-void udev_main_log(struct udev *udev, int priority,
-                   const char *file, int line, const char *fn,
-                   const char *format, va_list args) {}
+#include "udev.h"
 
 static int fake_filesystems(void) {
         static const struct fakefs {
@@ -50,7 +44,7 @@ static int fake_filesystems(void) {
                 { "test/dev", "/dev",                   "failed to mount test /dev" },
                 { "test/run", "/run",                   "failed to mount test /run" },
                 { "test/run", "/etc/udev/rules.d",      "failed to mount empty /etc/udev/rules.d" },
-                { "test/run", "/usr/lib/udev/rules.d",  "failed to mount empty /usr/lib/udev/rules.d" },
+                { "test/run", UDEVLIBEXECDIR "/rules.d","failed to mount empty " UDEVLIBEXECDIR "/rules.d" },
         };
         unsigned int i;
         int err;
@@ -72,14 +66,13 @@ static int fake_filesystems(void) {
                 err = mount(fakefss[i].src, fakefss[i].target, NULL, MS_BIND, NULL);
                 if (err < 0) {
                         err = -errno;
-                        fprintf(stderr, "%s %m", fakefss[i].error);
+                        fprintf(stderr, "%s %m\n", fakefss[i].error);
                         return err;
                 }
         }
 out:
         return err;
 }
-
 
 int main(int argc, char *argv[]) {
         _cleanup_udev_unref_ struct udev *udev = NULL;
@@ -89,7 +82,6 @@ int main(int argc, char *argv[]) {
         char syspath[UTIL_PATH_SIZE];
         const char *devpath;
         const char *action;
-        sigset_t mask, sigmask_orig;
         int err;
 
         err = fake_filesystems();
@@ -101,9 +93,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
 
         log_debug("version %s", VERSION);
-        label_init("/dev");
-
-        sigprocmask(SIG_SETMASK, NULL, &sigmask_orig);
+        mac_selinux_init("/dev");
 
         action = argv[1];
         if (action == NULL) {
@@ -120,22 +110,15 @@ int main(int argc, char *argv[]) {
         rules = udev_rules_new(udev, 1);
 
         strscpyl(syspath, sizeof(syspath), "/sys", devpath, NULL);
-        dev = udev_device_new_from_syspath(udev, syspath);
+        dev = udev_device_new_from_synthetic_event(udev, syspath, action);
         if (dev == NULL) {
                 log_debug("unknown device '%s'", devpath);
                 goto out;
         }
 
-        udev_device_set_action(dev, action);
         event = udev_event_new(dev);
 
-        sigfillset(&mask);
-        sigprocmask(SIG_SETMASK, &mask, &sigmask_orig);
-        event->fd_signal = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
-        if (event->fd_signal < 0) {
-                fprintf(stderr, "error creating signalfd\n");
-                goto out;
-        }
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGHUP, SIGCHLD, -1) >= 0);
 
         /* do what devtmpfs usually provides us */
         if (udev_device_get_devnode(dev) != NULL) {
@@ -151,16 +134,18 @@ int main(int argc, char *argv[]) {
                         mknod(udev_device_get_devnode(dev), mode, udev_device_get_devnum(dev));
                 } else {
                         unlink(udev_device_get_devnode(dev));
-                        util_delete_path(udev, udev_device_get_devnode(dev));
+                        rmdir_parents(udev_device_get_devnode(dev), "/");
                 }
         }
 
-        udev_event_execute_rules(event, rules, &sigmask_orig);
-        udev_event_execute_run(event, NULL);
+        udev_event_execute_rules(event,
+                                 3 * USEC_PER_SEC, USEC_PER_SEC,
+                                 NULL,
+                                 rules);
+        udev_event_execute_run(event,
+                               3 * USEC_PER_SEC, USEC_PER_SEC);
 out:
-        if (event != NULL && event->fd_signal >= 0)
-                close(event->fd_signal);
-        label_finish();
+        mac_selinux_finish();
 
         return err ? EXIT_FAILURE : EXIT_SUCCESS;
 }

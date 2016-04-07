@@ -1,24 +1,24 @@
-<?xml version='1.0'?> <!--*-nxml-*-->
+<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-This file is part of systemd.
+  This file is part of systemd.
 
-Copyright 2013 Zbigniew Jędrzejewski-Szmek
+  Copyright 2013 Zbigniew Jędrzejewski-Szmek
 
-systemd is free software; you can redistribute it and/or modify it
-under the terms of the GNU Lesser General Public License as published by
-the Free Software Foundation; either version 2.1 of the License, or
-(at your option) any later version.
+  systemd is free software; you can redistribute it and/or modify it
+  under the terms of the GNU Lesser General Public License as published by
+  the Free Software Foundation; either version 2.1 of the License, or
+  (at your option) any later version.
 
-systemd is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
+  systemd is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+  Lesser General Public License for more details.
 
-You should have received a copy of the GNU Lesser General Public License
-along with systemd; If not, see <http://www.gnu.org/licenses/>.
+  You should have received a copy of the GNU Lesser General Public License
+  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemd-activate"
@@ -60,24 +60,21 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
   <refsect1>
     <title>Description</title>
 
-    <para><command>systemd-activate</command> can be used to
-    launch a socket activated daemon from the command-line for
-    testing purposes. It can also be used to launch single instances
-    of the daemon per connection (inetd-style).
+    <para><command>systemd-activate</command> may be used to launch a socket-activated service binary from the command
+    line for testing purposes. It may also be used to launch individual instances of the service binary per connection.
     </para>
 
-    <para>The daemon to launch and its options should be specifed
+    <para>The daemon to launch and its options should be specified
     after options intended for <command>systemd-activate</command>.
     </para>
 
-    <para>If the <option>-a</option> option is given, file descriptor
-    of the connection will be used as the standard input and output of
-    the launched process. Otherwise, standard input and output will be
-    inherited, and sockets will be passed through file descriptors 3
-    and higher. Sockets passed through <varname>$LISTEN_FDS</varname>
-    to <command>systemd-activate</command> will be passed through to
-    the dameon, in the original positions. Other sockets specified
-    with <option>--listen</option> will use consecutive descriptors.
+    <para>If the <option>--inetd</option> option is given, the socket file descriptor will be used as the standard
+    input and output of the launched process. Otherwise, standard input and output will be inherited, and sockets will
+    be passed through file descriptors 3 and higher. Sockets passed through <varname>$LISTEN_FDS</varname> to
+    <command>systemd-activate</command> will be passed through to the daemon, in the original positions. Other sockets
+    specified with <option>--listen=</option> will use consecutive descriptors.  By default,
+    <command>systemd-activate</command> listens on a stream socket, use <option>--datagram</option> and
+    <option>--seqpacket</option> to listen on datagram or sequential packet sockets instead (see below).
     </para>
   </refsect1>
 
@@ -98,9 +95,32 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
         <term><option>-a</option></term>
         <term><option>--accept</option></term>
 
-        <listitem><para>Launch a separate instance of daemon per
-        connection and pass the connection socket as standard input
-        and standard output.</para></listitem>
+        <listitem><para>Launch an instance of the service binary for each connection and pass the connection
+        socket.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-d</option></term>
+        <term><option>--datagram</option></term>
+
+        <listitem><para>Listen on a datagram socket (<constant>SOCK_DGRAM</constant>), instead of a stream socket
+        (<constant>SOCK_STREAM</constant>). May not be combined with <option>--seqpacket</option>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--seqpacket</option></term>
+
+        <listitem><para>Listen on a sequential packet socket (<constant>SOCK_SEQPACKET</constant>), instead of a stream
+        socket (<constant>SOCK_STREAM</constant>). May not be combined with
+        <option>--datagram</option>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--inetd</option></term>
+
+        <listitem><para>Use the inetd protocol for passing file descriptors, i.e. as standard input and standard
+        output, instead of the new-style protocol for passing file descriptors using <varname>$LISTEN_FDS</varname>
+        (see above).</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -115,6 +135,16 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
         </para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--fdname=</option><replaceable>NAME</replaceable></term>
+
+        <listitem><para>Specify a name for the activation file
+        descriptors. This is equivalent to setting
+        <varname>FileDescriptorName=</varname> in socket unit files, and
+        enables use of
+        <citerefentry><refentrytitle>sd_listen_fds_with_names</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
+      </varlistentry>
+
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
     </variablelist>
@@ -126,6 +156,7 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
       <varlistentry>
         <term><varname>$LISTEN_FDS</varname></term>
         <term><varname>$LISTEN_PID</varname></term>
+        <term><varname>$LISTEN_FDNAMES</varname></term>
 
         <listitem><para>See
         <citerefentry><refentrytitle>sd_listen_fds</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
@@ -144,20 +175,19 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
   </refsect1>
 
   <refsect1>
-    <title>Example 1</title>
+    <title>Examples</title>
 
-    <programlisting>$ /usr/lib/systemd/systemd-activate -l 2000 -a cat</programlisting>
+    <example>
+      <title>Run an echo server on port 2000</title>
 
-    <para>This runs an echo server on port 2000.</para>
-  </refsect1>
+      <programlisting>$ /usr/lib/systemd/systemd-activate -l 2000 --inetd -a cat</programlisting>
+    </example>
 
-  <refsect1>
-    <title>Example 2</title>
+    <example>
+      <title>Run a socket-activated instance of <citerefentry><refentrytitle>systemd-journal-gatewayd</refentrytitle><manvolnum>8</manvolnum></citerefentry></title>
 
-    <programlisting>$ /usr/lib/systemd/systemd-activate -l 19531 /usr/lib/systemd/systemd-journal-gatewayd</programlisting>
-
-    <para>This runs a socket activated instance of
-    <citerefentry><refentrytitle>systemd-journal-gatewayd</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+      <programlisting>$ /usr/lib/systemd/systemd-activate -l 19531 /usr/lib/systemd/systemd-journal-gatewayd</programlisting>
+    </example>
   </refsect1>
 
   <refsect1>
@@ -166,7 +196,9 @@ along with systemd; If not, see <http://www.gnu.org/licenses/>.
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>cat</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+      <citerefentry><refentrytitle>sd_listen_fds</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>sd_listen_fds_with_names</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+      <citerefentry project='man-pages'><refentrytitle>cat</refentrytitle><manvolnum>1</manvolnum></citerefentry>
     </para>
   </refsect1>
 </refentry>

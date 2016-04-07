@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,8 +19,10 @@
 
 #include <stdarg.h>
 
-#include "xml.h"
+#include "alloc-util.h"
+#include "string-util.h"
 #include "util.h"
+#include "xml.h"
 
 static void test_one(const char *data, ...) {
         void *state = NULL;

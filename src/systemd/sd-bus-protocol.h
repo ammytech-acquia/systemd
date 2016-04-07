@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #ifndef foosdbusprotocolhfoo
 #define foosdbusprotocolhfoo
 
@@ -96,6 +94,8 @@ enum {
 #define SD_BUS_ERROR_INCONSISTENT_MESSAGE       "org.freedesktop.DBus.Error.InconsistentMessage"
 #define SD_BUS_ERROR_MATCH_RULE_NOT_FOUND       "org.freedesktop.DBus.Error.MatchRuleNotFound"
 #define SD_BUS_ERROR_MATCH_RULE_INVALID         "org.freedesktop.DBus.Error.MatchRuleInvalid"
+#define SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED \
+                                                "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired"
 
 _SD_END_DECLARATIONS;
 

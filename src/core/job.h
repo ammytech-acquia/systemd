@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -22,8 +20,11 @@
 ***/
 
 #include <stdbool.h>
-#include <inttypes.h>
-#include <errno.h>
+
+#include "sd-event.h"
+
+#include "list.h"
+#include "unit-name.h"
 
 typedef struct Job Job;
 typedef struct JobDependency JobDependency;
@@ -49,9 +50,11 @@ enum JobType {
         _JOB_TYPE_MAX_MERGING,
 
         /* JOB_NOP can enter into a transaction, but as it won't pull in
-         * any dependencies, it won't have to merge with anything.
-         * job_install() avoids the problem of merging JOB_NOP too (it's
-         * special-cased, only merges with other JOB_NOPs). */
+         * any dependencies and it uses the special 'nop_job' slot in Unit,
+         * it won't have to merge with anything (except possibly into another
+         * JOB_NOP, previously installed). JOB_NOP is special-cased in
+         * job_type_is_*() functions so that the transaction can be
+         * activated. */
         JOB_NOP = _JOB_TYPE_MAX_MERGING, /* do nothing */
 
         _JOB_TYPE_MAX_IN_TRANSACTION,
@@ -60,6 +63,9 @@ enum JobType {
          * it always collapses into JOB_RESTART or JOB_NOP before entering.
          * Thus we never need to merge it with anything. */
         JOB_TRY_RESTART = _JOB_TYPE_MAX_IN_TRANSACTION, /* if running, stop and then start */
+
+        /* Similar to JOB_TRY_RESTART but collapses to JOB_RELOAD or JOB_NOP */
+        JOB_TRY_RELOAD,
 
         /* JOB_RELOAD_OR_START won't enter into a transaction and cannot result
          * from transaction merging (there's no way for JOB_RELOAD and
@@ -94,20 +100,18 @@ enum JobMode {
 enum JobResult {
         JOB_DONE,                /* Job completed successfully */
         JOB_CANCELED,            /* Job canceled by a conflicting job installation or by explicit cancel request */
-        JOB_TIMEOUT,             /* JobTimeout elapsed */
+        JOB_TIMEOUT,             /* Job timeout elapsed */
         JOB_FAILED,              /* Job failed */
         JOB_DEPENDENCY,          /* A required dependency job did not result in JOB_DONE */
         JOB_SKIPPED,             /* Negative result of JOB_VERIFY_ACTIVE */
         JOB_INVALID,             /* JOB_RELOAD of inactive unit */
+        JOB_ASSERT,              /* Couldn't start a unit, because an assert didn't hold */
+        JOB_UNSUPPORTED,         /* Couldn't start a unit, because the unit type is not supported on the system */
         _JOB_RESULT_MAX,
         _JOB_RESULT_INVALID = -1
 };
 
-#include "sd-event.h"
-#include "manager.h"
 #include "unit.h"
-#include "hashmap.h"
-#include "list.h"
 
 struct JobDependency {
         /* Encodes that the 'subject' job needs the 'object' job in
@@ -145,16 +149,21 @@ struct Job {
         sd_event_source *timer_event_source;
         usec_t begin_usec;
 
-        /* There can be more than one client, because of job merging. */
-        sd_bus_track *subscribed;
-        char **deserialized_subscribed;
+        /*
+         * This tracks where to send signals, and also which clients
+         * are allowed to call DBus methods on the job (other than
+         * root).
+         *
+         * There can be more than one client, because of job merging.
+         */
+        sd_bus_track *clients;
+        char **deserialized_clients;
 
         JobResult result;
 
         bool installed:1;
         bool in_run_queue:1;
         bool matters_to_anchor:1;
-        bool override:1;
         bool in_dbus_queue:1;
         bool sent_dbus_new_signal:1;
         bool ignore_order:1;
@@ -184,11 +193,15 @@ _pure_ static inline bool job_type_is_mergeable(JobType a, JobType b) {
 }
 
 _pure_ static inline bool job_type_is_conflicting(JobType a, JobType b) {
-        return !job_type_is_mergeable(a, b);
+        return a != JOB_NOP && b != JOB_NOP && !job_type_is_mergeable(a, b);
 }
 
 _pure_ static inline bool job_type_is_superset(JobType a, JobType b) {
         /* Checks whether operation a is a "superset" of b in its actions */
+        if (b == JOB_NOP)
+                return true;
+        if (a == JOB_NOP)
+                return false;
         return a == job_type_lookup_merge(a, b);
 }
 
@@ -196,7 +209,7 @@ bool job_type_is_redundant(JobType a, UnitActiveState b) _pure_;
 
 /* Collapses a state-dependent job type into a simpler type by observing
  * the state of the unit which it is going to be applied to. */
-void job_type_collapse(JobType *t, Unit *u);
+JobType job_type_collapse(JobType t, Unit *u);
 
 int job_type_merge_and_collapse(JobType *a, JobType b, Unit *u);
 
@@ -212,6 +225,8 @@ char *job_dbus_path(Job *j);
 
 void job_shutdown_magic(Job *j);
 
+int job_get_timeout(Job *j, usec_t *timeout) _pure_;
+
 const char* job_type_to_string(JobType t) _const_;
 JobType job_type_from_string(const char *s) _pure_;
 
@@ -224,4 +239,4 @@ JobMode job_mode_from_string(const char *s) _pure_;
 const char* job_result_to_string(JobResult t) _const_;
 JobResult job_result_from_string(const char *s) _pure_;
 
-int job_get_timeout(Job *j, uint64_t *timeout) _pure_;
+const char* job_type_to_access_method(JobType t);

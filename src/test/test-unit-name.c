@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,93 +19,179 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <pwd.h>
 
+#include "alloc-util.h"
+#include "glob-util.h"
+#include "hostname-util.h"
+#include "macro.h"
 #include "manager.h"
-#include "unit.h"
+#include "path-util.h"
+#include "specifier.h"
+#include "string-util.h"
+#include "test-helper.h"
 #include "unit-name.h"
 #include "unit-printf.h"
-#include "install.h"
-#include "specifier.h"
+#include "unit.h"
+#include "user-util.h"
 #include "util.h"
-#include "macro.h"
-#include "test-helper.h"
 
-static void test_replacements(void) {
-#define expect(pattern, repl, expected)                            \
-        {                                                          \
-                _cleanup_free_ char *t =                           \
-                        unit_name_replace_instance(pattern, repl); \
-                puts(t);                                           \
-                assert(streq(t, expected));                        \
-        }
+static void test_unit_name_is_valid(void) {
+        assert_se(unit_name_is_valid("foo.service", UNIT_NAME_ANY));
+        assert_se(unit_name_is_valid("foo.service", UNIT_NAME_PLAIN));
+        assert_se(!unit_name_is_valid("foo.service", UNIT_NAME_INSTANCE));
+        assert_se(!unit_name_is_valid("foo.service", UNIT_NAME_TEMPLATE));
+        assert_se(!unit_name_is_valid("foo.service", UNIT_NAME_INSTANCE|UNIT_NAME_TEMPLATE));
 
-        expect("foo@.service", "waldo", "foo@waldo.service");
-        expect("foo@xyz.service", "waldo", "foo@waldo.service");
-        expect("xyz", "waldo", "xyz");
-        expect("", "waldo", "");
-        expect("foo.service", "waldo", "foo.service");
-        expect(".service", "waldo", ".service");
-        expect("foo@", "waldo", "foo@waldo");
-        expect("@bar", "waldo", "@waldo");
+        assert_se(unit_name_is_valid("foo@bar.service", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("foo@bar.service", UNIT_NAME_PLAIN));
+        assert_se(unit_name_is_valid("foo@bar.service", UNIT_NAME_INSTANCE));
+        assert_se(!unit_name_is_valid("foo@bar.service", UNIT_NAME_TEMPLATE));
+        assert_se(unit_name_is_valid("foo@bar.service", UNIT_NAME_INSTANCE|UNIT_NAME_TEMPLATE));
 
+        assert_se(unit_name_is_valid("foo@.service", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("foo@.service", UNIT_NAME_PLAIN));
+        assert_se(!unit_name_is_valid("foo@.service", UNIT_NAME_INSTANCE));
+        assert_se(unit_name_is_valid("foo@.service", UNIT_NAME_TEMPLATE));
+        assert_se(unit_name_is_valid("foo@.service", UNIT_NAME_INSTANCE|UNIT_NAME_TEMPLATE));
+
+        assert_se(!unit_name_is_valid(".service", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("foo.waldo", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("@.service", UNIT_NAME_ANY));
+        assert_se(!unit_name_is_valid("@piep.service", UNIT_NAME_ANY));
+}
+
+static void test_unit_name_replace_instance_one(const char *pattern, const char *repl, const char *expected, int ret) {
+        _cleanup_free_ char *t = NULL;
+        assert_se(unit_name_replace_instance(pattern, repl, &t) == ret);
+        puts(strna(t));
+        assert_se(streq_ptr(t, expected));
+}
+
+static void test_unit_name_replace_instance(void) {
         puts("-------------------------------------------------");
-#undef expect
-#define expect(path, suffix, expected)                             \
-        {                                                          \
-                _cleanup_free_ char *k, *t =                       \
-                        unit_name_from_path(path, suffix);         \
-                puts(t);                                           \
-                k = unit_name_to_path(t);                          \
-                puts(k);                                           \
-                assert(streq(k, expected ? expected : path));      \
+        test_unit_name_replace_instance_one("foo@.service", "waldo", "foo@waldo.service", 0);
+        test_unit_name_replace_instance_one("foo@xyz.service", "waldo", "foo@waldo.service", 0);
+        test_unit_name_replace_instance_one("xyz", "waldo", NULL, -EINVAL);
+        test_unit_name_replace_instance_one("", "waldo", NULL, -EINVAL);
+        test_unit_name_replace_instance_one("foo.service", "waldo", NULL, -EINVAL);
+        test_unit_name_replace_instance_one(".service", "waldo", NULL, -EINVAL);
+        test_unit_name_replace_instance_one("foo@", "waldo", NULL, -EINVAL);
+        test_unit_name_replace_instance_one("@bar", "waldo", NULL, -EINVAL);
+}
+
+static void test_unit_name_from_path_one(const char *path, const char *suffix, const char *expected, int ret) {
+        _cleanup_free_ char *t = NULL;
+
+        assert_se(unit_name_from_path(path, suffix, &t) == ret);
+        puts(strna(t));
+        assert_se(streq_ptr(t, expected));
+
+        if (t) {
+                _cleanup_free_ char *k = NULL;
+                assert_se(unit_name_to_path(t, &k) == 0);
+                puts(strna(k));
+                assert_se(path_equal(k, isempty(path) ? "/" : path));
         }
+}
 
-        expect("/waldo", ".mount", NULL);
-        expect("/waldo/quuix", ".mount", NULL);
-        expect("/waldo/quuix/", ".mount", "/waldo/quuix");
-        expect("/", ".mount", NULL);
-        expect("///", ".mount", "/");
-
+static void test_unit_name_from_path(void) {
         puts("-------------------------------------------------");
-#undef expect
-#define expect(pattern, path, suffix, expected)                              \
-        {                                                                    \
-                _cleanup_free_ char *t =                                     \
-                        unit_name_from_path_instance(pattern, path, suffix); \
-                puts(t);                                                     \
-                assert(streq(t, expected));                                  \
+        test_unit_name_from_path_one("/waldo", ".mount", "waldo.mount", 0);
+        test_unit_name_from_path_one("/waldo/quuix", ".mount", "waldo-quuix.mount", 0);
+        test_unit_name_from_path_one("/waldo/quuix/", ".mount", "waldo-quuix.mount", 0);
+        test_unit_name_from_path_one("", ".mount", "-.mount", 0);
+        test_unit_name_from_path_one("/", ".mount", "-.mount", 0);
+        test_unit_name_from_path_one("///", ".mount", "-.mount", 0);
+        test_unit_name_from_path_one("/foo/../bar", ".mount", NULL, -EINVAL);
+        test_unit_name_from_path_one("/foo/./bar", ".mount", NULL, -EINVAL);
+}
+
+static void test_unit_name_from_path_instance_one(const char *pattern, const char *path, const char *suffix, const char *expected, int ret) {
+        _cleanup_free_ char *t = NULL;
+
+        assert_se(unit_name_from_path_instance(pattern, path, suffix, &t) == ret);
+        puts(strna(t));
+        assert_se(streq_ptr(t, expected));
+
+        if (t) {
+                _cleanup_free_ char *k = NULL, *v = NULL;
+
+                assert_se(unit_name_to_instance(t, &k) > 0);
+                assert_se(unit_name_path_unescape(k, &v) == 0);
+                assert_se(path_equal(v, isempty(path) ? "/" : path));
         }
+}
 
-        expect("waldo", "/waldo", ".mount", "waldo@waldo.mount");
-        expect("waldo", "/waldo////quuix////", ".mount", "waldo@waldo-quuix.mount");
-        expect("waldo", "/", ".mount", "waldo@-.mount");
-        expect("wa--ldo", "/--", ".mount", "wa--ldo@\\x2d\\x2d.mount");
-
+static void test_unit_name_from_path_instance(void) {
         puts("-------------------------------------------------");
-#undef expect
-#define expect(pattern)                                                     \
-        {                                                                   \
-                _cleanup_free_ char *k, *t;                                 \
-                assert_se(t = unit_name_mangle(pattern, MANGLE_NOGLOB));    \
-                assert_se(k = unit_name_mangle(t, MANGLE_NOGLOB));          \
-                puts(t);                                                    \
-                assert_se(streq(t, k));                                     \
+
+        test_unit_name_from_path_instance_one("waldo", "/waldo", ".mount", "waldo@waldo.mount", 0);
+        test_unit_name_from_path_instance_one("waldo", "/waldo////quuix////", ".mount", "waldo@waldo-quuix.mount", 0);
+        test_unit_name_from_path_instance_one("waldo", "/", ".mount", "waldo@-.mount", 0);
+        test_unit_name_from_path_instance_one("waldo", "", ".mount", "waldo@-.mount", 0);
+        test_unit_name_from_path_instance_one("waldo", "///", ".mount", "waldo@-.mount", 0);
+        test_unit_name_from_path_instance_one("waldo", "..", ".mount", NULL, -EINVAL);
+        test_unit_name_from_path_instance_one("waldo", "/foo", ".waldi", NULL, -EINVAL);
+        test_unit_name_from_path_instance_one("wa--ldo", "/--", ".mount", "wa--ldo@\\x2d\\x2d.mount", 0);
+}
+
+static void test_unit_name_to_path_one(const char *unit, const char *path, int ret) {
+        _cleanup_free_ char *p = NULL;
+
+        assert_se(unit_name_to_path(unit, &p) == ret);
+        assert_se(streq_ptr(path, p));
+}
+
+static void test_unit_name_to_path(void) {
+        test_unit_name_to_path_one("home.mount", "/home", 0);
+        test_unit_name_to_path_one("home-lennart.mount", "/home/lennart", 0);
+        test_unit_name_to_path_one("home-lennart-.mount", NULL, -EINVAL);
+        test_unit_name_to_path_one("-home-lennart.mount", NULL, -EINVAL);
+        test_unit_name_to_path_one("-home--lennart.mount", NULL, -EINVAL);
+        test_unit_name_to_path_one("home-..-lennart.mount", NULL, -EINVAL);
+        test_unit_name_to_path_one("", NULL, -EINVAL);
+        test_unit_name_to_path_one("home/foo", NULL, -EINVAL);
+}
+
+static void test_unit_name_mangle_one(UnitNameMangle allow_globs, const char *pattern, const char *expect, int ret) {
+        _cleanup_free_ char *t = NULL;
+
+        assert_se(unit_name_mangle(pattern, allow_globs, &t) == ret);
+        puts(strna(t));
+        assert_se(streq_ptr(t, expect));
+
+        if (t) {
+                _cleanup_free_ char *k = NULL;
+
+                assert_se(unit_name_is_valid(t, UNIT_NAME_ANY) ||
+                          (allow_globs == UNIT_NAME_GLOB && string_is_glob(t)));
+
+                assert_se(unit_name_mangle(t, allow_globs, &k) == 0);
+                assert_se(streq_ptr(t, k));
         }
+}
 
-        expect("/home");
-        expect("/dev/sda");
-        expect("üxknürz.service");
-        expect("foobar-meh...waldi.service");
-        expect("_____####----.....service");
-        expect("_____##@;;;,,,##----.....service");
-        expect("xxx@@@@/////\\\\\\\\\\yyy.service");
+static void test_unit_name_mangle(void) {
+        puts("-------------------------------------------------");
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "foo.service", "foo.service", 0);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "/home", "home.mount", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "/dev/sda", "dev-sda.device", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "üxknürz.service", "\\xc3\\xbcxkn\\xc3\\xbcrz.service", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "foobar-meh...waldi.service", "foobar-meh...waldi.service", 0);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "_____####----.....service", "_____\\x23\\x23\\x23\\x23----.....service", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "_____##@;;;,,,##----.....service", "_____\\x23\\x23@\\x3b\\x3b\\x3b\\x2c\\x2c\\x2c\\x23\\x23----.....service", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "xxx@@@@/////\\\\\\\\\\yyy.service", "xxx@@@@-----\\\\\\\\\\yyy.service", 1);
+        test_unit_name_mangle_one(UNIT_NAME_NOGLOB, "", NULL, -EINVAL);
 
-#undef expect
+        test_unit_name_mangle_one(UNIT_NAME_GLOB, "foo.service", "foo.service", 0);
+        test_unit_name_mangle_one(UNIT_NAME_GLOB, "foo", "foo.service", 1);
+        test_unit_name_mangle_one(UNIT_NAME_GLOB, "foo*", "foo*", 0);
+        test_unit_name_mangle_one(UNIT_NAME_GLOB, "ü*", "\\xc3\\xbc*", 1);
 }
 
 static int test_unit_printf(void) {
@@ -115,37 +199,35 @@ static int test_unit_printf(void) {
         Unit *u, *u2;
         int r;
 
-        _cleanup_free_ char *mid, *bid, *host, *root_uid;
-        struct passwd *root;
+        _cleanup_free_ char *mid = NULL, *bid = NULL, *host = NULL, *uid = NULL, *user = NULL, *shell = NULL, *home = NULL;
 
         assert_se(specifier_machine_id('m', NULL, NULL, &mid) >= 0 && mid);
         assert_se(specifier_boot_id('b', NULL, NULL, &bid) >= 0 && bid);
-        assert_se((host = gethostname_malloc()));
+        assert_se(host = gethostname_malloc());
+        assert_se(user = getusername_malloc());
+        assert_se(asprintf(&uid, UID_FMT, getuid()));
+        assert_se(get_home_dir(&home) >= 0);
+        assert_se(get_shell(&shell) >= 0);
 
-        assert_se((root = getpwnam("root")));
-        assert_se(asprintf(&root_uid, "%d", (int) root->pw_uid) > 0);
-
-        r = manager_new(SYSTEMD_USER, &m);
+        r = manager_new(MANAGER_USER, true, &m);
         if (r == -EPERM || r == -EACCES || r == -EADDRINUSE) {
                 puts("manager_new: Permission denied. Skipping test.");
                 return EXIT_TEST_SKIP;
         }
-        assert(r == 0);
+        assert_se(r == 0);
 
 #define expect(unit, pattern, expected)                                 \
         {                                                               \
                 char *e;                                                \
-                _cleanup_free_ char *t;                                 \
+                _cleanup_free_ char *t = NULL;                          \
                 assert_se(unit_full_printf(unit, pattern, &t) >= 0);    \
                 printf("result: %s\nexpect: %s\n", t, expected);        \
                 if ((e = endswith(expected, "*")))                      \
-                        assert(strncmp(t, e, e-expected));              \
+                        assert_se(strncmp(t, e, e-expected));              \
                 else                                                    \
-                        assert(streq(t, expected));                     \
+                        assert_se(streq(t, expected));                     \
         }
 
-        assert_se(setenv("USER", "root", 1) == 0);
-        assert_se(setenv("HOME", "/root", 1) == 0);
         assert_se(setenv("XDG_RUNTIME_DIR", "/run/user/1/", 1) == 0);
 
         assert_se(u = unit_new(m, sizeof(Service)));
@@ -159,13 +241,14 @@ static int test_unit_printf(void) {
 
         /* normal unit */
         expect(u, "%n", "blah.service");
+        expect(u, "%f", "/blah");
         expect(u, "%N", "blah");
         expect(u, "%p", "blah");
         expect(u, "%P", "blah");
         expect(u, "%i", "");
-        expect(u, "%u", root->pw_name);
-        expect(u, "%U", root_uid);
-        expect(u, "%h", root->pw_dir);
+        expect(u, "%u", user);
+        expect(u, "%U", uid);
+        expect(u, "%h", home);
         expect(u, "%m", mid);
         expect(u, "%b", bid);
         expect(u, "%H", host);
@@ -178,19 +261,21 @@ static int test_unit_printf(void) {
 
         expect(u2, "%n", "blah@foo-foo.service");
         expect(u2, "%N", "blah@foo-foo");
+        expect(u2, "%f", "/foo/foo");
         expect(u2, "%p", "blah");
         expect(u2, "%P", "blah");
         expect(u2, "%i", "foo-foo");
         expect(u2, "%I", "foo/foo");
-        expect(u2, "%u", root->pw_name);
-        expect(u2, "%U", root_uid);
-        expect(u2, "%h", root->pw_dir);
+        expect(u2, "%u", user);
+        expect(u2, "%U", uid);
+        expect(u2, "%h", home);
         expect(u2, "%m", mid);
         expect(u2, "%b", bid);
         expect(u2, "%H", host);
         expect(u2, "%t", "/run/user/*");
 
         manager_free(m);
+#undef expect
 
         return 0;
 }
@@ -223,63 +308,83 @@ static void test_unit_prefix_is_valid(void) {
 }
 
 static void test_unit_name_change_suffix(void) {
-        char *r;
+        char *t;
 
-        r = unit_name_change_suffix("foo.bar", ".service");
-        assert_se(r);
-        assert_se(streq(r, "foo.service"));
-        free(r);
+        assert_se(unit_name_change_suffix("foo.mount", ".service", &t) == 0);
+        assert_se(streq(t, "foo.service"));
+        free(t);
 
-        r = unit_name_change_suffix("foo@stuff.bar", ".boo");
-        assert_se(r);
-        assert_se(streq(r, "foo@stuff.boo"));
-        free(r);
+        assert_se(unit_name_change_suffix("foo@stuff.service", ".socket", &t) == 0);
+        assert_se(streq(t, "foo@stuff.socket"));
+        free(t);
 }
 
 static void test_unit_name_build(void) {
-        char *r;
+        char *t;
 
-        r = unit_name_build("foo", "bar", ".service");
-        assert_se(r);
-        assert_se(streq(r, "foo@bar.service"));
-        free(r);
+        assert_se(unit_name_build("foo", "bar", ".service", &t) == 0);
+        assert_se(streq(t, "foo@bar.service"));
+        free(t);
 
-        r = unit_name_build("fo0-stUff_b", "bar", ".mount");
-        assert_se(r);
-        assert_se(streq(r, "fo0-stUff_b@bar.mount"));
-        free(r);
+        assert_se(unit_name_build("fo0-stUff_b", "bar", ".mount", &t) == 0);
+        assert_se(streq(t, "fo0-stUff_b@bar.mount"));
+        free(t);
 
-        r = unit_name_build("foo", NULL, ".service");
-        assert_se(r);
-        assert_se(streq(r, "foo.service"));
-        free(r);
+        assert_se(unit_name_build("foo", NULL, ".service", &t) == 0);
+        assert_se(streq(t, "foo.service"));
+        free(t);
 }
 
-static void test_unit_name_is_instance(void) {
-        assert_se(unit_name_is_instance("a@b.service"));
-        assert_se(unit_name_is_instance("a-c_c01Aj@b05Dii_-oioi.service"));
-
-        assert_se(!unit_name_is_instance("a.service"));
-        assert_se(!unit_name_is_instance("junk"));
-        assert_se(!unit_name_is_instance(""));
+static void test_slice_name_is_valid(void) {
+        assert_se(slice_name_is_valid("-.slice"));
+        assert_se(slice_name_is_valid("foo.slice"));
+        assert_se(slice_name_is_valid("foo-bar.slice"));
+        assert_se(slice_name_is_valid("foo-bar-baz.slice"));
+        assert_se(!slice_name_is_valid("-foo-bar-baz.slice"));
+        assert_se(!slice_name_is_valid("foo-bar-baz-.slice"));
+        assert_se(!slice_name_is_valid("-foo-bar-baz-.slice"));
+        assert_se(!slice_name_is_valid("foo-bar--baz.slice"));
+        assert_se(!slice_name_is_valid("foo--bar--baz.slice"));
+        assert_se(!slice_name_is_valid(".slice"));
+        assert_se(!slice_name_is_valid(""));
+        assert_se(!slice_name_is_valid("foo.service"));
 }
 
 static void test_build_subslice(void) {
         char *a;
         char *b;
 
-        assert_se(build_subslice("-.slice", "foo", &a) >= 0);
-        assert_se(build_subslice(a, "bar", &b) >= 0);
+        assert_se(slice_build_subslice("-.slice", "foo", &a) >= 0);
+        assert_se(slice_build_subslice(a, "bar", &b) >= 0);
         free(a);
-        assert_se(build_subslice(b, "barfoo", &a) >= 0);
+        assert_se(slice_build_subslice(b, "barfoo", &a) >= 0);
         free(b);
-        assert_se(build_subslice(a, "foobar", &b) >= 0);
+        assert_se(slice_build_subslice(a, "foobar", &b) >= 0);
         free(a);
         assert_se(streq(b, "foo-bar-barfoo-foobar.slice"));
         free(b);
 
-        assert_se(build_subslice("foo.service", "bar", &a) < 0);
-        assert_se(build_subslice("foo", "bar", &a) < 0);
+        assert_se(slice_build_subslice("foo.service", "bar", &a) < 0);
+        assert_se(slice_build_subslice("foo", "bar", &a) < 0);
+}
+
+static void test_build_parent_slice_one(const char *name, const char *expect, int ret) {
+        _cleanup_free_ char *s = NULL;
+
+        assert_se(slice_build_parent_slice(name, &s) == ret);
+        assert_se(streq_ptr(s, expect));
+}
+
+static void test_build_parent_slice(void) {
+        test_build_parent_slice_one("-.slice", NULL, 0);
+        test_build_parent_slice_one("foo.slice", "-.slice", 1);
+        test_build_parent_slice_one("foo-bar.slice", "foo.slice", 1);
+        test_build_parent_slice_one("foo-bar-baz.slice", "foo-bar.slice", 1);
+        test_build_parent_slice_one("foo-bar--baz.slice", NULL, -EINVAL);
+        test_build_parent_slice_one("-foo-bar.slice", NULL, -EINVAL);
+        test_build_parent_slice_one("foo-bar-.slice", NULL, -EINVAL);
+        test_build_parent_slice_one("foo-bar.service", NULL, -EINVAL);
+        test_build_parent_slice_one(".slice", NULL, -EINVAL);
 }
 
 static void test_unit_name_to_instance(void) {
@@ -291,16 +396,24 @@ static void test_unit_name_to_instance(void) {
         assert_se(streq(instance, "bar"));
         free(instance);
 
-        r = unit_name_to_instance("fo0-stUff_b@b.e", &instance);
+        r = unit_name_to_instance("foo@.service", &instance);
+        assert_se(r >= 0);
+        assert_se(streq(instance, ""));
+        free(instance);
+
+        r = unit_name_to_instance("fo0-stUff_b@b.service", &instance);
         assert_se(r >= 0);
         assert_se(streq(instance, "b"));
         free(instance);
 
-        r = unit_name_to_instance("foo.bar", &instance);
-        assert_se(r >= 0);
+        r = unit_name_to_instance("foo.service", &instance);
+        assert_se(r == 0);
         assert_se(!instance);
 
         r = unit_name_to_instance("fooj@unk", &instance);
+        assert_se(r < 0);
+
+        r = unit_name_to_instance("foo@", &instance);
         assert_se(r < 0);
 }
 
@@ -312,18 +425,63 @@ static void test_unit_name_escape(void) {
         assert_se(streq(r, "ab\\x2b\\x2dc.a-bc\\x40foo.service"));
 }
 
+
+static void test_u_n_t_one(const char *name, const char *expected, int ret) {
+        _cleanup_free_ char *f = NULL;
+
+        assert_se(unit_name_template(name, &f) == ret);
+        printf("got: %s, expected: %s\n", strna(f), strna(expected));
+        assert_se(streq_ptr(f, expected));
+}
+
+static void test_unit_name_template(void) {
+        test_u_n_t_one("foo@bar.service", "foo@.service", 0);
+        test_u_n_t_one("foo.mount", NULL, -EINVAL);
+}
+
+static void test_unit_name_path_unescape_one(const char *name, const char *path, int ret) {
+        _cleanup_free_ char *p = NULL;
+
+        assert_se(unit_name_path_unescape(name, &p) == ret);
+        assert_se(streq_ptr(path, p));
+}
+
+static void test_unit_name_path_unescape(void) {
+
+        test_unit_name_path_unescape_one("foo", "/foo", 0);
+        test_unit_name_path_unescape_one("foo-bar", "/foo/bar", 0);
+        test_unit_name_path_unescape_one("foo-.bar", "/foo/.bar", 0);
+        test_unit_name_path_unescape_one("foo-bar-baz", "/foo/bar/baz", 0);
+        test_unit_name_path_unescape_one("-", "/", 0);
+        test_unit_name_path_unescape_one("--", NULL, -EINVAL);
+        test_unit_name_path_unescape_one("-foo-bar", NULL, -EINVAL);
+        test_unit_name_path_unescape_one("foo--bar", NULL, -EINVAL);
+        test_unit_name_path_unescape_one("foo-bar-", NULL, -EINVAL);
+        test_unit_name_path_unescape_one(".-bar", NULL, -EINVAL);
+        test_unit_name_path_unescape_one("foo-..", NULL, -EINVAL);
+        test_unit_name_path_unescape_one("", NULL, -EINVAL);
+}
+
 int main(int argc, char* argv[]) {
         int rc = 0;
-        test_replacements();
+        test_unit_name_is_valid();
+        test_unit_name_replace_instance();
+        test_unit_name_from_path();
+        test_unit_name_from_path_instance();
+        test_unit_name_mangle();
+        test_unit_name_to_path();
         TEST_REQ_RUNNING_SYSTEMD(rc = test_unit_printf());
         test_unit_instance_is_valid();
         test_unit_prefix_is_valid();
         test_unit_name_change_suffix();
         test_unit_name_build();
-        test_unit_name_is_instance();
+        test_slice_name_is_valid();
         test_build_subslice();
+        test_build_parent_slice();
         test_unit_name_to_instance();
         test_unit_name_escape();
+        test_unit_name_template();
+        test_unit_name_path_unescape();
 
         return rc;
 }

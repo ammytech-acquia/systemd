@@ -1,9 +1,7 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
-  Copyright (C) 2014 Intel Corporation. All rights reserved.
+  Copyright (C) 2014-2015 Intel Corporation. All rights reserved.
 
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
@@ -19,37 +17,46 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <netinet/in.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <string.h>
 
-#include "sparse-endian.h"
-#include "util.h"
+#include "sd-dhcp6-client.h"
 
+#include "alloc-util.h"
 #include "dhcp6-internal.h"
 #include "dhcp6-protocol.h"
+#include "dns-domain.h"
+#include "sparse-endian.h"
+#include "strv.h"
+#include "unaligned.h"
+#include "util.h"
 
-#define DHCP6_OPTION_HDR_LEN                    4
 #define DHCP6_OPTION_IA_NA_LEN                  12
 #define DHCP6_OPTION_IA_TA_LEN                  4
-#define DHCP6_OPTION_IAADDR_LEN                 24
+
+typedef struct DHCP6Option {
+        be16_t code;
+        be16_t len;
+        uint8_t data[];
+} _packed_ DHCP6Option;
 
 static int option_append_hdr(uint8_t **buf, size_t *buflen, uint16_t optcode,
                              size_t optlen) {
+        DHCP6Option *option = (DHCP6Option*) *buf;
+
         assert_return(buf, -EINVAL);
         assert_return(*buf, -EINVAL);
         assert_return(buflen, -EINVAL);
 
-        if (optlen > 0xffff || *buflen < optlen + DHCP6_OPTION_HDR_LEN)
+        if (optlen > 0xffff || *buflen < optlen + sizeof(DHCP6Option))
                 return -ENOBUFS;
 
-        (*buf)[0] = optcode >> 8;
-        (*buf)[1] = optcode & 0xff;
-        (*buf)[2] = optlen >> 8;
-        (*buf)[3] = optlen & 0xff;
+        option->code = htobe16(optcode);
+        option->len = htobe16(optlen);
 
-        *buf += DHCP6_OPTION_HDR_LEN;
-        *buflen -= DHCP6_OPTION_HDR_LEN;
+        *buf += sizeof(DHCP6Option);
+        *buflen -= sizeof(DHCP6Option);
 
         return 0;
 }
@@ -83,11 +90,11 @@ int dhcp6_option_append_ia(uint8_t **buf, size_t *buflen, DHCP6IA *ia) {
         assert_return(buf && *buf && buflen && ia, -EINVAL);
 
         switch (ia->type) {
-        case DHCP6_OPTION_IA_NA:
+        case SD_DHCP6_OPTION_IA_NA:
                 len = DHCP6_OPTION_IA_NA_LEN;
                 break;
 
-        case DHCP6_OPTION_IA_TA:
+        case SD_DHCP6_OPTION_IA_TA:
                 len = DHCP6_OPTION_IA_TA_LEN;
                 break;
 
@@ -101,8 +108,8 @@ int dhcp6_option_append_ia(uint8_t **buf, size_t *buflen, DHCP6IA *ia) {
         ia_hdr = *buf;
         ia_buflen = *buflen;
 
-        *buf += DHCP6_OPTION_HDR_LEN;
-        *buflen -= DHCP6_OPTION_HDR_LEN;
+        *buf += sizeof(DHCP6Option);
+        *buflen -= sizeof(DHCP6Option);
 
         memcpy(*buf, &ia->id, len);
 
@@ -110,17 +117,17 @@ int dhcp6_option_append_ia(uint8_t **buf, size_t *buflen, DHCP6IA *ia) {
         *buflen -= len;
 
         LIST_FOREACH(addresses, addr, ia->addresses) {
-                r = option_append_hdr(buf, buflen, DHCP6_OPTION_IAADDR,
-                                      DHCP6_OPTION_IAADDR_LEN);
+                r = option_append_hdr(buf, buflen, SD_DHCP6_OPTION_IAADDR,
+                                      sizeof(addr->iaaddr));
                 if (r < 0)
                         return r;
 
-                memcpy(*buf, &addr->address, DHCP6_OPTION_IAADDR_LEN);
+                memcpy(*buf, &addr->iaaddr, sizeof(addr->iaaddr));
 
-                *buf += DHCP6_OPTION_IAADDR_LEN;
-                *buflen -= DHCP6_OPTION_IAADDR_LEN;
+                *buf += sizeof(addr->iaaddr);
+                *buflen -= sizeof(addr->iaaddr);
 
-                ia_addrlen += DHCP6_OPTION_HDR_LEN + DHCP6_OPTION_IAADDR_LEN;
+                ia_addrlen += sizeof(DHCP6Option) + sizeof(addr->iaaddr);
         }
 
         r = option_append_hdr(&ia_hdr, &ia_buflen, ia->type, len + ia_addrlen);
@@ -131,23 +138,23 @@ int dhcp6_option_append_ia(uint8_t **buf, size_t *buflen, DHCP6IA *ia) {
 }
 
 
-static int option_parse_hdr(uint8_t **buf, size_t *buflen, uint16_t *opt,
-                            size_t *optlen) {
+static int option_parse_hdr(uint8_t **buf, size_t *buflen, uint16_t *optcode, size_t *optlen) {
+        DHCP6Option *option = (DHCP6Option*) *buf;
         uint16_t len;
 
         assert_return(buf, -EINVAL);
-        assert_return(opt, -EINVAL);
+        assert_return(optcode, -EINVAL);
         assert_return(optlen, -EINVAL);
 
-        if (*buflen < 4)
+        if (*buflen < sizeof(DHCP6Option))
                 return -ENOMSG;
 
-        len = (*buf)[2] << 8 | (*buf)[3];
+        len = be16toh(option->len);
 
         if (len > *buflen)
                 return -ENOMSG;
 
-        *opt = (*buf)[0] << 8 | (*buf)[1];
+        *optcode = be16toh(option->code);
         *optlen = len;
 
         *buf += 4;
@@ -189,10 +196,10 @@ int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
         assert_return(!ia->addresses, -EINVAL);
 
         switch (iatype) {
-        case DHCP6_OPTION_IA_NA:
+        case SD_DHCP6_OPTION_IA_NA:
 
-                if (*buflen < DHCP6_OPTION_IA_NA_LEN + DHCP6_OPTION_HDR_LEN +
-                    DHCP6_OPTION_IAADDR_LEN) {
+                if (*buflen < DHCP6_OPTION_IA_NA_LEN + sizeof(DHCP6Option) +
+                    sizeof(addr->iaaddr)) {
                         r = -ENOBUFS;
                         goto error;
                 }
@@ -212,9 +219,9 @@ int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
 
                 break;
 
-        case DHCP6_OPTION_IA_TA:
-                if (*buflen < DHCP6_OPTION_IA_TA_LEN + DHCP6_OPTION_HDR_LEN +
-                    DHCP6_OPTION_IAADDR_LEN) {
+        case SD_DHCP6_OPTION_IA_TA:
+                if (*buflen < DHCP6_OPTION_IA_TA_LEN + sizeof(DHCP6Option) +
+                    sizeof(addr->iaaddr)) {
                         r = -ENOBUFS;
                         goto error;
                 }
@@ -240,7 +247,7 @@ int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
         while ((r = option_parse_hdr(buf, buflen, &opt, &optlen)) >= 0) {
 
                 switch (opt) {
-                case DHCP6_OPTION_IAADDR:
+                case SD_DHCP6_OPTION_IAADDR:
 
                         addr = new0(DHCP6Address, 1);
                         if (!addr) {
@@ -250,10 +257,10 @@ int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
 
                         LIST_INIT(addresses, addr);
 
-                        memcpy(&addr->address, *buf, DHCP6_OPTION_IAADDR_LEN);
+                        memcpy(&addr->iaaddr, *buf, sizeof(addr->iaaddr));
 
-                        lt_valid = be32toh(addr->lifetime_valid);
-                        lt_pref = be32toh(addr->lifetime_valid);
+                        lt_valid = be32toh(addr->iaaddr.lifetime_valid);
+                        lt_pref = be32toh(addr->iaaddr.lifetime_valid);
 
                         if (!lt_valid || lt_pref > lt_valid) {
                                 log_dhcp6_client(client, "IA preferred %ds > valid %ds",
@@ -267,7 +274,7 @@ int dhcp6_option_parse_ia(uint8_t **buf, size_t *buflen, uint16_t iatype,
 
                         break;
 
-                case DHCP6_OPTION_STATUS_CODE:
+                case SD_DHCP6_OPTION_STATUS_CODE:
                         if (optlen < sizeof(status))
                                 break;
 
@@ -310,5 +317,98 @@ error:
         *buf += *buflen;
         *buflen = 0;
 
+        return r;
+}
+
+int dhcp6_option_parse_ip6addrs(uint8_t *optval, uint16_t optlen,
+                                struct in6_addr **addrs, size_t count,
+                                size_t *allocated) {
+
+        if (optlen == 0 || optlen % sizeof(struct in6_addr) != 0)
+                return -EINVAL;
+
+        if (!GREEDY_REALLOC(*addrs, *allocated,
+                            count * sizeof(struct in6_addr) + optlen))
+                return -ENOMEM;
+
+        memcpy(*addrs + count, optval, optlen);
+
+        count += optlen / sizeof(struct in6_addr);
+
+        return count;
+}
+
+int dhcp6_option_parse_domainname(const uint8_t *optval, uint16_t optlen, char ***str_arr) {
+        size_t pos = 0, idx = 0;
+        _cleanup_free_ char **names = NULL;
+        int r;
+
+        assert_return(optlen > 1, -ENODATA);
+        assert_return(optval[optlen - 1] == '\0', -EINVAL);
+
+        while (pos < optlen) {
+                _cleanup_free_ char *ret = NULL;
+                size_t n = 0, allocated = 0;
+                bool first = true;
+
+                for (;;) {
+                        uint8_t c;
+
+                        c = optval[pos++];
+
+                        if (c == 0)
+                                /* End of name */
+                                break;
+                        else if (c <= 63) {
+                                const char *label;
+
+                                /* Literal label */
+                                label = (const char *)&optval[pos];
+                                pos += c;
+                                if (pos > optlen)
+                                        return -EMSGSIZE;
+
+                                if (!GREEDY_REALLOC(ret, allocated, n + !first + DNS_LABEL_ESCAPED_MAX)) {
+                                        r = -ENOMEM;
+                                        goto fail;
+                                }
+
+                                if (first)
+                                        first = false;
+                                else
+                                        ret[n++] = '.';
+
+                                r = dns_label_escape(label, c, ret + n, DNS_LABEL_ESCAPED_MAX);
+                                if (r < 0)
+                                        goto fail;
+
+                                n += r;
+                                continue;
+                        } else {
+                                r = -EBADMSG;
+                                goto fail;
+                        }
+                }
+
+                if (!GREEDY_REALLOC(ret, allocated, n + 1)) {
+                        r = -ENOMEM;
+                        goto fail;
+                }
+
+                ret[n] = 0;
+
+                r = strv_extend(&names, ret);
+                if (r < 0)
+                        goto fail;
+
+                idx++;
+        }
+
+        *str_arr = names;
+        names = NULL;
+
+        return idx;
+
+fail:
         return r;
 }

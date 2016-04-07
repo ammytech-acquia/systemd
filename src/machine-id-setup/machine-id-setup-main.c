@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,28 +17,27 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <getopt.h>
 #include <errno.h>
+#include <getopt.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-#include "machine-id-setup.h"
 #include "log.h"
-#include "build.h"
+#include "machine-id-setup.h"
+#include "path-util.h"
+#include "util.h"
 
-static const char *arg_root = "";
+static char *arg_root = NULL;
+static bool arg_commit = false;
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Initialize /etc/machine-id from a random source.\n\n"
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
-               "     --root=ROOT        Filesystem root\n",
-               program_invocation_short_name);
-
-        return 0;
+               "     --root=ROOT        Filesystem root\n"
+               "     --commit           Commit transient ID\n"
+               , program_invocation_short_name);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -48,34 +45,41 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_ROOT,
+                ARG_COMMIT,
         };
 
         static const struct option options[] = {
                 { "help",      no_argument,       NULL, 'h'           },
                 { "version",   no_argument,       NULL, ARG_VERSION   },
                 { "root",      required_argument, NULL, ARG_ROOT      },
+                { "commit",    no_argument,       NULL, ARG_COMMIT    },
                 {}
         };
 
-        int c;
+        int c, r;
 
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hqcv", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hqcv", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        return help();
-
-                case ARG_VERSION:
-                        puts(PACKAGE_STRING);
-                        puts(SYSTEMD_FEATURES);
+                        help();
                         return 0;
 
+                case ARG_VERSION:
+                        return version();
+
                 case ARG_ROOT:
-                        arg_root = optarg;
+                        r = parse_path_argument_and_warn(optarg, true, &arg_root);
+                        if (r < 0)
+                                return r;
+                        break;
+
+                case ARG_COMMIT:
+                        arg_commit = true;
                         break;
 
                 case '?':
@@ -84,7 +88,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         if (optind < argc) {
                 log_error("Extraneous arguments");
@@ -102,7 +105,14 @@ int main(int argc, char *argv[]) {
 
         r = parse_argv(argc, argv);
         if (r <= 0)
-                return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+                goto finish;
 
-        return machine_id_setup(arg_root) < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        if (arg_commit)
+                r = machine_id_commit(arg_root);
+        else
+                r = machine_id_setup(arg_root, SD_ID128_NULL);
+
+finish:
+        free(arg_root);
+        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

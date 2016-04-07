@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,12 +17,12 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <unistd.h>
 #include <string.h>
 
-#include "util.h"
-#include "strv.h"
 #include "env-util.h"
+#include "string-util.h"
+#include "strv.h"
+#include "util.h"
 
 static void test_strv_env_delete(void) {
         _cleanup_strv_free_ char **a = NULL, **b = NULL, **c = NULL, **d = NULL;
@@ -119,6 +117,8 @@ static void test_replace_env_arg(void) {
                 "$FOO$FOO",
                 "${FOO}${BAR}",
                 "${FOO",
+                "FOO$$${FOO}",
+                "$$FOO${FOO}",
                 NULL
         };
         _cleanup_strv_free_ char **r = NULL;
@@ -134,32 +134,9 @@ static void test_replace_env_arg(void) {
         assert_se(streq(r[6], "BAR"));
         assert_se(streq(r[7], "BAR BARwaldo"));
         assert_se(streq(r[8], "${FOO"));
-        assert_se(strv_length(r) == 9);
-}
-
-static void test_one_normalize(const char *input, const char *output) {
-        _cleanup_free_ char *t;
-
-        t = normalize_env_assignment(input);
-        assert_se(t);
-        assert_se(streq(t, output));
-}
-
-static void test_normalize_env_assignment(void) {
-        test_one_normalize("foo=bar", "foo=bar");
-        test_one_normalize("=bar", "=bar");
-        test_one_normalize("foo=", "foo=");
-        test_one_normalize("=", "=");
-        test_one_normalize("", "");
-        test_one_normalize("a=\"waldo\"", "a=waldo");
-        test_one_normalize("a=\"waldo", "a=\"waldo");
-        test_one_normalize("a=waldo\"", "a=waldo\"");
-        test_one_normalize("a=\'", "a='");
-        test_one_normalize("a=\'\'", "a=");
-        test_one_normalize(" xyz  ", "xyz");
-        test_one_normalize(" xyz = bar  ", "xyz=bar");
-        test_one_normalize(" xyz = 'bar ' ", "xyz=bar ");
-        test_one_normalize(" ' xyz' = 'bar ' ", "' xyz'=bar ");
+        assert_se(streq(r[9], "FOO$BAR BAR"));
+        assert_se(streq(r[10], "$FOOBAR BAR"));
+        assert_se(strv_length(r) == 11);
 }
 
 static void test_env_clean(void) {
@@ -210,7 +187,6 @@ int main(int argc, char *argv[]) {
         test_strv_env_set();
         test_strv_env_merge();
         test_replace_env_arg();
-        test_normalize_env_assignment();
         test_env_clean();
         test_env_name_is_valid();
 

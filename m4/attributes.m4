@@ -34,15 +34,19 @@ dnl this special exception to the GPL to apply to your modified version as
 dnl well.
 
 dnl Check if FLAG in ENV-VAR is supported by compiler and append it
-dnl to WHERE-TO-APPEND variable
-dnl CC_CHECK_FLAG_APPEND([WHERE-TO-APPEND], [ENV-VAR], [FLAG])
+dnl to WHERE-TO-APPEND variable. Note that we invert -Wno-* checks to
+dnl -W* as gcc cannot test for negated warnings. If a C snippet is passed,
+dnl use it, otherwise use a simple main() definition that just returns 0.
+dnl CC_CHECK_FLAG_APPEND([WHERE-TO-APPEND], [ENV-VAR], [FLAG], [C-SNIPPET])
 
 AC_DEFUN([CC_CHECK_FLAG_APPEND], [
   AC_CACHE_CHECK([if $CC supports flag $3 in envvar $2],
                  AS_TR_SH([cc_cv_$2_$3]),
           [eval "AS_TR_SH([cc_save_$2])='${$2}'"
-           eval "AS_TR_SH([$2])='-Werror $3'"
-           AC_LINK_IFELSE([AC_LANG_SOURCE([int a = 0; int main(void) { return a; } ])],
+           eval "AS_TR_SH([$2])='${cc_save_$2} -Werror `echo "$3" | sed 's/^-Wno-/-W/'`'"
+           AC_LINK_IFELSE([AC_LANG_SOURCE(ifelse([$4], [],
+                                                 [int main(void) { return 0; } ],
+                                                 [$4]))],
                           [eval "AS_TR_SH([cc_cv_$2_$3])='yes'"],
                           [eval "AS_TR_SH([cc_cv_$2_$3])='no'"])
            eval "AS_TR_SH([$2])='$cc_save_$2'"])
@@ -51,10 +55,10 @@ AC_DEFUN([CC_CHECK_FLAG_APPEND], [
         [eval "$1='${$1} $3'"])
 ])
 
-dnl CC_CHECK_FLAGS_APPEND([WHERE-TO-APPEND], [ENV-VAR], [FLAG1 FLAG2])
+dnl CC_CHECK_FLAGS_APPEND([WHERE-TO-APPEND], [ENV-VAR], [FLAG1 FLAG2], [C-SNIPPET])
 AC_DEFUN([CC_CHECK_FLAGS_APPEND], [
-  for flag in $3; do
-    CC_CHECK_FLAG_APPEND($1, $2, $flag)
+  for flag in [$3]; do
+    CC_CHECK_FLAG_APPEND([$1], [$2], $flag, [$4])
   done
 ])
 
@@ -89,7 +93,7 @@ AC_DEFUN([CC_NOUNDEFINED], [
      *-freebsd* | *-openbsd*) ;;
      *)
         dnl First of all check for the --no-undefined variant of GNU ld. This allows
-        dnl for a much more readable commandline, so that people can understand what
+        dnl for a much more readable command line, so that people can understand what
         dnl it does without going to look for what the heck -z defs does.
         for possible_flags in "-Wl,--no-undefined" "-Wl,-z,defs"; do
            CC_CHECK_LDFLAGS([$possible_flags], [LDFLAGS_NOUNDEFINED="$possible_flags"])

@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,11 +17,6 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
-#include <fcntl.h>
-
 #include "hostname-setup.h"
 #include "util.h"
 
@@ -32,7 +25,7 @@ int main(int argc, char* argv[]) {
 
         r = hostname_setup();
         if (r < 0)
-                fprintf(stderr, "hostname: %s\n", strerror(-r));
+                log_error_errno(r, "hostname: %m");
 
         return 0;
 }

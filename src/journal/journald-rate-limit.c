@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,13 +17,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <string.h>
 #include <errno.h>
+#include <string.h>
 
+#include "alloc-util.h"
+#include "hashmap.h"
 #include "journald-rate-limit.h"
 #include "list.h"
+#include "random-util.h"
+#include "string-util.h"
 #include "util.h"
-#include "hashmap.h"
 
 #define POOLS_MAX 5
 #define BUCKETS_MAX 127
@@ -56,7 +57,7 @@ struct JournalRateLimitGroup {
 
         char *id;
         JournalRateLimitPool pools[POOLS_MAX];
-        unsigned long hash;
+        uint64_t hash;
 
         LIST_FIELDS(JournalRateLimitGroup, bucket);
         LIST_FIELDS(JournalRateLimitGroup, lru);
@@ -144,6 +145,7 @@ static void journal_rate_limit_vacuum(JournalRateLimit *r, usec_t ts) {
 
 static JournalRateLimitGroup* journal_rate_limit_group_new(JournalRateLimit *r, const char *id, usec_t ts) {
         JournalRateLimitGroup *g;
+        struct siphash state;
 
         assert(r);
         assert(id);
@@ -156,7 +158,9 @@ static JournalRateLimitGroup* journal_rate_limit_group_new(JournalRateLimit *r, 
         if (!g->id)
                 goto fail;
 
-        g->hash = string_hash_func(g->id, r->hash_key);
+        siphash24_init(&state, r->hash_key);
+        string_hash_func(g->id, &state);
+        g->hash = siphash24_finalize(&state);
 
         journal_rate_limit_vacuum(r, ts);
 
@@ -203,9 +207,10 @@ static unsigned burst_modulate(unsigned burst, uint64_t available) {
 }
 
 int journal_rate_limit_test(JournalRateLimit *r, const char *id, int priority, uint64_t available) {
-        unsigned long h;
+        uint64_t h;
         JournalRateLimitGroup *g;
         JournalRateLimitPool *p;
+        struct siphash state;
         unsigned burst;
         usec_t ts;
 
@@ -221,7 +226,9 @@ int journal_rate_limit_test(JournalRateLimit *r, const char *id, int priority, u
 
         ts = now(CLOCK_MONOTONIC);
 
-        h = string_hash_func(id, r->hash_key);
+        siphash24_init(&state, r->hash_key);
+        string_hash_func(id, &state);
+        h = siphash24_finalize(&state);
         g = r->buckets[h % BUCKETS_MAX];
 
         LIST_FOREACH(bucket, g, g)

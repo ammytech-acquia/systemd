@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -22,6 +20,7 @@
 #include <stddef.h>
 #include <unistd.h>
 
+#include "formats-util.h"
 #include "log.h"
 #include "util.h"
 

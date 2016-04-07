@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,10 +17,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "unit.h"
-#include "device.h"
-#include "dbus-unit.h"
 #include "dbus-device.h"
+#include "device.h"
+#include "unit.h"
 
 const sd_bus_vtable bus_device_vtable[] = {
         SD_BUS_VTABLE_START(0),

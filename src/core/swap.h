@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -22,26 +20,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <libudev.h>
+#include "libudev.h"
 
 typedef struct Swap Swap;
-
-#include "unit.h"
-
-typedef enum SwapState {
-        SWAP_DEAD,
-        SWAP_ACTIVATING,               /* /sbin/swapon is running, but the swap not yet enabled. */
-        SWAP_ACTIVATING_DONE,          /* /sbin/swapon is running, and the swap is done. */
-        SWAP_ACTIVE,
-        SWAP_DEACTIVATING,
-        SWAP_ACTIVATING_SIGTERM,
-        SWAP_ACTIVATING_SIGKILL,
-        SWAP_DEACTIVATING_SIGTERM,
-        SWAP_DEACTIVATING_SIGKILL,
-        SWAP_FAILED,
-        _SWAP_STATE_MAX,
-        _SWAP_STATE_INVALID = -1
-} SwapState;
 
 typedef enum SwapExecCommand {
         SWAP_EXEC_ACTIVATE,
@@ -63,9 +44,8 @@ typedef enum SwapResult {
 
 typedef struct SwapParameters {
         char *what;
+        char *options;
         int priority;
-        bool noauto:1;
-        bool nofail:1;
 } SwapParameters;
 
 struct Swap {
@@ -88,6 +68,8 @@ struct Swap {
          * from/to /proc/swaps */
         bool is_active:1;
         bool just_activated:1;
+
+        bool reset_cpu_usage:1;
 
         SwapResult result;
 
@@ -117,11 +99,8 @@ struct Swap {
 
 extern const UnitVTable swap_vtable;
 
-int swap_process_new_device(Manager *m, struct udev_device *dev);
-int swap_process_removed_device(Manager *m, struct udev_device *dev);
-
-const char* swap_state_to_string(SwapState i) _const_;
-SwapState swap_state_from_string(const char *s) _pure_;
+int swap_process_device_new(Manager *m, struct udev_device *dev);
+int swap_process_device_remove(Manager *m, struct udev_device *dev);
 
 const char* swap_exec_command_to_string(SwapExecCommand i) _const_;
 SwapExecCommand swap_exec_command_from_string(const char *s) _pure_;

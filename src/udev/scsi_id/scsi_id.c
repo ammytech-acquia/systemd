@@ -16,23 +16,25 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <unistd.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
-#include <ctype.h>
-#include <getopt.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "libudev.h"
+
+#include "fd-util.h"
 #include "libudev-private.h"
 #include "scsi_id.h"
+#include "string-util.h"
 #include "udev-util.h"
 
 static const struct option options[] = {
@@ -55,7 +57,6 @@ static bool dev_specified = false;
 static char config_file[MAX_PATH_LEN] = "/etc/scsi_id.config";
 static enum page_code default_page_code = PAGE_UNSPECIFIED;
 static int sg_version = 4;
-static int debug = 0;
 static bool reformat_serial = false;
 static bool export = false;
 static char vendor_str[64];
@@ -64,14 +65,6 @@ static char vendor_enc_str[256];
 static char model_enc_str[256];
 static char revision_str[16];
 static char type_str[16];
-
-_printf_(6,0)
-static void log_fn(struct udev *udev, int priority,
-                   const char *file, int line, const char *fn,
-                   const char *format, va_list args)
-{
-        vsyslog(priority, format, args);
-}
 
 static void set_type(const char *from, char *to, size_t len)
 {
@@ -184,7 +177,7 @@ static int get_file_options(struct udev *udev,
                 if (errno == ENOENT)
                         return 1;
                 else {
-                        log_error("can't open %s: %m", config_file);
+                        log_error_errno(errno, "can't open %s: %m", config_file);
                         return -1;
                 }
         }
@@ -200,7 +193,7 @@ static int get_file_options(struct udev *udev,
 
         *newargv = NULL;
         lineno = 0;
-        while (1) {
+        for (;;) {
                 vendor_in = model_in = options_in = NULL;
 
                 buf = fgets(buffer, MAX_BUFFER_LEN, f);
@@ -289,9 +282,9 @@ static int get_file_options(struct udev *udev,
                         strcpy(buffer, options_in);
                         c = argc_count(buffer) + 2;
                         *newargv = calloc(c, sizeof(**newargv));
-                        if (!*newargv) {
+                        if (!*newargv)
                                 retval = log_oom();
-                        } else {
+                        else {
                                 *argc = c;
                                 c = 0;
                                 /*
@@ -314,18 +307,20 @@ static int get_file_options(struct udev *udev,
 }
 
 static void help(void) {
-        printf("Usage: scsi_id [OPTION...] DEVICE\n"
-               "  -d,--device=                     device node for SG_IO commands\n"
-               "  -f,--config=                     location of config file\n"
-               "  -p,--page=0x80|0x83|pre-spc3-83  SCSI page (0x80, 0x83, pre-spc3-83)\n"
-               "  -s,--sg-version=3|4              use SGv3 or SGv4\n"
-               "  -b,--blacklisted                 threat device as blacklisted\n"
-               "  -g,--whitelisted                 threat device as whitelisted\n"
-               "  -u,--replace-whitespace          replace all whitespace by underscores\n"
-               "  -v,--verbose                     verbose logging\n"
-               "     --version                     print version\n"
-               "  -x,--export                      print values as environment keys\n"
-               "  -h,--help                        print this help text\n\n");
+        printf("Usage: %s [OPTION...] DEVICE\n\n"
+               "SCSI device identification.\n\n"
+               "  -h --help                        Print this message\n"
+               "     --version                     Print version of the program\n\n"
+               "  -d --device=                     Device node for SG_IO commands\n"
+               "  -f --config=                     Location of config file\n"
+               "  -p --page=0x80|0x83|pre-spc3-83  SCSI page (0x80, 0x83, pre-spc3-83)\n"
+               "  -s --sg-version=3|4              Use SGv3 or SGv4\n"
+               "  -b --blacklisted                 Treat device as blacklisted\n"
+               "  -g --whitelisted                 Treat device as whitelisted\n"
+               "  -u --replace-whitespace          Replace all whitespace by underscores\n"
+               "  -v --verbose                     Verbose logging\n"
+               "  -x --export                      Print values as environment keys\n"
+               , program_invocation_short_name);
 
 }
 
@@ -390,7 +385,9 @@ static int set_options(struct udev *udev,
                         break;
 
                 case 'v':
-                        debug++;
+                        log_set_target(LOG_TARGET_CONSOLE);
+                        log_set_max_level(LOG_DEBUG);
+                        log_open();
                         break;
 
                 case 'V':
@@ -543,16 +540,13 @@ static int scsi_id(struct udev *udev, char *maj_min_dev)
                         if (dev_scsi.wwn_vendor_extension[0] != '\0') {
                                 printf("ID_WWN_VENDOR_EXTENSION=0x%s\n", dev_scsi.wwn_vendor_extension);
                                 printf("ID_WWN_WITH_EXTENSION=0x%s%s\n", dev_scsi.wwn, dev_scsi.wwn_vendor_extension);
-                        } else {
+                        } else
                                 printf("ID_WWN_WITH_EXTENSION=0x%s\n", dev_scsi.wwn);
-                        }
                 }
-                if (dev_scsi.tgpt_group[0] != '\0') {
+                if (dev_scsi.tgpt_group[0] != '\0')
                         printf("ID_TARGET_PORT=%s\n", dev_scsi.tgpt_group);
-                }
-                if (dev_scsi.unit_serial_number[0] != '\0') {
+                if (dev_scsi.unit_serial_number[0] != '\0')
                         printf("ID_SCSI_SERIAL=%s\n", dev_scsi.unit_serial_number);
-                }
                 goto out;
         }
 
@@ -583,12 +577,12 @@ int main(int argc, char **argv)
         int newargc;
         char **newargv = NULL;
 
+        log_parse_environment();
+        log_open();
+
         udev = udev_new();
         if (udev == NULL)
                 goto exit;
-
-        log_open();
-        udev_set_log_fn(udev, log_fn);
 
         /*
          * Get config file options.
@@ -614,7 +608,7 @@ int main(int argc, char **argv)
                 exit(1);
 
         if (!dev_specified) {
-                log_error("no device specified");
+                log_error("No device specified.");
                 retval = 1;
                 goto exit;
         }

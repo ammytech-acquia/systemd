@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,9 +19,10 @@
 
 #include <string.h>
 
-#include "util.h"
 #include "macro.h"
 #include "replace-var.h"
+#include "string-util.h"
+#include "util.h"
 
 static char *lookup(const char *variable, void *userdata) {
         return strjoin("<<<", variable, ">>>", NULL);

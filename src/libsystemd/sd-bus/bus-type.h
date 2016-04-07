@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -24,11 +22,14 @@
 #include <stdbool.h>
 
 #include "sd-bus.h"
-#include "sd-bus-protocol.h"
+
+#include "macro.h"
 
 bool bus_type_is_valid(char c) _const_;
 bool bus_type_is_valid_in_signature(char c) _const_;
 bool bus_type_is_basic(char c) _const_;
+/* "trivial" is systemd's term for what the D-Bus Specification calls
+ * a "fixed type": that is, a basic type of fixed length */
 bool bus_type_is_trivial(char c) _const_;
 bool bus_type_is_container(char c) _const_;
 

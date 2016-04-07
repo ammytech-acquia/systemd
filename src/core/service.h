@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -22,32 +20,12 @@
 ***/
 
 typedef struct Service Service;
+typedef struct ServiceFDStore ServiceFDStore;
 
-#include "unit.h"
+#include "exit-status.h"
+#include "kill.h"
 #include "path.h"
 #include "ratelimit.h"
-#include "kill.h"
-#include "exit-status.h"
-
-typedef enum ServiceState {
-        SERVICE_DEAD,
-        SERVICE_START_PRE,
-        SERVICE_START,
-        SERVICE_START_POST,
-        SERVICE_RUNNING,
-        SERVICE_EXITED,            /* Nothing is running anymore, but RemainAfterExit is true hence this is OK */
-        SERVICE_RELOAD,
-        SERVICE_STOP,              /* No STOP_PRE state, instead just register multiple STOP executables */
-        SERVICE_STOP_SIGTERM,
-        SERVICE_STOP_SIGKILL,
-        SERVICE_STOP_POST,
-        SERVICE_FINAL_SIGTERM,     /* In case the STOP_POST executable hangs, we shoot that down, too */
-        SERVICE_FINAL_SIGKILL,
-        SERVICE_FAILED,
-        SERVICE_AUTO_RESTART,
-        _SERVICE_STATE_MAX,
-        _SERVICE_STATE_INVALID = -1
-} ServiceState;
 
 typedef enum ServiceRestart {
         SERVICE_RESTART_NO,
@@ -91,6 +69,15 @@ typedef enum NotifyAccess {
         _NOTIFY_ACCESS_INVALID = -1
 } NotifyAccess;
 
+typedef enum NotifyState {
+        NOTIFY_UNKNOWN,
+        NOTIFY_READY,
+        NOTIFY_RELOADING,
+        NOTIFY_STOPPING,
+        _NOTIFY_STATE_MAX,
+        _NOTIFY_STATE_INVALID = -1
+} NotifyState;
+
 typedef enum ServiceResult {
         SERVICE_SUCCESS,
         SERVICE_FAILURE_RESOURCES,
@@ -99,19 +86,19 @@ typedef enum ServiceResult {
         SERVICE_FAILURE_SIGNAL,
         SERVICE_FAILURE_CORE_DUMP,
         SERVICE_FAILURE_WATCHDOG,
-        SERVICE_FAILURE_START_LIMIT,
         _SERVICE_RESULT_MAX,
         _SERVICE_RESULT_INVALID = -1
 } ServiceResult;
 
-typedef enum FailureAction {
-        SERVICE_FAILURE_ACTION_NONE,
-        SERVICE_FAILURE_ACTION_REBOOT,
-        SERVICE_FAILURE_ACTION_REBOOT_FORCE,
-        SERVICE_FAILURE_ACTION_REBOOT_IMMEDIATE,
-        _SERVICE_FAILURE_ACTION_MAX,
-        _SERVICE_FAILURE_ACTION_INVALID = -1
-} FailureAction;
+struct ServiceFDStore {
+        Service *service;
+
+        int fd;
+        char *fdname;
+        sd_event_source *event_source;
+
+        LIST_FIELDS(ServiceFDStore, fd_store);
+};
 
 struct Service {
         Unit meta;
@@ -128,6 +115,7 @@ struct Service {
         usec_t restart_usec;
         usec_t timeout_start_usec;
         usec_t timeout_stop_usec;
+        usec_t runtime_max_usec;
 
         dual_timestamp watchdog_timestamp;
         usec_t watchdog_usec;
@@ -160,6 +148,9 @@ struct Service {
 
         pid_t main_pid, control_pid;
         int socket_fd;
+        bool socket_fd_selinux_context_net;
+
+        int bus_endpoint_fd;
 
         bool permissions_start_only;
         bool root_directory_start_only;
@@ -175,19 +166,16 @@ struct Service {
         bool bus_name_good:1;
         bool forbid_restart:1;
         bool start_timeout_defined:1;
-#ifdef HAVE_SYSV_COMPAT
-        int sysv_start_priority;
-#endif
+
+        bool reset_cpu_usage:1;
 
         char *bus_name;
+        char *bus_name_owner; /* unique name of the current owner */
 
         char *status_text;
+        int status_errno;
 
         FailureAction failure_action;
-
-        RateLimit start_limit;
-        FailureAction start_limit_action;
-        char *reboot_arg;
 
         UnitRef accept_socket;
 
@@ -195,16 +183,23 @@ struct Service {
         PathSpec *pid_file_pathspec;
 
         NotifyAccess notify_access;
+        NotifyState notify_state;
+
+        ServiceFDStore *fd_store;
+        unsigned n_fd_store;
+        unsigned n_fd_store_max;
+
+        char *usb_function_descriptors;
+        char *usb_function_strings;
+
+        int stdin_fd;
+        int stdout_fd;
+        int stderr_fd;
 };
 
 extern const UnitVTable service_vtable;
 
-struct Socket;
-
-int service_set_socket_fd(Service *s, int fd, struct Socket *socket);
-
-const char* service_state_to_string(ServiceState i) _const_;
-ServiceState service_state_from_string(const char *s) _pure_;
+int service_set_socket_fd(Service *s, int fd, struct Socket *socket, bool selinux_context_net);
 
 const char* service_restart_to_string(ServiceRestart i) _const_;
 ServiceRestart service_restart_from_string(const char *s) _pure_;
@@ -218,8 +213,8 @@ ServiceExecCommand service_exec_command_from_string(const char *s) _pure_;
 const char* notify_access_to_string(NotifyAccess i) _const_;
 NotifyAccess notify_access_from_string(const char *s) _pure_;
 
+const char* notify_state_to_string(NotifyState i) _const_;
+NotifyState notify_state_from_string(const char *s) _pure_;
+
 const char* service_result_to_string(ServiceResult i) _const_;
 ServiceResult service_result_from_string(const char *s) _pure_;
-
-const char* failure_action_to_string(FailureAction i) _const_;
-FailureAction failure_action_from_string(const char *s) _pure_;

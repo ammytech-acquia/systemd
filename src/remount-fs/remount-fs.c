@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,30 +17,33 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <unistd.h>
-#include <fcntl.h>
 #include <errno.h>
+#include <mntent.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <mntent.h>
+#include <unistd.h>
 
-#include "log.h"
-#include "util.h"
-#include "path-util.h"
-#include "set.h"
-#include "mount-setup.h"
 #include "exit-status.h"
+#include "log.h"
+#include "mount-setup.h"
+#include "mount-util.h"
+#include "path-util.h"
+#include "process-util.h"
+#include "signal-util.h"
+#include "strv.h"
+#include "util.h"
 
 /* Goes through /etc/fstab and remounts all API file systems, applying
  * options that are in /etc/fstab that systemd might not have
  * respected */
 
 int main(int argc, char *argv[]) {
-        int ret = EXIT_FAILURE;
+        _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
         _cleanup_endmntent_ FILE *f = NULL;
         struct mntent* me;
-        Hashmap *pids = NULL;
+        int r;
 
         if (argc > 1) {
                 log_error("This program takes no argument.");
@@ -57,20 +58,20 @@ int main(int argc, char *argv[]) {
 
         f = setmntent("/etc/fstab", "r");
         if (!f) {
-                if (errno == ENOENT)
-                        return EXIT_SUCCESS;
+                if (errno == ENOENT) {
+                        r = 0;
+                        goto finish;
+                }
 
-                log_error("Failed to open /etc/fstab: %m");
-                return EXIT_FAILURE;
-        }
-
-        pids = hashmap_new(trivial_hash_func, trivial_compare_func);
-        if (!pids) {
-                log_error("Failed to allocate set");
+                r = log_error_errno(errno, "Failed to open /etc/fstab: %m");
                 goto finish;
         }
 
-        ret = EXIT_SUCCESS;
+        pids = hashmap_new(NULL);
+        if (!pids) {
+                r = log_oom();
+                goto finish;
+        }
 
         while ((me = getmntent(f))) {
                 pid_t pid;
@@ -87,24 +88,20 @@ int main(int argc, char *argv[]) {
 
                 pid = fork();
                 if (pid < 0) {
-                        log_error("Failed to fork: %m");
-                        ret = EXIT_FAILURE;
-                        continue;
+                        r = log_error_errno(errno, "Failed to fork: %m");
+                        goto finish;
                 }
 
                 if (pid == 0) {
-                        const char *arguments[5];
                         /* Child */
 
-                        arguments[0] = "/bin/mount";
-                        arguments[1] = me->mnt_dir;
-                        arguments[2] = "-o";
-                        arguments[3] = "remount";
-                        arguments[4] = NULL;
+                        (void) reset_all_signal_handlers();
+                        (void) reset_signal_mask();
+                        (void) prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-                        execv("/bin/mount", (char **) arguments);
+                        execv(MOUNT_PATH, STRV_MAKE(MOUNT_PATH, me->mnt_dir, "-o", "remount"));
 
-                        log_error("Failed to execute /bin/mount: %m");
+                        log_error_errno(errno, "Failed to execute " MOUNT_PATH ": %m");
                         _exit(EXIT_FAILURE);
                 }
 
@@ -112,20 +109,19 @@ int main(int argc, char *argv[]) {
 
                 s = strdup(me->mnt_dir);
                 if (!s) {
-                        log_oom();
-                        ret = EXIT_FAILURE;
-                        continue;
+                        r = log_oom();
+                        goto finish;
                 }
 
-
-                k = hashmap_put(pids, UINT_TO_PTR(pid), s);
+                k = hashmap_put(pids, PID_TO_PTR(pid), s);
                 if (k < 0) {
-                        log_error("Failed to add PID to set: %s", strerror(-k));
-                        ret = EXIT_FAILURE;
-                        continue;
+                        free(s);
+                        r = log_oom();
+                        goto finish;
                 }
         }
 
+        r = 0;
         while (!hashmap_isempty(pids)) {
                 siginfo_t si = {};
                 char *s;
@@ -135,20 +131,19 @@ int main(int argc, char *argv[]) {
                         if (errno == EINTR)
                                 continue;
 
-                        log_error("waitid() failed: %m");
-                        ret = EXIT_FAILURE;
-                        break;
+                        r = log_error_errno(errno, "waitid() failed: %m");
+                        goto finish;
                 }
 
-                s = hashmap_remove(pids, UINT_TO_PTR(si.si_pid));
+                s = hashmap_remove(pids, PID_TO_PTR(si.si_pid));
                 if (s) {
                         if (!is_clean_exit(si.si_code, si.si_status, NULL)) {
                                 if (si.si_code == CLD_EXITED)
-                                        log_error("/bin/mount for %s exited with exit status %i.", s, si.si_status);
+                                        log_error(MOUNT_PATH " for %s exited with exit status %i.", s, si.si_status);
                                 else
-                                        log_error("/bin/mount for %s terminated by signal %s.", s, signal_to_string(si.si_status));
+                                        log_error(MOUNT_PATH " for %s terminated by signal %s.", s, signal_to_string(si.si_status));
 
-                                ret = EXIT_FAILURE;
+                                r = -ENOEXEC;
                         }
 
                         free(s);
@@ -156,9 +151,5 @@ int main(int argc, char *argv[]) {
         }
 
 finish:
-
-        if (pids)
-                hashmap_free_free(pids);
-
-        return ret;
+        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

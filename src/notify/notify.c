@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,43 +17,38 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdio.h>
-#include <getopt.h>
-#include <error.h>
 #include <errno.h>
-#include <unistd.h>
+#include <getopt.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <unistd.h>
 
-#include <systemd/sd-daemon.h>
+#include "sd-daemon.h"
 
+#include "alloc-util.h"
+#include "env-util.h"
+#include "formats-util.h"
+#include "log.h"
+#include "parse-util.h"
+#include "string-util.h"
 #include "strv.h"
 #include "util.h"
-#include "log.h"
-#include "sd-readahead.h"
-#include "build.h"
-#include "env-util.h"
 
 static bool arg_ready = false;
 static pid_t arg_pid = 0;
 static const char *arg_status = NULL;
 static bool arg_booted = false;
-static const char *arg_readahead = NULL;
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...] [VARIABLE=VALUE...]\n\n"
                "Notify the init system about service status updates.\n\n"
-               "  -h --help             Show this help\n"
-               "     --version          Show package version\n"
-               "     --ready            Inform the init system about service start-up completion\n"
-               "     --pid[=PID]        Set main pid of daemon\n"
-               "     --status=TEXT      Set status text\n"
-               "     --booted           Returns 0 if the system was booted up with systemd, non-zero otherwise\n"
-               "     --readahead=ACTION Controls read-ahead operations\n",
+               "  -h --help            Show this help\n"
+               "     --version         Show package version\n"
+               "     --ready           Inform the init system about service start-up completion\n"
+               "     --pid[=PID]       Set main pid of daemon\n"
+               "     --status=TEXT     Set status text\n"
+               "     --booted          Check if the system was booted up with systemd\n",
                program_invocation_short_name);
-
-        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -66,7 +59,6 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PID,
                 ARG_STATUS,
                 ARG_BOOTED,
-                ARG_READAHEAD
         };
 
         static const struct option options[] = {
@@ -76,7 +68,6 @@ static int parse_argv(int argc, char *argv[]) {
                 { "pid",       optional_argument, NULL, ARG_PID       },
                 { "status",    required_argument, NULL, ARG_STATUS    },
                 { "booted",    no_argument,       NULL, ARG_BOOTED    },
-                { "readahead", required_argument, NULL, ARG_READAHEAD },
                 {}
         };
 
@@ -90,12 +81,11 @@ static int parse_argv(int argc, char *argv[]) {
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
-                        puts(PACKAGE_STRING);
-                        puts(SYSTEMD_FEATURES);
-                        return 0;
+                        return version();
 
                 case ARG_READY:
                         arg_ready = true;
@@ -121,10 +111,6 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_booted = true;
                         break;
 
-                case ARG_READAHEAD:
-                        arg_readahead = optarg;
-                        break;
-
                 case '?':
                         return -EINVAL;
 
@@ -137,8 +123,7 @@ static int parse_argv(int argc, char *argv[]) {
             !arg_ready &&
             !arg_status &&
             !arg_pid &&
-            !arg_booted &&
-            !arg_readahead) {
+            !arg_booted) {
                 help();
                 return -EINVAL;
         }
@@ -162,14 +147,6 @@ int main(int argc, char* argv[]) {
 
         if (arg_booted)
                 return sd_booted() <= 0;
-
-        if (arg_readahead) {
-                r = sd_readahead(arg_readahead);
-                if (r < 0) {
-                        log_error("Failed to issue read-ahead control command: %s", strerror(-r));
-                        goto finish;
-                }
-        }
 
         if (arg_ready)
                 our_env[i++] = (char*) "READY=1";
@@ -212,14 +189,14 @@ int main(int argc, char* argv[]) {
                 goto finish;
         }
 
-        r = sd_pid_notify(arg_pid, false, n);
+        r = sd_pid_notify(arg_pid ? arg_pid : getppid(), false, n);
         if (r < 0) {
-                log_error("Failed to notify init system: %s", strerror(-r));
+                log_error_errno(r, "Failed to notify init system: %m");
                 goto finish;
+        } else if (r == 0) {
+                log_error("No status data could be sent: $NOTIFY_SOCKET was not set");
+                r = -EOPNOTSUPP;
         }
-
-        if (r == 0)
-                r = -ENOTSUP;
 
 finish:
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

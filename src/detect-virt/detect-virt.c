@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,35 +17,32 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <stdlib.h>
-#include <stdbool.h>
 #include <errno.h>
-#include <string.h>
 #include <getopt.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #include "util.h"
 #include "virt.h"
-#include "build.h"
 
 static bool arg_quiet = false;
 static enum {
         ANY_VIRTUALIZATION,
         ONLY_VM,
-        ONLY_CONTAINER
+        ONLY_CONTAINER,
+        ONLY_CHROOT,
 } arg_mode = ANY_VIRTUALIZATION;
 
-static int help(void) {
-
+static void help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Detect execution in a virtualized environment.\n\n"
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
                "  -c --container        Only detect whether we are run in a container\n"
                "  -v --vm               Only detect whether we are run in a VM\n"
-               "  -q --quiet            Don't output anything, just set return value\n",
-               program_invocation_short_name);
-
-        return 0;
+               "  -r --chroot           Detect whether we are run in a chroot() environment\n"
+               "  -q --quiet            Don't output anything, just set return value\n"
+               , program_invocation_short_name);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -60,7 +55,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "help",      no_argument,       NULL, 'h'           },
                 { "version",   no_argument,       NULL, ARG_VERSION   },
                 { "container", no_argument,       NULL, 'c'           },
-                { "vm",        optional_argument, NULL, 'v'           },
+                { "vm",        no_argument,       NULL, 'v'           },
+                { "chroot",    no_argument,       NULL, 'r'           },
                 { "quiet",     no_argument,       NULL, 'q'           },
                 {}
         };
@@ -70,17 +66,16 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hqcv", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hqcvr", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        return help();
+                        help();
+                        return 0;
 
                 case ARG_VERSION:
-                        puts(PACKAGE_STRING);
-                        puts(SYSTEMD_FEATURES);
-                        return 0;
+                        return version();
 
                 case 'q':
                         arg_quiet = true;
@@ -94,16 +89,19 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_mode = ONLY_VM;
                         break;
 
+                case 'r':
+                        arg_mode = ONLY_CHROOT;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
                 default:
                         assert_not_reached("Unhandled option");
                 }
-        }
 
         if (optind < argc) {
-                help();
+                log_error("%s takes no arguments.", program_invocation_short_name);
                 return -EINVAL;
         }
 
@@ -111,8 +109,6 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        const char *id = NULL;
-        int retval = EXIT_SUCCESS;
         int r;
 
         /* This is mostly intended to be used for scripts which want
@@ -128,42 +124,46 @@ int main(int argc, char *argv[]) {
 
         switch (arg_mode) {
 
-        case ANY_VIRTUALIZATION: {
-                int v;
-
-                v = detect_virtualization(&id);
-                if (v < 0) {
-                        log_error("Failed to check for virtualization: %s", strerror(-v));
+        case ONLY_VM:
+                r = detect_vm();
+                if (r < 0) {
+                        log_error_errno(r, "Failed to check for VM: %m");
                         return EXIT_FAILURE;
                 }
 
-                retval = v != VIRTUALIZATION_NONE ? EXIT_SUCCESS : EXIT_FAILURE;
                 break;
-        }
 
         case ONLY_CONTAINER:
-                r = detect_container(&id);
+                r = detect_container();
                 if (r < 0) {
-                        log_error("Failed to check for container: %s", strerror(-r));
+                        log_error_errno(r, "Failed to check for container: %m");
                         return EXIT_FAILURE;
                 }
 
-                retval = r > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
                 break;
 
-        case ONLY_VM:
-                r = detect_vm(&id);
+        case ONLY_CHROOT:
+                r = running_in_chroot();
                 if (r < 0) {
-                        log_error("Failed to check for vm: %s", strerror(-r));
+                        log_error_errno(r, "Failed to check for chroot() environment: %m");
                         return EXIT_FAILURE;
                 }
 
-                retval = r > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+                return r ? EXIT_SUCCESS : EXIT_FAILURE;
+
+        case ANY_VIRTUALIZATION:
+        default:
+                r = detect_virtualization();
+                if (r < 0) {
+                        log_error_errno(r, "Failed to check for virtualization: %m");
+                        return EXIT_FAILURE;
+                }
+
                 break;
         }
 
         if (!arg_quiet)
-                puts(id ? id : "none");
+                puts(virtualization_to_string(r));
 
-        return retval;
+        return r != VIRTUALIZATION_NONE ? EXIT_SUCCESS : EXIT_FAILURE;
 }

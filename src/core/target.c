@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,17 +17,13 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
-#include <signal.h>
-#include <unistd.h>
-
+#include "dbus-target.h"
+#include "log.h"
+#include "special.h"
+#include "string-util.h"
+#include "unit-name.h"
 #include "unit.h"
 #include "target.h"
-#include "load-fragment.h"
-#include "log.h"
-#include "dbus-target.h"
-#include "special.h"
-#include "unit-name.h"
 
 static const UnitActiveState state_translation_table[_TARGET_STATE_MAX] = {
         [TARGET_DEAD] = UNIT_INACTIVE,
@@ -56,9 +50,7 @@ static int target_add_default_dependencies(Target *t) {
 
         static const UnitDependency deps[] = {
                 UNIT_REQUIRES,
-                UNIT_REQUIRES_OVERRIDABLE,
                 UNIT_REQUISITE,
-                UNIT_REQUISITE_OVERRIDABLE,
                 UNIT_WANTS,
                 UNIT_BINDS_TO,
                 UNIT_PART_OF
@@ -137,7 +129,7 @@ static int target_start(Unit *u) {
         assert(t->state == TARGET_DEAD);
 
         target_set_state(t, TARGET_ACTIVE);
-        return 0;
+        return 1;
 }
 
 static int target_stop(Unit *u) {
@@ -147,7 +139,7 @@ static int target_stop(Unit *u) {
         assert(t->state == TARGET_ACTIVE);
 
         target_set_state(t, TARGET_DEAD);
-        return 0;
+        return 1;
 }
 
 static int target_serialize(Unit *u, FILE *f, FDSet *fds) {
@@ -196,13 +188,6 @@ _pure_ static const char *target_sub_state_to_string(Unit *u) {
         return target_state_to_string(TARGET(u)->state);
 }
 
-static const char* const target_state_table[_TARGET_STATE_MAX] = {
-        [TARGET_DEAD] = "dead",
-        [TARGET_ACTIVE] = "active"
-};
-
-DEFINE_STRING_TABLE_LOOKUP(target_state, TargetState);
-
 const UnitVTable target_vtable = {
         .object_size = sizeof(Target),
 
@@ -225,13 +210,11 @@ const UnitVTable target_vtable = {
         .active_state = target_active_state,
         .sub_state_to_string = target_sub_state_to_string,
 
-        .bus_interface = "org.freedesktop.systemd1.Target",
         .bus_vtable = bus_target_vtable,
 
         .status_message_formats = {
                 .finished_start_job = {
                         [JOB_DONE]       = "Reached target %s.",
-                        [JOB_DEPENDENCY] = "Dependency failed for %s.",
                 },
                 .finished_stop_job = {
                         [JOB_DONE]       = "Stopped target %s.",

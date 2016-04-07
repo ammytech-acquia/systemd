@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -23,8 +21,6 @@
 
 typedef struct Button Button;
 
-#include "list.h"
-#include "util.h"
 #include "logind.h"
 
 struct Button {

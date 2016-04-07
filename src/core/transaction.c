@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,13 +17,15 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <unistd.h>
 #include <fcntl.h>
+#include <unistd.h>
 
-#include "bus-errors.h"
-#include "bus-util.h"
+#include "alloc-util.h"
+#include "bus-common-errors.h"
 #include "bus-error.h"
+#include "terminal-util.h"
 #include "transaction.h"
+#include "dbus-unit.h"
 
 static void transaction_unlink_job(Transaction *tr, Job *j, bool delete_dependencies);
 
@@ -98,9 +98,7 @@ static void transaction_merge_and_delete_job(Transaction *tr, Job *j, Job *other
 
         j->type = t;
         j->state = JOB_WAITING;
-        j->override = j->override || other->override;
         j->irreversible = j->irreversible || other->irreversible;
-
         j->matters_to_anchor = j->matters_to_anchor || other->matters_to_anchor;
 
         /* Patch us in as new owner of the JobDependency objects */
@@ -189,11 +187,11 @@ static int delete_one_unmergeable_job(Transaction *tr, Job *j) {
                                  * another unit in which case we
                                  * rather remove the start. */
 
-                                log_debug_unit(j->unit->id,
+                                log_unit_debug(j->unit,
                                                "Looking at job %s/%s conflicted_by=%s",
                                                j->unit->id, job_type_to_string(j->type),
                                                yes_no(j->type == JOB_STOP && job_is_conflicted_by(j)));
-                                log_debug_unit(k->unit->id,
+                                log_unit_debug(k->unit,
                                                "Looking at job %s/%s conflicted_by=%s",
                                                k->unit->id, job_type_to_string(k->type),
                                                yes_no(k->type == JOB_STOP && job_is_conflicted_by(k)));
@@ -222,7 +220,7 @@ static int delete_one_unmergeable_job(Transaction *tr, Job *j) {
                                 return -ENOEXEC;
 
                         /* Ok, we can drop one, so let's do so. */
-                        log_debug_unit(d->unit->id,
+                        log_unit_debug(d->unit,
                                        "Fixing conflicting jobs %s/%s,%s/%s by deleting job %s/%s",
                                        j->unit->id, job_type_to_string(j->type),
                                        k->unit->id, job_type_to_string(k->type),
@@ -264,13 +262,12 @@ static int transaction_merge_jobs(Transaction *tr, sd_bus_error *e) {
                                 return -EAGAIN;
 
                         /* We couldn't merge anything. Failure */
-                        sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_JOBS_CONFLICTING,
-                                          "Transaction contains conflicting jobs '%s' and '%s' for %s. "
-                                          "Probably contradicting requirement dependencies configured.",
-                                          job_type_to_string(t),
-                                          job_type_to_string(k->type),
-                                          k->unit->id);
-                        return r;
+                        return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_JOBS_CONFLICTING,
+                                                 "Transaction contains conflicting jobs '%s' and '%s' for %s. "
+                                                 "Probably contradicting requirement dependencies configured.",
+                                                 job_type_to_string(t),
+                                                 job_type_to_string(k->type),
+                                                 k->unit->id);
                 }
         }
 
@@ -369,7 +366,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                  * job to remove. We use the marker to find our way
                  * back, since smart how we are we stored our way back
                  * in there. */
-                log_warning_unit(j->unit->id,
+                log_unit_warning(j->unit,
                                  "Found ordering cycle on %s/%s",
                                  j->unit->id, job_type_to_string(j->type));
 
@@ -377,16 +374,14 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                 for (k = from; k; k = ((k->generation == generation && k->marker != k) ? k->marker : NULL)) {
 
                         /* logging for j not k here here to provide consistent narrative */
-                        log_info_unit(j->unit->id,
-                                      "Found dependency on %s/%s",
-                                      k->unit->id, job_type_to_string(k->type));
+                        log_unit_warning(j->unit,
+                                         "Found dependency on %s/%s",
+                                         k->unit->id, job_type_to_string(k->type));
 
-                        if (!delete && hashmap_get(tr->jobs, k->unit) &&
-                            !unit_matters_to_anchor(k->unit, k)) {
+                        if (!delete && hashmap_get(tr->jobs, k->unit) && !unit_matters_to_anchor(k->unit, k))
                                 /* Ok, we can drop this one, so let's
                                  * do so. */
                                 delete = k;
-                        }
 
                         /* Check if this in fact was the beginning of
                          * the cycle */
@@ -397,14 +392,14 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
 
                 if (delete) {
                         /* logging for j not k here here to provide consistent narrative */
-                        log_warning_unit(j->unit->id,
+                        log_unit_warning(j->unit,
                                          "Breaking ordering cycle by deleting job %s/%s",
                                          delete->unit->id, job_type_to_string(delete->type));
-                        log_error_unit(delete->unit->id,
+                        log_unit_error(delete->unit,
                                        "Job %s/%s deleted to break ordering cycle starting with %s/%s",
                                        delete->unit->id, job_type_to_string(delete->type),
                                        j->unit->id, job_type_to_string(j->type));
-                        unit_status_printf(delete->unit, ANSI_HIGHLIGHT_RED_ON " SKIP " ANSI_HIGHLIGHT_OFF,
+                        unit_status_printf(delete->unit, ANSI_HIGHLIGHT_RED " SKIP " ANSI_NORMAL,
                                            "Ordering cycle found, skipping %s");
                         transaction_delete_unit(tr, delete->unit);
                         return -EAGAIN;
@@ -412,9 +407,8 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
 
                 log_error("Unable to break cycle");
 
-                sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_ORDER_IS_CYCLIC,
-                                  "Transaction order is cyclic. See system logs for details.");
-                return -ENOEXEC;
+                return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_ORDER_IS_CYCLIC,
+                                         "Transaction order is cyclic. See system logs for details.");
         }
 
         /* Make the marker point to where we come from, so that we can
@@ -466,9 +460,11 @@ static int transaction_verify_order(Transaction *tr, unsigned *generation, sd_bu
 
         g = (*generation)++;
 
-        HASHMAP_FOREACH(j, tr->jobs, i)
-                if ((r = transaction_verify_order_one(tr, j, NULL, g, e)) < 0)
+        HASHMAP_FOREACH(j, tr->jobs, i) {
+                r = transaction_verify_order_one(tr, j, NULL, g, e);
+                if (r < 0)
                         return r;
+        }
 
         return 0;
 }
@@ -513,12 +509,9 @@ static int transaction_is_destructive(Transaction *tr, JobMode mode, sd_bus_erro
                 assert(!j->transaction_next);
 
                 if (j->unit->job && (mode == JOB_FAIL || j->unit->job->irreversible) &&
-                    !job_type_is_superset(j->type, j->unit->job->type)) {
-
-                        sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_IS_DESTRUCTIVE,
-                                          "Transaction is destructive.");
-                        return -EEXIST;
-                }
+                    job_type_is_conflicting(j->unit->job->type, j->type))
+                        return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_IS_DESTRUCTIVE,
+                                                 "Transaction is destructive.");
         }
 
         return 0;
@@ -557,17 +550,17 @@ rescan:
                                 continue;
 
                         if (stops_running_service)
-                                log_debug_unit(j->unit->id,
+                                log_unit_debug(j->unit,
                                                "%s/%s would stop a running service.",
                                                j->unit->id, job_type_to_string(j->type));
 
                         if (changes_existing_job)
-                                log_debug_unit(j->unit->id,
+                                log_unit_debug(j->unit,
                                                "%s/%s would change existing job.",
                                                j->unit->id, job_type_to_string(j->type));
 
                         /* Ok, let's get rid of this */
-                        log_debug_unit(j->unit->id,
+                        log_unit_debug(j->unit,
                                        "Deleting %s/%s to minimize impact.",
                                        j->unit->id, job_type_to_string(j->type));
 
@@ -727,10 +720,8 @@ int transaction_activate(Transaction *tr, Manager *m, JobMode mode, sd_bus_error
 
         /* Tenth step: apply changes */
         r = transaction_apply(tr, m, mode);
-        if (r < 0) {
-                log_warning("Failed to apply transaction: %s", strerror(-r));
-                return r;
-        }
+        if (r < 0)
+                return log_warning_errno(r, "Failed to apply transaction: %m");
 
         assert(hashmap_isempty(tr->jobs));
 
@@ -743,15 +734,15 @@ int transaction_activate(Transaction *tr, Manager *m, JobMode mode, sd_bus_error
 
                 if (m->idle_pipe[0] < 0 && m->idle_pipe[1] < 0 &&
                     m->idle_pipe[2] < 0 && m->idle_pipe[3] < 0) {
-                        pipe2(m->idle_pipe, O_NONBLOCK|O_CLOEXEC);
-                        pipe2(m->idle_pipe + 2, O_NONBLOCK|O_CLOEXEC);
+                        (void) pipe2(m->idle_pipe, O_NONBLOCK|O_CLOEXEC);
+                        (void) pipe2(m->idle_pipe + 2, O_NONBLOCK|O_CLOEXEC);
                 }
         }
 
         return 0;
 }
 
-static Job* transaction_add_one_job(Transaction *tr, JobType type, Unit *unit, bool override, bool *is_new) {
+static Job* transaction_add_one_job(Transaction *tr, JobType type, Unit *unit, bool *is_new) {
         Job *j, *f;
 
         assert(tr);
@@ -780,7 +771,6 @@ static Job* transaction_add_one_job(Transaction *tr, JobType type, Unit *unit, b
         j->generation = 0;
         j->marker = NULL;
         j->matters_to_anchor = false;
-        j->override = override;
         j->irreversible = tr->irreversible;
 
         LIST_PREPEND(transaction, f, j);
@@ -824,7 +814,7 @@ static void transaction_unlink_job(Transaction *tr, Job *j, bool delete_dependen
                 job_dependency_free(j->object_list);
 
                 if (other && delete_dependencies) {
-                        log_debug_unit(other->unit->id,
+                        log_unit_debug(other->unit,
                                        "Deleting job %s/%s as dependency of job %s/%s",
                                        other->unit->id, job_type_to_string(other->type),
                                        j->unit->id, job_type_to_string(j->type));
@@ -839,7 +829,6 @@ int transaction_add_job_and_dependencies(
                 Unit *unit,
                 Job *by,
                 bool matters,
-                bool override,
                 bool conflicts,
                 bool ignore_requirements,
                 bool ignore_order,
@@ -855,58 +844,35 @@ int transaction_add_job_and_dependencies(
         assert(type < _JOB_TYPE_MAX_IN_TRANSACTION);
         assert(unit);
 
+        /* Before adding jobs for this unit, let's ensure that its state has been loaded
+         * This matters when jobs are spawned as part of coldplugging itself (see e. g. path_coldplug()).
+         * This way, we "recursively" coldplug units, ensuring that we do not look at state of
+         * not-yet-coldplugged units. */
+        if (unit->manager->n_reloading > 0)
+                unit_coldplug(unit);
+
         /* log_debug("Pulling in %s/%s from %s/%s", */
         /*           unit->id, job_type_to_string(type), */
         /*           by ? by->unit->id : "NA", */
         /*           by ? job_type_to_string(by->type) : "NA"); */
 
-        if (unit->load_state != UNIT_LOADED &&
-            unit->load_state != UNIT_ERROR &&
-            unit->load_state != UNIT_NOT_FOUND &&
-            unit->load_state != UNIT_MASKED) {
-                sd_bus_error_setf(e, BUS_ERROR_LOAD_FAILED,
-                                  "Unit %s is not loaded properly.", unit->id);
-                return -EINVAL;
+        if (!IN_SET(unit->load_state, UNIT_LOADED, UNIT_ERROR, UNIT_NOT_FOUND, UNIT_MASKED))
+                return sd_bus_error_setf(e, BUS_ERROR_LOAD_FAILED, "Unit %s is not loaded properly.", unit->id);
+
+        if (type != JOB_STOP) {
+                r = bus_unit_check_load_state(unit, e);
+                if (r < 0)
+                        return r;
         }
 
-        if (type != JOB_STOP && unit->load_state == UNIT_ERROR) {
-                if (unit->load_error == -ENOENT)
-                        sd_bus_error_setf(e, BUS_ERROR_LOAD_FAILED,
-                                          "Unit %s failed to load: %s.",
-                                          unit->id,
-                                          strerror(-unit->load_error));
-                else
-                        sd_bus_error_setf(e, BUS_ERROR_LOAD_FAILED,
-                                          "Unit %s failed to load: %s. "
-                                          "See system logs and 'systemctl status %s' for details.",
-                                          unit->id,
-                                          strerror(-unit->load_error),
-                                          unit->id);
-                return -EINVAL;
-        }
+        if (!unit_job_is_applicable(unit, type))
+                return sd_bus_error_setf(e, BUS_ERROR_JOB_TYPE_NOT_APPLICABLE,
+                                         "Job type %s is not applicable for unit %s.",
+                                         job_type_to_string(type), unit->id);
 
-        if (type != JOB_STOP && unit->load_state == UNIT_NOT_FOUND) {
-                sd_bus_error_setf(e, BUS_ERROR_LOAD_FAILED,
-                                  "Unit %s failed to load: %s.",
-                                  unit->id, strerror(-unit->load_error));
-                return -EINVAL;
-        }
-
-        if (type != JOB_STOP && unit->load_state == UNIT_MASKED) {
-                sd_bus_error_setf(e, BUS_ERROR_UNIT_MASKED,
-                                  "Unit %s is masked.", unit->id);
-                return -EADDRNOTAVAIL;
-        }
-
-        if (!unit_job_is_applicable(unit, type)) {
-                sd_bus_error_setf(e, BUS_ERROR_JOB_TYPE_NOT_APPLICABLE,
-                                  "Job type %s is not applicable for unit %s.",
-                                  job_type_to_string(type), unit->id);
-                return -EBADR;
-        }
 
         /* First add the job. */
-        ret = transaction_add_one_job(tr, type, unit, override, &is_new);
+        ret = transaction_add_one_job(tr, type, unit, &is_new);
         if (!ret)
                 return -ENOMEM;
 
@@ -929,14 +895,10 @@ int transaction_add_job_and_dependencies(
                  * add all dependencies of everybody following. */
                 if (unit_following_set(ret->unit, &following) > 0) {
                         SET_FOREACH(dep, following, i) {
-                                r = transaction_add_job_and_dependencies(tr, type, dep, ret, false, override, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, type, dep, ret, false, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        log_warning_unit(dep->id,
-                                                         "Cannot add dependency job for unit %s, ignoring: %s",
-                                                         dep->id, bus_error_message(e, r));
-
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        log_unit_warning(dep, "Cannot add dependency job for, ignoring: %s", bus_error_message(e, r));
+                                        sd_bus_error_free(e);
                                 }
                         }
 
@@ -946,147 +908,118 @@ int transaction_add_job_and_dependencies(
                 /* Finally, recursively add in all dependencies. */
                 if (type == JOB_START || type == JOB_RESTART) {
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_REQUIRES], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, true, override, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        if (r != -EBADR)
+                                        if (r != -EBADR) /* job type not applicable */
                                                 goto fail;
 
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_BINDS_TO], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, true, override, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        if (r != -EBADR)
+                                        if (r != -EBADR) /* job type not applicable */
                                                 goto fail;
 
-                                        if (e)
-                                                sd_bus_error_free(e);
-                                }
-                        }
-
-                        SET_FOREACH(dep, ret->unit->dependencies[UNIT_REQUIRES_OVERRIDABLE], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, !override, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        log_full_unit(r == -EADDRNOTAVAIL ? LOG_DEBUG : LOG_WARNING, dep->id,
-                                                      "Cannot add dependency job for unit %s, ignoring: %s",
-                                                      dep->id, bus_error_message(e, r));
-
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_WANTS], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, false, false, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, false, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        log_full_unit(r == -EADDRNOTAVAIL ? LOG_DEBUG : LOG_WARNING, dep->id,
-                                                      "Cannot add dependency job for unit %s, ignoring: %s",
-                                                      dep->id, bus_error_message(e, r));
-
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        /* unit masked, job type not applicable and unit not found are not considered as errors. */
+                                        log_unit_full(dep,
+                                                      IN_SET(r, -ESHUTDOWN, -EBADR, -ENOENT) ? LOG_DEBUG : LOG_WARNING,
+                                                      r, "Cannot add dependency job, ignoring: %s",
+                                                      bus_error_message(e, r));
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_REQUISITE], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_VERIFY_ACTIVE, dep, ret, true, override, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_VERIFY_ACTIVE, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        if (r != -EBADR)
+                                        if (r != -EBADR) /* job type not applicable */
                                                 goto fail;
 
-                                        if (e)
-                                                sd_bus_error_free(e);
-                                }
-                        }
-
-                        SET_FOREACH(dep, ret->unit->dependencies[UNIT_REQUISITE_OVERRIDABLE], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_VERIFY_ACTIVE, dep, ret, !override, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        log_full_unit(r == -EADDRNOTAVAIL ? LOG_DEBUG : LOG_WARNING, dep->id,
-                                                      "Cannot add dependency job for unit %s, ignoring: %s",
-                                                      dep->id, bus_error_message(e, r));
-
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_CONFLICTS], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, true, override, true, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, true, true, false, ignore_order, e);
                                 if (r < 0) {
-                                        if (r != -EBADR)
+                                        if (r != -EBADR) /* job type not applicable */
                                                 goto fail;
 
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_CONFLICTED_BY], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, false, override, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, false, false, false, ignore_order, e);
                                 if (r < 0) {
-                                        log_warning_unit(dep->id,
-                                                         "Cannot add dependency job for unit %s, ignoring: %s",
-                                                         dep->id, bus_error_message(e, r));
-
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                        log_unit_warning(dep,
+                                                         "Cannot add dependency job, ignoring: %s",
+                                                         bus_error_message(e, r));
+                                        sd_bus_error_free(e);
                                 }
                         }
 
                 }
 
                 if (type == JOB_STOP || type == JOB_RESTART) {
+                        static const UnitDependency propagate_deps[] = {
+                                UNIT_REQUIRED_BY,
+                                UNIT_REQUISITE_OF,
+                                UNIT_BOUND_BY,
+                                UNIT_CONSISTS_OF,
+                        };
 
-                        SET_FOREACH(dep, ret->unit->dependencies[UNIT_REQUIRED_BY], i) {
-                                r = transaction_add_job_and_dependencies(tr, type, dep, ret, true, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        if (r != -EBADR)
-                                                goto fail;
+                        JobType ptype;
+                        unsigned j;
 
-                                        if (e)
+                        /* We propagate STOP as STOP, but RESTART only
+                         * as TRY_RESTART, in order not to start
+                         * dependencies that are not around. */
+                        ptype = type == JOB_RESTART ? JOB_TRY_RESTART : type;
+
+                        for (j = 0; j < ELEMENTSOF(propagate_deps); j++)
+                                SET_FOREACH(dep, ret->unit->dependencies[propagate_deps[j]], i) {
+                                        JobType nt;
+
+                                        nt = job_type_collapse(ptype, dep);
+                                        if (nt == JOB_NOP)
+                                                continue;
+
+                                        r = transaction_add_job_and_dependencies(tr, nt, dep, ret, true, false, false, ignore_order, e);
+                                        if (r < 0) {
+                                                if (r != -EBADR) /* job type not applicable */
+                                                        goto fail;
+
                                                 sd_bus_error_free(e);
+                                        }
                                 }
-                        }
-
-                        SET_FOREACH(dep, ret->unit->dependencies[UNIT_BOUND_BY], i) {
-                                r = transaction_add_job_and_dependencies(tr, type, dep, ret, true, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        if (r != -EBADR)
-                                                goto fail;
-
-                                        if (e)
-                                                sd_bus_error_free(e);
-                                }
-                        }
-
-                        SET_FOREACH(dep, ret->unit->dependencies[UNIT_CONSISTS_OF], i) {
-                                r = transaction_add_job_and_dependencies(tr, type, dep, ret, true, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        if (r != -EBADR)
-                                                goto fail;
-
-                                        if (e)
-                                                sd_bus_error_free(e);
-                                }
-                        }
-
                 }
 
                 if (type == JOB_RELOAD) {
 
                         SET_FOREACH(dep, ret->unit->dependencies[UNIT_PROPAGATES_RELOAD_TO], i) {
-                                r = transaction_add_job_and_dependencies(tr, JOB_RELOAD, dep, ret, false, override, false, false, ignore_order, e);
-                                if (r < 0) {
-                                        log_warning_unit(dep->id,
-                                                         "Cannot add dependency reload job for unit %s, ignoring: %s",
-                                                         dep->id, bus_error_message(e, r));
+                                JobType nt;
 
-                                        if (e)
-                                                sd_bus_error_free(e);
+                                nt = job_type_collapse(JOB_TRY_RELOAD, dep);
+                                if (nt == JOB_NOP)
+                                        continue;
+
+                                r = transaction_add_job_and_dependencies(tr, nt, dep, ret, false, false, false, ignore_order, e);
+                                if (r < 0) {
+                                        log_unit_warning(dep,
+                                                         "Cannot add dependency reload job, ignoring: %s",
+                                                         bus_error_message(e, r));
+                                        sd_bus_error_free(e);
                                 }
                         }
                 }
@@ -1126,11 +1059,9 @@ int transaction_add_isolate_jobs(Transaction *tr, Manager *m) {
                 if (hashmap_get(tr->jobs, u))
                         continue;
 
-                r = transaction_add_job_and_dependencies(tr, JOB_STOP, u, tr->anchor_job, true, false, false, false, false, NULL);
+                r = transaction_add_job_and_dependencies(tr, JOB_STOP, u, tr->anchor_job, true, false, false, false, NULL);
                 if (r < 0)
-                        log_warning_unit(u->id,
-                                         "Cannot add isolate job for unit %s, ignoring: %s",
-                                         u->id, strerror(-r));
+                        log_unit_warning_errno(u, r, "Cannot add isolate job, ignoring: %m");
         }
 
         return 0;
@@ -1143,7 +1074,7 @@ Transaction *transaction_new(bool irreversible) {
         if (!tr)
                 return NULL;
 
-        tr->jobs = hashmap_new(trivial_hash_func, trivial_compare_func);
+        tr->jobs = hashmap_new(NULL);
         if (!tr->jobs) {
                 free(tr);
                 return NULL;

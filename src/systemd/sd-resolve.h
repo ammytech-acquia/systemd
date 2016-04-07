@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #ifndef foosdresolvehfoo
 #define foosdresolvehfoo
 
@@ -22,12 +20,14 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <inttypes.h>
 #include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include "sd-event.h"
 
 #include "_sd-common.h"
-#include "sd-event.h"
 
 _SD_BEGIN_DECLARATIONS;
 
@@ -40,12 +40,11 @@ typedef struct sd_resolve_query sd_resolve_query;
 /* A callback on completion */
 typedef int (*sd_resolve_getaddrinfo_handler_t)(sd_resolve_query *q, int ret, const struct addrinfo *ai, void *userdata);
 typedef int (*sd_resolve_getnameinfo_handler_t)(sd_resolve_query *q, int ret, const char *host, const char *serv, void *userdata);
-typedef int (*sd_resolve_res_handler_t)(sd_resolve_query* q, int ret, unsigned char *answer, void *userdata);
 
 enum {
-        SD_RESOLVE_GET_HOST = 1ULL,
-        SD_RESOLVE_GET_SERVICE = 2ULL,
-        SD_RESOLVE_GET_BOTH = 3ULL
+        SD_RESOLVE_GET_HOST = UINT64_C(1),
+        SD_RESOLVE_GET_SERVICE = UINT64_C(2),
+        SD_RESOLVE_GET_BOTH = UINT64_C(3),
 };
 
 int sd_resolve_default(sd_resolve **ret);
@@ -99,18 +98,6 @@ int sd_resolve_getaddrinfo(sd_resolve *resolve, sd_resolve_query **q, const char
  * if you want to query the hostname (resp. the service name). */
 int sd_resolve_getnameinfo(sd_resolve *resolve, sd_resolve_query **q, const struct sockaddr *sa, socklen_t salen, int flags, uint64_t get, sd_resolve_getnameinfo_handler_t callback, void *userdata);
 
-/* Issue a resolver query on the specified session. The arguments are
- * compatible with those of libc's res_query(3). The function returns a new
- * query object. When the query is completed, you may retrieve the results using
- * sd_resolve_res_done(). */
-int sd_resolve_res_query(sd_resolve *resolve, sd_resolve_query **q, const char *dname, int clazz, int type, sd_resolve_res_handler_t callback, void *userdata);
-
-/* Issue a resolver query on the specified session. The arguments are
- * compatible with those of libc's res_search(3). The function returns a new
- * query object. When the query is completed, you may retrieve the results using
- * sd_resolve_res_done(). */
-int sd_resolve_res_search(sd_resolve *resolve, sd_resolve_query **q, const char *dname, int clazz, int type, sd_resolve_res_handler_t callback, void *userdata);
-
 sd_resolve_query *sd_resolve_query_ref(sd_resolve_query* q);
 sd_resolve_query *sd_resolve_query_unref(sd_resolve_query* q);
 
@@ -121,6 +108,9 @@ void *sd_resolve_query_get_userdata(sd_resolve_query *q);
 void *sd_resolve_query_set_userdata(sd_resolve_query *q, void *userdata);
 
 sd_resolve *sd_resolve_query_get_resolve(sd_resolve_query *q);
+
+_SD_DEFINE_POINTER_CLEANUP_FUNC(sd_resolve, sd_resolve_unref);
+_SD_DEFINE_POINTER_CLEANUP_FUNC(sd_resolve_query, sd_resolve_query_unref);
 
 _SD_END_DECLARATIONS;
 

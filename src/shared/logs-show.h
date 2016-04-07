@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -22,13 +20,16 @@
 ***/
 
 #include <stdbool.h>
-#include <unistd.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <sys/types.h>
 
-#include <systemd/sd-journal.h>
+#include "sd-journal.h"
 
-#include "util.h"
+#include "macro.h"
 #include "output-mode.h"
+#include "time-util.h"
+#include "util.h"
 
 int output_journal(
                 FILE *f,
@@ -58,7 +59,8 @@ int show_journal_by_unit(
                 unsigned how_many,
                 uid_t uid,
                 OutputFlags flags,
-                bool system,
+                int journal_open_flags,
+                bool system_unit,
                 bool *ellipsized);
 
 void json_escape(

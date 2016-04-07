@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -20,11 +18,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include "util.h"
-#include "log.h"
+#include "acpi-fpdt.h"
 #include "boot-timestamps.h"
 #include "efivars.h"
-#include "acpi-fpdt.h"
+#include "log.h"
+#include "util.h"
 
 static int test_acpi_fpdt(void) {
         usec_t loader_start;
@@ -37,7 +35,7 @@ static int test_acpi_fpdt(void) {
         r = acpi_get_boot_usec(&loader_start, &loader_exit);
         if (r < 0) {
                 if (r != -ENOENT)
-                        log_error("Failed to read ACPI FPDT: %s", strerror(-r));
+                        log_error_errno(r, "Failed to read ACPI FPDT: %m");
                 return r;
         }
 
@@ -60,7 +58,7 @@ static int test_efi_loader(void) {
         r = efi_loader_get_boot_usec(&loader_start, &loader_exit);
         if (r < 0) {
                 if (r != -ENOENT)
-                        log_error("Failed to read EFI loader data: %s", strerror(-r));
+                        log_error_errno(r, "Failed to read EFI loader data: %m");
                 return r;
         }
 
@@ -84,7 +82,7 @@ int main(int argc, char* argv[]) {
 
         r = boot_timestamps(NULL, &fw, &l);
         if (r < 0) {
-                log_error("Failed to read variables: %s", strerror(-r));
+                log_error_errno(r, "Failed to read variables: %m");
                 return 1;
         }
 

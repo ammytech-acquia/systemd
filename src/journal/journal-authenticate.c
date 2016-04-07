@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -22,10 +20,12 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include "fd-util.h"
+#include "fsprg.h"
+#include "hexdecoct.h"
+#include "journal-authenticate.h"
 #include "journal-def.h"
 #include "journal-file.h"
-#include "journal-authenticate.h"
-#include "fsprg.h"
 
 static uint64_t journal_file_tag_seqnum(JournalFile *f) {
         uint64_t r;
@@ -106,7 +106,7 @@ static int journal_file_get_epoch(JournalFile *f, uint64_t realtime, uint64_t *e
 
         if (f->fss_start_usec == 0 ||
             f->fss_interval_usec == 0)
-                return -ENOTSUP;
+                return -EOPNOTSUPP;
 
         if (realtime < f->fss_start_usec)
                 return -ESTALE;
@@ -229,7 +229,7 @@ int journal_file_maybe_append_tag(JournalFile *f, uint64_t realtime) {
         return 0;
 }
 
-int journal_file_hmac_put_object(JournalFile *f, int type, Object *o, uint64_t p) {
+int journal_file_hmac_put_object(JournalFile *f, ObjectType type, Object *o, uint64_t p) {
         int r;
 
         assert(f);
@@ -246,7 +246,7 @@ int journal_file_hmac_put_object(JournalFile *f, int type, Object *o, uint64_t p
                 if (r < 0)
                         return r;
         } else {
-                if (type >= 0 && o->object.type != type)
+                if (type > OBJECT_UNUSED && o->object.type != type)
                         return -EBADMSG;
         }
 
@@ -339,7 +339,7 @@ int journal_file_fss_load(JournalFile *f) {
         fd = open(p, O_RDWR|O_CLOEXEC|O_NOCTTY, 0600);
         if (fd < 0) {
                 if (errno != ENOENT)
-                        log_error("Failed to open %s: %m", p);
+                        log_error_errno(errno, "Failed to open %s: %m", p);
 
                 r = -errno;
                 goto finish;
@@ -446,7 +446,7 @@ int journal_file_hmac_setup(JournalFile *f) {
 
         e = gcry_md_open(&f->hmac, GCRY_MD_SHA256, GCRY_MD_FLAG_HMAC);
         if (e != 0)
-                return -ENOTSUP;
+                return -EOPNOTSUPP;
 
         return 0;
 }

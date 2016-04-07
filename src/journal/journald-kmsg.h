@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -26,6 +24,6 @@
 int server_open_dev_kmsg(Server *s);
 int server_flush_dev_kmsg(Server *s);
 
-void server_forward_kmsg(Server *s, int priority, const char *identifier, const char *message, struct ucred *ucred);
+void server_forward_kmsg(Server *s, int priority, const char *identifier, const char *message, const struct ucred *ucred);
 
 int server_open_kernel_seqnum(Server *s);

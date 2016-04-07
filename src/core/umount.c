@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,24 +19,30 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/dm-ioctl.h>
+#include <linux/loop.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/swap.h>
-#include <unistd.h>
-#include <linux/loop.h>
-#include <linux/dm-ioctl.h>
 
+#include "libudev.h"
+
+#include "alloc-util.h"
+#include "escape.h"
+#include "fd-util.h"
+#include "fstab-util.h"
 #include "list.h"
 #include "mount-setup.h"
-#include "umount.h"
 #include "path-util.h"
+#include "string-util.h"
+#include "udev-util.h"
+#include "umount.h"
 #include "util.h"
 #include "virt.h"
-#include "libudev.h"
-#include "udev-util.h"
 
 typedef struct MountPoint {
         char *path;
+        char *options;
         dev_t devnum;
         LIST_FIELDS(struct MountPoint, mount_point);
 } MountPoint;
@@ -63,6 +67,7 @@ static void mount_points_list_free(MountPoint **head) {
 static int mount_points_list_get(MountPoint **head) {
         _cleanup_fclose_ FILE *proc_self_mountinfo = NULL;
         unsigned int i;
+        int r;
 
         assert(head);
 
@@ -71,7 +76,7 @@ static int mount_points_list_get(MountPoint **head) {
                 return -errno;
 
         for (i = 1;; i++) {
-                _cleanup_free_ char *path = NULL;
+                _cleanup_free_ char *path = NULL, *options = NULL;
                 char *p = NULL;
                 MountPoint *m;
                 int k;
@@ -82,15 +87,15 @@ static int mount_points_list_get(MountPoint **head) {
                            "%*s "       /* (3) major:minor */
                            "%*s "       /* (4) root */
                            "%ms "       /* (5) mount point */
-                           "%*s"        /* (6) mount options */
+                           "%*s"        /* (6) mount flags */
                            "%*[^-]"     /* (7) optional fields */
                            "- "         /* (8) separator */
                            "%*s "       /* (9) file system type */
                            "%*s"        /* (10) mount source */
-                           "%*s"        /* (11) mount options 2 */
+                           "%ms"        /* (11) mount options */
                            "%*[^\n]",   /* some rubbish at the end */
-                           &path);
-                if (k != 1) {
+                           &path, &options);
+                if (k != 2) {
                         if (k == EOF)
                                 break;
 
@@ -98,16 +103,22 @@ static int mount_points_list_get(MountPoint **head) {
                         continue;
                 }
 
-                p = cunescape(path);
-                if (!p)
-                        return -ENOMEM;
+                r = cunescape(path, UNESCAPE_RELAX, &p);
+                if (r < 0)
+                        return r;
 
                 /* Ignore mount points we can't unmount because they
                  * are API or because we are keeping them open (like
-                 * /dev/console) */
+                 * /dev/console). Also, ignore all mounts below API
+                 * file systems, since they are likely virtual too,
+                 * and hence not worth spending time on. Also, in
+                 * unprivileged containers we might lack the rights to
+                 * unmount these things, hence don't bother. */
                 if (mount_point_is_api(p) ||
                     mount_point_ignore(p) ||
-                    path_equal(p, "/dev/console")) {
+                    path_startswith(p, "/dev") ||
+                    path_startswith(p, "/sys") ||
+                    path_startswith(p, "/proc")) {
                         free(p);
                         continue;
                 }
@@ -119,6 +130,9 @@ static int mount_points_list_get(MountPoint **head) {
                 }
 
                 m->path = p;
+                m->options = options;
+                options = NULL;
+
                 LIST_PREPEND(mount_point, *head, m);
         }
 
@@ -128,10 +142,12 @@ static int mount_points_list_get(MountPoint **head) {
 static int swap_list_get(MountPoint **head) {
         _cleanup_fclose_ FILE *proc_swaps = NULL;
         unsigned int i;
+        int r;
 
         assert(head);
 
-        if (!(proc_swaps = fopen("/proc/swaps", "re")))
+        proc_swaps = fopen("/proc/swaps", "re");
+        if (!proc_swaps)
                 return (errno == ENOENT) ? 0 : -errno;
 
         (void) fscanf(proc_swaps, "%*s %*s %*s %*s %*s\n");
@@ -141,19 +157,19 @@ static int swap_list_get(MountPoint **head) {
                 char *dev = NULL, *d;
                 int k;
 
-                if ((k = fscanf(proc_swaps,
-                                "%ms " /* device/file */
-                                "%*s " /* type of swap */
-                                "%*s " /* swap size */
-                                "%*s " /* used */
-                                "%*s\n", /* priority */
-                                &dev)) != 1) {
+                k = fscanf(proc_swaps,
+                           "%ms " /* device/file */
+                           "%*s " /* type of swap */
+                           "%*s " /* swap size */
+                           "%*s " /* used */
+                           "%*s\n", /* priority */
+                           &dev);
 
+                if (k != 1) {
                         if (k == EOF)
                                 break;
 
                         log_warning("Failed to parse /proc/swaps:%u.", i);
-
                         free(dev);
                         continue;
                 }
@@ -163,14 +179,13 @@ static int swap_list_get(MountPoint **head) {
                         continue;
                 }
 
-                d = cunescape(dev);
+                r = cunescape(dev, UNESCAPE_RELAX, &d);
                 free(dev);
+                if (r < 0)
+                        return r;
 
-                if (!d) {
-                        return -ENOMEM;
-                }
-
-                if (!(swap = new0(MountPoint, 1))) {
+                swap = new0(MountPoint, 1);
+                if (!swap) {
                         free(d);
                         return -ENOMEM;
                 }
@@ -361,7 +376,15 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
                    read-only mount anything as that brings no real
                    benefits, but might confuse the host, as we remount
                    the superblock here, not the bind mound. */
-                if (detect_container(NULL) <= 0)  {
+                if (detect_container() <= 0)  {
+                        _cleanup_free_ char *options = NULL;
+                        /* MS_REMOUNT requires that the data parameter
+                         * should be the same from the original mount
+                         * except for the desired changes. Since we want
+                         * to remount read-only, we should filter out
+                         * rw (and ro too, because it confuses the kernel) */
+                        (void) fstab_filter_options(m->options, "rw\0ro\0", NULL, NULL, &options);
+
                         /* We always try to remount directories
                          * read-only first, before we go on and umount
                          * them.
@@ -378,7 +401,8 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
                          * alias read-only we hence should be
                          * relatively safe regarding keeping the fs we
                          * can otherwise not see dirty. */
-                        mount(NULL, m->path, NULL, MS_REMOUNT|MS_RDONLY, NULL);
+                        log_info("Remounting '%s' read-only with options '%s'.", m->path, options);
+                        (void) mount(NULL, m->path, NULL, MS_REMOUNT|MS_RDONLY, options);
                 }
 
                 /* Skip / and /usr since we cannot unmount that
@@ -401,7 +425,7 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool log_e
 
                         mount_point_free(head, m);
                 } else if (log_error) {
-                        log_warning("Could not unmount %s: %m", m->path);
+                        log_warning_errno(errno, "Could not unmount %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -423,7 +447,7 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning("Could not deactivate swap %s: %m", m->path);
+                        log_warning_errno(errno, "Could not deactivate swap %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -460,7 +484,7 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning("Could not detach loopback %s: %m", m->path);
+                        log_warning_errno(errno, "Could not detach loopback %s: %m", m->path);
                         n_failed++;
                 }
         }
@@ -495,7 +519,7 @@ static int dm_points_list_detach(MountPoint **head, bool *changed) {
 
                         mount_point_free(head, m);
                 } else {
-                        log_warning("Could not detach DM %s: %m", m->path);
+                        log_warning_errno(errno, "Could not detach DM %s: %m", m->path);
                         n_failed++;
                 }
         }

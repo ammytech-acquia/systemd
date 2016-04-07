@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,15 +19,15 @@
 
 #include <stdio.h>
 
-#include "log.h"
 #include "sd-journal.h"
-#include "macro.h"
-#include "util.h"
+
 #include "journal-internal.h"
+#include "log.h"
+#include "macro.h"
 
 int main(int argc, char *argv[]) {
         unsigned n = 0;
-        _cleanup_journal_close_ sd_journal*j = NULL;
+        _cleanup_(sd_journal_closep) sd_journal*j = NULL;
 
         log_set_max_level(LOG_DEBUG);
 

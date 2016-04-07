@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -23,4 +21,4 @@
 
 #include "journald-server.h"
 
-void server_forward_console(Server *s, int priority, const char *identifier, const char *message, struct ucred *ucred);
+void server_forward_console(Server *s, int priority, const char *identifier, const char *message, const struct ucred *ucred);

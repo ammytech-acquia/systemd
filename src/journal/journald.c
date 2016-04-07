@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -19,19 +17,17 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <errno.h>
 #include <unistd.h>
 
-#include <systemd/sd-journal.h>
-#include <systemd/sd-messages.h>
-#include <systemd/sd-daemon.h>
+#include "sd-daemon.h"
+#include "sd-messages.h"
 
+#include "formats-util.h"
 #include "journal-authenticate.h"
-#include "journald-server.h"
 #include "journald-kmsg.h"
+#include "journald-server.h"
 #include "journald-syslog.h"
+#include "sigbus.h"
 
 int main(int argc, char *argv[]) {
         Server server;
@@ -49,23 +45,23 @@ int main(int argc, char *argv[]) {
 
         umask(0022);
 
+        sigbus_install();
+
         r = server_init(&server);
         if (r < 0)
                 goto finish;
 
-        server_vacuum(&server);
+        server_vacuum(&server, false, false);
         server_flush_to_var(&server);
         server_flush_dev_kmsg(&server);
 
         log_debug("systemd-journald running as pid "PID_FMT, getpid());
-        server_driver_message(&server, SD_MESSAGE_JOURNAL_START, "Journal started");
-
-        sd_notify(false,
-                  "READY=1\n"
-                  "STATUS=Processing requests...");
+        server_driver_message(&server, SD_MESSAGE_JOURNAL_START,
+                              LOG_MESSAGE("Journal started"),
+                              NULL);
 
         for (;;) {
-                usec_t t = (usec_t) -1, n;
+                usec_t t = USEC_INFINITY, n;
 
                 r = sd_event_get_state(server.event);
                 if (r < 0)
@@ -81,7 +77,7 @@ int main(int argc, char *argv[]) {
                         if (server.oldest_file_usec + server.max_retention_usec < n) {
                                 log_info("Retention time reached.");
                                 server_rotate(&server);
-                                server_vacuum(&server);
+                                server_vacuum(&server, false, false);
                                 continue;
                         }
 
@@ -104,7 +100,7 @@ int main(int argc, char *argv[]) {
 
                 r = sd_event_run(server.event, t);
                 if (r < 0) {
-                        log_error("Failed to run event loop: %s", strerror(-r));
+                        log_error_errno(r, "Failed to run event loop: %m");
                         goto finish;
                 }
 
@@ -113,11 +109,11 @@ int main(int argc, char *argv[]) {
         }
 
         log_debug("systemd-journald stopped as pid "PID_FMT, getpid());
-        server_driver_message(&server, SD_MESSAGE_JOURNAL_STOP, "Journal stopped");
+        server_driver_message(&server, SD_MESSAGE_JOURNAL_STOP,
+                              LOG_MESSAGE("Journal stopped"),
+                              NULL);
 
 finish:
-        sd_notify(false, "STATUS=Shutting down...");
-
         server_done(&server);
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

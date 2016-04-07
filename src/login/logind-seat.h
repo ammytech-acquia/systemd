@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -24,9 +22,6 @@
 typedef struct Seat Seat;
 
 #include "list.h"
-#include "util.h"
-#include "logind.h"
-#include "logind-device.h"
 #include "logind-session.h"
 
 struct Seat {
@@ -96,3 +91,5 @@ char *seat_bus_path(Seat *s);
 
 int seat_send_signal(Seat *s, bool new_seat);
 int seat_send_changed(Seat *s, const char *properties, ...) _sentinel_;
+
+int bus_seat_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error);

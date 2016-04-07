@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 #pragma once
 
 /***
@@ -23,19 +21,7 @@
 
 typedef struct Scope Scope;
 
-#include "unit.h"
 #include "kill.h"
-
-typedef enum ScopeState {
-        SCOPE_DEAD,
-        SCOPE_RUNNING,
-        SCOPE_ABANDONED,
-        SCOPE_STOP_SIGTERM,
-        SCOPE_STOP_SIGKILL,
-        SCOPE_FAILED,
-        _SCOPE_STATE_MAX,
-        _SCOPE_STATE_INVALID = -1
-} ScopeState;
 
 typedef enum ScopeResult {
         SCOPE_SUCCESS,
@@ -64,9 +50,6 @@ struct Scope {
 extern const UnitVTable scope_vtable;
 
 int scope_abandon(Scope *s);
-
-const char* scope_state_to_string(ScopeState i) _const_;
-ScopeState scope_state_from_string(const char *s) _pure_;
 
 const char* scope_result_to_string(ScopeResult i) _const_;
 ScopeResult scope_result_from_string(const char *s) _pure_;

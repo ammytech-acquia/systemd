@@ -1,5 +1,3 @@
-/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
-
 /***
   This file is part of systemd.
 
@@ -21,8 +19,9 @@
 
 #include <sched.h>
 
-#include "manager.h"
 #include "macro.h"
+#include "manager.h"
+#include "test-helper.h"
 
 int main(int argc, char *argv[]) {
         Manager *m = NULL;
@@ -31,16 +30,15 @@ int main(int argc, char *argv[]) {
         FILE *serial = NULL;
         FDSet *fdset = NULL;
         int r;
-        const char *dir = TEST_DIR;
 
         /* prepare the test */
-        assert_se(set_unit_path(dir) >= 0);
-        r = manager_new(SYSTEMD_USER, &m);
-        if (r == -EPERM || r == -EACCES || r == -EADDRINUSE || r == -EHOSTDOWN) {
-                printf("Skipping test: manager_new: %s", strerror(-r));
+        assert_se(set_unit_path(TEST_DIR) >= 0);
+        r = manager_new(MANAGER_USER, true, &m);
+        if (MANAGER_SKIP_TEST(r)) {
+                printf("Skipping test: manager_new: %s\n", strerror(-r));
                 return EXIT_TEST_SKIP;
         }
-        assert(r >= 0);
+        assert_se(r >= 0);
         assert_se(manager_startup(m, serial, fdset) >= 0);
 
         /* load idle ok */
