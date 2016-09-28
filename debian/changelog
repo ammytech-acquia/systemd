@@ -1,3 +1,85 @@
+systemd (229-4ubuntu10) xenial-security; urgency=medium
+
+  * SECURITY UPDATE: zero-length notify message triggers abort/denial of
+    service
+    - systemd-dont_assert_on_zero_length_message-lp1628687.patch: change
+      assert to simple return + log (LP: #1628687)
+    - Thanks to Jorge Niedbalski <jorge.niedbalski@canonical.com> for
+      the patch.
+
+ -- Steve Beattie <sbeattie@ubuntu.com>  Wed, 28 Sep 2016 14:21:42 -0700
+
+systemd (229-4ubuntu8) xenial-proposed; urgency=medium
+
+  * Queue loading transient units after setting their properties. Fixes
+    starting VMs with libvirt. (LP: #1529079)
+  * Connect pid1's stdin/out/err fds to /dev/null also for containers. This
+    fixes generators which expect a valid stdout/err fd in some container
+    technologies. (LP: #1608953)
+  * 73-usb-net-by-mac.rules: Do not run readlink for *every* uevent, and
+    merely check if /etc/udev/rules.d/80-net-setup-link.rules exists.
+    A common way to disable an udev rule is to just "touch" it in
+    /etc/udev/rule.d/ (i. e. empty file), and if the rule is customized we
+    cannot really predict anyway if the user wants MAC-based USB net names or
+    not. (LP: #1615021)
+  * systemd-networkd-resolvconf-update.service: Also pick up DNS servers from
+    individual link leases, as they sometimes don't appear in the global
+    ifstate. (LP: #1620559)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 06 Sep 2016 14:16:29 +0200
+
+systemd (229-4ubuntu7) xenial-proposed; urgency=medium
+
+  * Add pre-dependency to dpkg >= 1.17.14 on udev, to ensure that
+    dpkg-maintscript-helper symlink_to_dir is available. (LP: #1585406)
+  * Add activation rate limiting for socket units. (LP: #1568094)
+  * Split out udev rule to name USB network interfaces by MAC address into
+    73-usb-net-by-mac.rules, so that it's easier to disable. (Closes: #824025)
+  * 73-usb-net-by-mac.rules: Disable when net.ifnames=0 is specified on the
+    kernel command line or if /etc/udev/rules.d/80-net-setup-link.rules is a
+    symlink to /dev/null, to be consistent with disabling the *.link files and
+    the documented way to disable ifnames. (Closes: #824491, LP: #1593379)
+  * coredump: Fix "Coredump file descriptor missing". (LP: #1602256)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 12 Jul 2016 17:37:25 +0200
+
+systemd (229-4ubuntu6) xenial-proposed; urgency=medium
+
+  * Add a DHCP exit hook for pushing received NTP servers into timesyncd.
+    (LP: #1578663)
+  * Revert "enable TasksMax= for all services by default, and set it to 512".
+    Introducing a default limit on number of threads broke a lot of software
+    which regularly needs more, such as MySQL and RabbitMQ, or services that
+    spawn off an indefinite number of subtasks that are not in a scope, like
+    LXC or cron. 512 is way too much for most "simple" services, and it's way
+    too little for the ones mentioned above. Effective (and much stricter)
+    limits should instead be put into units individually.
+    (Closes: #823530, LP: #1578080)
+  * debian/gbp.conf: Switch to ubuntu-xenial branch.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 12 May 2016 10:39:30 +0200
+
+systemd (229-4ubuntu5) xenial-proposed; urgency=medium
+
+  * debian/udev.postinst: Don't fail if /var/log/udev is a directory.
+    (LP: #1574004)
+  * Set MAC based name for USB network interfaces only for universally
+    administered (i. e. stable) MACs, not for locally administered (i. e.
+    randomly generated) ones. Drop /lib/systemd/network/90-mac-for-usb.link
+    (as link files don't currently support globs for MACAddress=) and replace
+    with an udev rule in /lib/udev/rules.d/73-special-net-names.rules.
+    (Closes: #812575, LP: #1574483)
+  * debian/extra/init-functions.d/40-systemd: Invoke status command with
+    --no-pager, to avoid blocking scripts that call an init.d script with
+    "status" with an unexpected pager process. (Closes: #765175, LP: #1576409)
+  * Add debian/extra/rules/70-debian-uaccess.rules: Make FIDO U2F dongles
+    accessible to the user session. This avoids having to install libu2f-host0
+    (which isn't discoverable at all) to make those devices work.
+    (LP: #1387908)
+  * On shutdown, unmount /tmp before disabling swap. (Closes: #788303)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Mon, 02 May 2016 15:04:42 -0500
+
 systemd (229-4ubuntu4) xenial; urgency=medium
 
   * 73-special-net-names.rules: Further refine ibmveth naming.
@@ -14,7 +96,6 @@ systemd (229-4ubuntu3) xenial; urgency=medium
  -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 12 Apr 2016 10:43:34 +0200
 
 systemd (229-4ubuntu2) xenial; urgency=medium
-
   * debian/tests/unit-config: Call "daemon-reload" to clean up generated units
     in between tests.
   * debian/tests/unit-config: Check that enable/disable commands are

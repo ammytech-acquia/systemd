@@ -30,6 +30,12 @@ man-update-links-to-kernel.org-cgroup-documentation.patch
 man-fix-cgroup-attributes-for-device-throttling.patch
 rules-set-SYSTEMD_READY-0-on-DM_UDEV_DISABLE_OTHER_RULES_.patch
 Install-correctly-report-symlink-creations.patch
+tmp.mount.hm4-After-swap.target-3087.patch
+core-introduce-activation-rate-limiting-for-socket-units.patch
+core-move-start-ratelimiting-check-after-condition-checks.patch
+coredump-use-next_datagram_size_fd-instead-of-ioctl-FIONR.patch
+core-queue-loading-transient-units-after-setting-their-pr.patch
+Connect-pid1-s-stdin-out-err-fds-to-dev-null-also-for-con.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
@@ -62,9 +68,11 @@ Skip-filesystem-check-if-already-done-by-the-initram.patch
 Revert-core-one-step-back-again-for-nspawn-we-actual.patch
 Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 Revert-Revert-networkd-ndisc-revert-to-letting-the-k.patch
+Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 
 ## Ubuntu patches:
 Support-system-image-read-only-etc.patch
 systemctl-Don-t-forward-telinit-u-to-upstart.patch
 Provide-shutdown-fallback-for-upstart.patch
 udev-Don-t-kill-peer-processes-if-we-don-t-run-in-a-cgrou.patch
+systemd-dont_assert_on_zero_length_message-lp1628687.patch
