@@ -1,5 +1,7 @@
 systemd (229-4ubuntu21.15-acquia1) xenial; urgency=medium
 
+  * ensure empty cgroup messages are not lost
+    (https://github.com/systemd/systemd/issues/1961)
   * don't dispatch load queue when setting Slice= for transient units
     (https://github.com/systemd/systemd/pull/3094)
   * run: make --slice= work in conjunction with --scope
