@@ -72,6 +72,9 @@ Fix-journald-rate-limit-with-low-disk-space.patch
 0001-sysctl-run-sysctl-service-if-proc-sys-net-is-writabl.patch
 0001-sysctl-do-not-fail-systemd-sysctl.service-if-proc-sy.patch
 0001-Add-a-RequiredForOnline-Link-attribute-for-.network-.patch
+acquia-0001-dont-dispatch-load-queue-when-setting-slice-for-transient-unit.patch
+acquia-0002-run-make-slice-work-in-conjunction-with-scope.patch
+acquia-0003-nspawn-decrease-mkdir-error-logging.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
