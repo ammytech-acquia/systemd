@@ -1,3 +1,14 @@
+systemd (229-4ubuntu21.15-acquia1) xenial; urgency=medium
+
+  * don't dispatch load queue when setting Slice= for transient units
+    (https://github.com/systemd/systemd/pull/3094)
+  * run: make --slice= work in conjunction with --scope
+    (https://github.com/systemd/systemd/pull/3094)
+  * nspawn: decrease mkdir error logging in /sys to debug priority
+    (https://github.com/systemd/systemd/pull/3748)
+
+ -- Glenn Pratt <glenn.pratt@acquia.com>  Fri, 14 Jul 2017 11:09:48 -0800
+
 systemd (229-4ubuntu21.15) xenial-security; urgency=medium
 
   * SECURITY UPDATE: memory corruption in journald via attacker controlled alloca

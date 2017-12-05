@@ -1,0 +1,26 @@
+From 201b13c81eb05b28c21bc462aa4bba54040509b8 Mon Sep 17 00:00:00 2001
+From: tblume <Thomas.Blume@suse.com>
+Date: Mon, 18 Jul 2016 12:23:08 +0200
+Subject: [PATCH] nspawn: decrease mkdir error logging in /sys to debug
+ priority (#3748)
+
+Such mkdir errors happen for example when trying to mkdir /sys/fs/selinux.
+
+/sys is documented to be readonly in the container, so mkdir errors below /sys
+can be expected.
+They shouldn't be logged as warnings since they lead users to think that
+there is something wrong.
+
+diff --git a/src/nspawn/nspawn-mount.c b/src/nspawn/nspawn-mount.c
+index 8e2d2d5..9f4903c 100644
+--- a/src/nspawn/nspawn-mount.c
++++ b/src/nspawn/nspawn-mount.c
+@@ -342,7 +342,7 @@ int mount_all(const char *dest,
+                         if (mount_table[k].fatal)
+                                 return log_error_errno(r, "Failed to create directory %s: %m", where);
+ 
+-                        log_warning_errno(r, "Failed to create directory %s: %m", where);
++                        log_debug_errno(r, "Failed to create directory %s: %m", where);
+                         continue;
+                 }
+ 
