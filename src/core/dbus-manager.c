@@ -139,7 +139,7 @@ static int property_get_tainted(
         if (access("/proc/cgroups", F_OK) < 0)
                 e = stpcpy(e, "cgroups-missing:");
 
-        if (clock_is_localtime() > 0)
+        if (clock_is_localtime(NULL) > 0)
                 e = stpcpy(e, "local-hwclock:");
 
         /* remove the last ':' */
@@ -683,6 +683,7 @@ static int transient_unit_from_message(
                 return r;
 
         /* Now load the missing bits of the unit we just created */
+        unit_add_to_load_queue(u);
         manager_dispatch_load_queue(m);
 
         *unit = u;

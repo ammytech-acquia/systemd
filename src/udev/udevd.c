@@ -1254,7 +1254,7 @@ static int on_post(sd_event_source *s, void *userdata) {
                                 r = sd_event_exit(manager->event, 0);
                                 if (r < 0)
                                         return r;
-                        } else if (manager->cgroup)
+                        } else if (manager->cgroup && !streq(manager->cgroup, "/"))
                                 /* cleanup possible left-over processes in our cgroup */
                                 cg_kill(SYSTEMD_CGROUP_CONTROLLER, manager->cgroup, SIGKILL, false, true, NULL);
                 }
@@ -1715,7 +1715,7 @@ int main(int argc, char *argv[]) {
                    by PID1. otherwise we are not guaranteed to have a dedicated cgroup */
                 r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
                 if (r < 0) {
-                        if (r == -ENOENT || r == -ENOEXEC)
+                        if (r == -ENOENT || r == -ENOMEDIUM)
                                 log_debug_errno(r, "did not find dedicated cgroup: %m");
                         else
                                 log_warning_errno(r, "failed to get cgroup: %m");

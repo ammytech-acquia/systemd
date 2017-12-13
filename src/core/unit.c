@@ -1472,11 +1472,6 @@ int unit_start(Unit *u) {
         if (UNIT_IS_ACTIVE_OR_RELOADING(state))
                 return -EALREADY;
 
-        /* Make sure we don't enter a busy loop of some kind. */
-        r = unit_start_limit_test(u);
-        if (r < 0)
-                return r;
-
         /* Units that aren't loaded cannot be started */
         if (u->load_state != UNIT_LOADED)
                 return -EINVAL;
@@ -1517,6 +1512,11 @@ int unit_start(Unit *u) {
         /* If it is stopped, but we cannot start it, then fail */
         if (!UNIT_VTABLE(u)->start)
                 return -EBADR;
+
+        /* Make sure we don't enter a busy loop of some kind. */
+        r = unit_start_limit_test(u);
+        if (r < 0)
+                return r;
 
         /* We don't suppress calls to ->start() here when we are
          * already starting, to allow this request to be used as a
@@ -3460,7 +3460,6 @@ int unit_make_transient(Unit *u) {
 
         unit_add_to_dbus_queue(u);
         unit_add_to_gc_queue(u);
-        unit_add_to_load_queue(u);
 
         return 0;
 }
@@ -3544,24 +3543,7 @@ int unit_kill_context(
                                 log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", u->cgroup_path);
 
                 } else if (r > 0) {
-
-                        /* FIXME: For now, on the legacy hierarchy, we
-                         * will not wait for the cgroup members to die
-                         * if we are running in a container or if this
-                         * is a delegation unit, simply because cgroup
-                         * notification is unreliable in these
-                         * cases. It doesn't work at all in
-                         * containers, and outside of containers it
-                         * can be confused easily by left-over
-                         * directories in the cgroup -- which however
-                         * should not exist in non-delegated units. On
-                         * the unified hierarchy that's different,
-                         * there we get proper events. Hence rely on
-                         * them.*/
-
-                        if  (cg_unified() > 0 ||
-                             (detect_container() == 0 && !unit_cgroup_delegate(u)))
-                                wait_for_exit = true;
+                        wait_for_exit = true;
 
                         if (c->send_sighup && k != KILL_KILL) {
                                 set_free(pid_set);

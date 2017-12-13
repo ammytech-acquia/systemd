@@ -123,8 +123,8 @@ static FILE* arg_serialization = NULL;
 static bool arg_default_cpu_accounting = false;
 static bool arg_default_blockio_accounting = false;
 static bool arg_default_memory_accounting = false;
-static bool arg_default_tasks_accounting = true;
-static uint64_t arg_default_tasks_max = UINT64_C(512);
+static bool arg_default_tasks_accounting = false;
+static uint64_t arg_default_tasks_max = (uint64_t) -1;
 static sd_id128_t arg_machine_id = {};
 
 static void pager_open_if_enabled(void) {
@@ -296,6 +296,7 @@ static int parse_crash_chvt(const char *value) {
 }
 
 static int set_machine_id(const char *m) {
+        assert(m);
 
         if (sd_id128_from_string(m, &arg_machine_id) < 0)
                 return -EINVAL;
@@ -1230,10 +1231,15 @@ static int status_welcome(void) {
         if (r < 0 && r != -ENOENT)
                 log_warning_errno(r, "Failed to read os-release file: %m");
 
-        return status_printf(NULL, false, false,
-                             "\nWelcome to \x1B[%sm%s\x1B[0m!\n",
-                             isempty(ansi_color) ? "1" : ansi_color,
-                             isempty(pretty_name) ? "Linux" : pretty_name);
+        if (log_get_show_color())
+                return status_printf(NULL, false, false,
+                                     "\nWelcome to \x1B[%sm%s\x1B[0m!\n",
+                                     isempty(ansi_color) ? "1" : ansi_color,
+                                     isempty(pretty_name) ? "Linux" : pretty_name);
+        else
+                return status_printf(NULL, false, false,
+                                     "\nWelcome to %s!\n",
+                                     isempty(pretty_name) ? "Linux" : pretty_name);
 }
 
 static int write_container_id(void) {
@@ -1348,14 +1354,15 @@ int main(int argc, char *argv[]) {
         log_set_upgrade_syslog_to_journal(true);
 
         /* Disable the umask logic */
-        if (getpid() == 1)
+        if (getpid() == 1) {
                 umask(0);
+                make_null_stdio();
+        }
 
         if (getpid() == 1 && detect_container() <= 0) {
 
                 /* Running outside of a container as PID 1 */
                 arg_running_as = MANAGER_SYSTEM;
-                make_null_stdio();
                 log_set_target(LOG_TARGET_KMSG);
                 log_open();
 
@@ -1388,7 +1395,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (!skip_setup) {
-                        if (clock_is_localtime() > 0) {
+                        if (clock_is_localtime(NULL) > 0) {
                                 int min;
 
                                 /*
@@ -1460,17 +1467,6 @@ int main(int argc, char *argv[]) {
                 /* clear the kernel timestamp,
                  * because we are not PID 1 */
                 kernel_timestamp = DUAL_TIMESTAMP_NULL;
-        }
-
-        if (getpid() == 1) {
-                /* Don't limit the core dump size, so that coredump handlers such as systemd-coredump (which honour the limit)
-                 * will process core dumps for system services by default. */
-                (void) setrlimit(RLIMIT_CORE, &RLIMIT_MAKE_CONST(RLIM_INFINITY));
-
-                /* But at the same time, turn off the core_pattern logic by default, so that no coredumps are stored
-                 * until the systemd-coredump tool is enabled via sysctl. */
-                if (!skip_setup)
-                        (void) write_string_file("/proc/sys/kernel/core_pattern", "|/bin/false", 0);
         }
 
         /* Initialize default unit */

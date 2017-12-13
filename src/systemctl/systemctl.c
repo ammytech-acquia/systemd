@@ -29,6 +29,7 @@
 #include <string.h>
 #include <sys/reboot.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
@@ -1883,13 +1884,13 @@ static void output_machines_list(struct machine_info *machine_infos, unsigned n)
                         printf("%s%s%s ", on_state, circle ? draw_special_char(DRAW_BLACK_CIRCLE) : " ", off_state);
 
                 if (m->is_host)
-                        printf("%-*s (host) %s%-*s%s %s%*u%s %*u\n",
+                        printf("%-*s (host) %s%-*s%s %s%*" PRIu32 "%s %*" PRIu32 "\n",
                                (int) (namelen - (sizeof(" (host)")-1)), strna(m->name),
                                on_state, statelen, strna(m->state), off_state,
                                on_failed, failedlen, m->n_failed_units, off_failed,
                                jobslen, m->n_jobs);
                 else
-                        printf("%-*s %s%-*s%s %s%*u%s %*u\n",
+                        printf("%-*s %s%-*s%s %s%*" PRIu32 "%s %*" PRIu32 "\n",
                                namelen, strna(m->name),
                                on_state, statelen, strna(m->state), off_state,
                                on_failed, failedlen, m->n_failed_units, off_failed,
@@ -2604,7 +2605,10 @@ static int start_unit_one(
 
                 if (!sd_bus_error_has_name(error, BUS_ERROR_NO_SUCH_UNIT) &&
                     !sd_bus_error_has_name(error, BUS_ERROR_UNIT_MASKED))
-                        log_error("See system logs and 'systemctl status %s' for details.", name);
+                        log_error("See %s logs and 'systemctl%s status %s' for details.",
+                                   arg_scope == UNIT_FILE_SYSTEM ? "system" : "user",
+                                   arg_scope == UNIT_FILE_SYSTEM ? "" : " --user",
+                                   name);
 
                 return r;
         }
@@ -4598,8 +4602,8 @@ static int show_system_status(sd_bus *bus) {
         printf("    State: %s%s%s\n",
                on, strna(mi.state), off);
 
-        printf("     Jobs: %u queued\n", mi.n_jobs);
-        printf("   Failed: %u units\n", mi.n_failed_units);
+        printf("     Jobs: %" PRIu32 " queued\n", mi.n_jobs);
+        printf("   Failed: %" PRIu32 " units\n", mi.n_failed_units);
 
         printf("    Since: %s; %s\n",
                format_timestamp(since2, sizeof(since2), mi.timestamp),
@@ -6157,8 +6161,18 @@ static int edit(int argc, char *argv[], void *userdata) {
                 r = daemon_reload(argc, argv, userdata);
 
 end:
-        STRV_FOREACH_PAIR(original, tmp, paths)
+        STRV_FOREACH_PAIR(original, tmp, paths) {
                 (void) unlink(*tmp);
+
+                /* Removing empty dropin dirs */
+                if (!arg_full) {
+                        _cleanup_free_ char *dir = dirname_malloc(*original);
+                        /* no need to check if the dir is empty, rmdir
+                         * does nothing if it is not the case.
+                         */
+                        (void) rmdir(dir);
+                }
+        }
 
         return r;
 }
@@ -7242,6 +7256,13 @@ static int parse_argv(int argc, char *argv[]) {
                                  * request to it. For now we simply
                                  * guess that it is Upstart. */
 
+                                /* work around upstart exec'ing systemd when /sbin/init
+                                 * changes (https://launchpad.net/bugs/1430479) */
+                                if (argv[1] != NULL && streq(argv[1], "u")) {
+                                    log_warning("Ignoring telinit u request, systemd is not running");
+                                    return -ENOTSUP;
+                                }
+
                                 execv(TELINIT, argv);
 
                                 log_error("Couldn't find an alternative telinit implementation to spawn.");
@@ -7294,22 +7315,62 @@ static int talk_initctl(void) {
 
         request.runlevel = rl;
 
-        fd = open(INIT_FIFO, O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
+        /* Try /run/initctl first since that is what sysvinit in Debian uses */
+        fd = open("/run/initctl", O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
         if (fd < 0) {
-                if (errno == ENOENT)
-                        return 0;
+                /* Fall back to /dev/initctl */
+                fd = open(INIT_FIFO, O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
+                if (fd < 0) {
+                        if (errno == ENOENT)
+                                return 0;
 
-                return log_error_errno(errno, "Failed to open "INIT_FIFO": %m");
+                        return log_error_errno(errno, "Failed to open "INIT_FIFO": %m");
+                }
         }
 
         r = loop_write(fd, &request, sizeof(request), false);
         if (r < 0)
-                return log_error_errno(r, "Failed to write to "INIT_FIFO": %m");
+                return log_error_errno(r, "Failed to write to initctl FIFO: %m");
 
         return 1;
 #else
         return 0;
 #endif
+}
+
+static int talk_upstart(void) {
+        _cleanup_close_ int fd;
+        struct sockaddr_un upstart_addr = {
+                .sun_family = AF_UNIX,
+                .sun_path = "\0/com/ubuntu/upstart\0",
+        };
+        char rl;
+        char telinit_cmd[] = "telinit X";
+
+        /* check if we can connect to upstart; if not, fail */
+        fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
+        if (fd < 0) {
+                log_error("socket(AF_UNIX) failed: %m");
+                return -errno;
+        }
+        if (connect(fd, &upstart_addr, sizeof(upstart_addr.sun_family) + 1 +
+                                       strlen(upstart_addr.sun_path + 1)) < 0) {
+                log_debug("cannot connect to upstart");
+                return 0;
+        }
+        log_debug("upstart is running");
+
+        rl = action_to_runlevel();
+        if (!rl)
+                return 0;
+
+        /* invoke telinit with the desired new runlevel */
+        telinit_cmd[8] = rl;
+        if (system(telinit_cmd) != 0) {
+                log_error("failed to run %s for upstart fallback", telinit_cmd);
+                return 0;
+        }
+        return 1;
 }
 
 static int systemctl_main(int argc, char *argv[]) {
@@ -7407,9 +7468,13 @@ static int start_with_fallback(void) {
         if (start_unit(0, NULL, NULL) >= 0)
                 return 0;
 
-        /* Nothing else worked, so let's try
-         * /dev/initctl */
+        /* systemd didn't work (most probably it's not the current init
+         * system), so let's try /dev/initctl for SysV init */
         if (talk_initctl() > 0)
+                return 0;
+
+        /* and now upstart */
+        if (talk_upstart() > 0)
                 return 0;
 
         log_error("Failed to talk to init daemon.");

@@ -408,6 +408,7 @@ rootlibexec_PROGRAMS = \
 	systemd-remount-fs \
 	systemd-reply-password \
 	systemd-fsck \
+	systemd-fsckd \
 	systemd-ac-power \
 	systemd-sysctl \
 	systemd-sleep \
@@ -421,6 +422,7 @@ rootlibexec_PROGRAMS += \
 endif
 
 systemgenerator_PROGRAMS = \
+	systemd-insserv-generator \
 	systemd-getty-generator \
 	systemd-fstab-generator \
 	systemd-system-update-generator \
@@ -508,6 +510,7 @@ dist_systemunit_DATA = \
 	units/slices.target \
 	units/system.slice \
 	units/x-.slice \
+	units/systemd-fsckd.socket \
 	units/systemd-initctl.socket \
 	units/syslog.socket \
 	units/dev-hugepages.mount \
@@ -557,6 +560,7 @@ nodist_systemunit_DATA = \
 	units/systemd-exit.service \
 	units/systemd-fsck@.service \
 	units/systemd-fsck-root.service \
+	units/systemd-fsckd.service \
 	units/systemd-machine-id-commit.service \
 	units/systemd-udevd.service \
 	units/systemd-udev-trigger.service \
@@ -576,10 +580,17 @@ nodist_systemunit_DATA += \
 	units/systemd-update-utmp-runlevel.service
 endif
 
+if HAVE_SYSV_COMPAT
+nodist_systemunit_DATA += \
+	units/mail-transport-agent.target
+endif
+
 dist_userunit_DATA = \
 	units/user/basic.target \
 	units/user/default.target \
-	units/user/exit.target
+	units/user/exit.target \
+	units/user/graphical-session.target \
+	units/user/graphical-session-pre.target
 
 nodist_userunit_DATA = \
 	units/user/systemd-exit.service
@@ -610,6 +621,7 @@ EXTRA_DIST += \
 	units/user/systemd-exit.service.in \
 	units/systemd-fsck@.service.in \
 	units/systemd-fsck-root.service.in \
+	units/systemd-fsckd.service.in \
 	units/systemd-machine-id-commit.service.in \
 	units/user@.service.m4.in \
 	units/debug-shell.service.in \
@@ -1049,6 +1061,8 @@ libshared_la_SOURCES = \
 	src/shared/bus-util.h \
 	src/shared/logs-show.c \
 	src/shared/logs-show.h \
+	src/shared/vlan-util.h \
+	src/shared/vlan-util.c \
 	src/shared/machine-image.c \
 	src/shared/machine-image.h \
 	src/shared/machine-pool.c \
@@ -1471,6 +1485,7 @@ tests += \
 	test-prioq \
 	test-fileio \
 	test-time \
+	test-clock \
 	test-hashmap \
 	test-set \
 	test-bitmap \
@@ -2000,6 +2015,12 @@ test_time_SOURCES = \
 test_time_LDADD = \
 	libshared.la
 
+test_clock_SOURCES = \
+	src/test/test-clock.c
+
+test_clock_LDADD = \
+	libshared.la
+
 test_architecture_SOURCES = \
 	src/test/test-architecture.c
 
@@ -2518,6 +2539,16 @@ systemd_fsck_LDADD = \
 	libshared.la
 
 # ------------------------------------------------------------------------------
+systemd_fsckd_SOURCES = \
+	src/fsckd/fsckd.c \
+	$(NULL)
+
+systemd_fsckd_LDADD = \
+	libsystemd-internal.la \
+	libudev-internal.la \
+	$(NULL)
+
+# ------------------------------------------------------------------------------
 systemd_ac_power_SOURCES = \
 	src/ac-power/ac-power.c
 
@@ -2540,6 +2571,13 @@ systemd_delta_SOURCES = \
 
 systemd_delta_LDADD = \
 	libshared.la
+
+# ------------------------------------------------------------------------------
+systemd_insserv_generator_SOURCES = \
+	src/insserv-generator/insserv-generator.c
+
+systemd_insserv_generator_LDADD = \
+	libsystemd-internal.la
 
 # ------------------------------------------------------------------------------
 systemd_getty_generator_SOURCES = \
@@ -3389,6 +3427,9 @@ libsystemd_network_la_SOURCES = \
 	src/libsystemd-network/network-internal.c \
 	src/libsystemd-network/network-internal.h \
 	src/libsystemd-network/sd-ndisc.c \
+	src/libsystemd-network/ndisc-internal.h \
+	src/libsystemd-network/ndisc-router.h \
+	src/libsystemd-network/ndisc-router.c \
 	src/libsystemd-network/icmp6-util.h \
 	src/libsystemd-network/icmp6-util.c \
 	src/libsystemd-network/sd-dhcp6-client.c \
@@ -3400,15 +3441,11 @@ libsystemd_network_la_SOURCES = \
 	src/libsystemd-network/sd-dhcp6-lease.c \
 	src/libsystemd-network/dhcp-identifier.h \
 	src/libsystemd-network/dhcp-identifier.c \
-	src/libsystemd-network/lldp.h \
-	src/libsystemd-network/lldp-tlv.h \
-	src/libsystemd-network/lldp-tlv.c \
+	src/libsystemd-network/lldp-internal.h \
 	src/libsystemd-network/lldp-network.h \
 	src/libsystemd-network/lldp-network.c \
-	src/libsystemd-network/lldp-port.h \
-	src/libsystemd-network/lldp-port.c \
-	src/libsystemd-network/lldp-internal.h \
-	src/libsystemd-network/lldp-internal.c \
+	src/libsystemd-network/lldp-neighbor.h \
+	src/libsystemd-network/lldp-neighbor.c \
 	src/libsystemd-network/sd-lldp.c
 
 libsystemd_network_la_LIBADD = \
@@ -3491,9 +3528,6 @@ test_dhcp6_client_LDADD = \
 	libshared.la
 
 test_lldp_SOURCES = \
-	src/libsystemd-network/lldp.h \
-	src/libsystemd-network/lldp-tlv.h \
-	src/libsystemd-network/lldp-tlv.c \
 	src/libsystemd-network/test-lldp.c
 
 test_lldp_LDADD = \
@@ -5381,10 +5415,14 @@ libnetworkd_core_la_CFLAGS = \
 libnetworkd_core_la_SOURCES = \
 	src/libsystemd-network/network-internal.h \
 	src/network/networkd.h \
+	src/network/networkd-conf.h \
+	src/network/networkd-conf.c \
 	src/network/networkd-link.h \
 	src/network/networkd-link.c \
 	src/network/networkd-netdev.h \
 	src/network/networkd-netdev.c \
+	src/network/networkd-netdev-vrf.h \
+	src/network/networkd-netdev-vrf.c \
 	src/network/networkd-netdev-tunnel.h \
 	src/network/networkd-netdev-tunnel.c \
 	src/network/networkd-netdev-veth.h \
@@ -5409,6 +5447,7 @@ libnetworkd_core_la_SOURCES = \
 	src/network/networkd-ipv4ll.c \
 	src/network/networkd-dhcp4.c \
 	src/network/networkd-dhcp6.c \
+	src/network/networkd-ndisc.h \
 	src/network/networkd-ndisc.c \
 	src/network/networkd-network.h \
 	src/network/networkd-network.c \
@@ -5421,12 +5460,17 @@ libnetworkd_core_la_SOURCES = \
 	src/network/networkd-manager-bus.c \
 	src/network/networkd-fdb.h \
 	src/network/networkd-fdb.c \
+	src/network/networkd-brvlan.h \
+	src/network/networkd-brvlan.c \
 	src/network/networkd-address-pool.h \
 	src/network/networkd-address-pool.c \
 	src/network/networkd-util.h \
-	src/network/networkd-util.c
+	src/network/networkd-util.c \
+	src/network/networkd-lldp-tx.h \
+	src/network/networkd-lldp-tx.c
 
 nodist_libnetworkd_core_la_SOURCES = \
+	src/network/networkd-gperf.c \
 	src/network/networkd-network-gperf.c \
 	src/network/networkd-netdev-gperf.c
 
@@ -5523,6 +5567,7 @@ BUSNAMES_TARGET_WANTS += \
 endif
 
 gperf_gperf_sources += \
+	src/network/networkd-gperf.gperf \
 	src/network/networkd-network-gperf.gperf \
 	src/network/networkd-netdev-gperf.gperf
 
