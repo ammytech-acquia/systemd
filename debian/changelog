@@ -1,3 +1,9 @@
+systemd (229-4ubuntu21.31+esm1-acquia1) xenial-security; urgency=medium
+
+  * Remove acquia patches that have been added to upstream
+
+ -- Peter Sarkozi <peter.sarkozi@acquia.com>  Fri, 23 Jul 2021 22:21:23 +0200
+
 systemd (229-4ubuntu21.31+esm1) xenial-security; urgency=medium
 
   [ Marc Deslauriers ]
