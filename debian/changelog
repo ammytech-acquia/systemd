@@ -1,3 +1,157 @@
+systemd (229-4ubuntu21.31+esm1) xenial-security; urgency=medium
+
+  [ Marc Deslauriers ]
+  * SECURITY UPDATE: DoS via DHCP FORCERENEW
+    - debian/patches/CVE-2020-13529.patch: tentatively ignore FORCERENEW
+      command in src/libsystemd-network/sd-dhcp-client.c.
+    - CVE-2020-13529
+  * SECURITY UPDATE: denial of service via stack exhaustion
+    - debian/patches/CVE-2021-33910.patch: do not use strdupa() on a path
+      in src/basic/unit-name.c.
+    - CVE-2021-33910
+
+ -- Leonidas Da Silva Barbosa <leo.barbosa@canonical.com>  Tue, 13 Jul 2021 10:31:23 -0300
+
+systemd (229-4ubuntu21.31) xenial; urgency=medium
+
+  * d/p/lp1878969-time-epoch-use-source-date-epoch.patch:
+    - Fix configure.ac change to set time epoch
+      (LP: #1878969)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=30bf11d2759499ec94d3b82eaf22f55583f4758b
+
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 01 Apr 2021 22:51:58 -0400
+
+systemd (229-4ubuntu21.30) xenial; urgency=medium
+
+  * d/p/lp1878969-time-epoch-use-source-date-epoch.patch:
+    - Set time epoch using $SOURCE_DATE_EPOCH
+      (LP: #1878969)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9e1ad364d94b3619947c541b72aa506010ee3f38
+  * d/p/lp1913763-udev-rules-add-rule-to-create-dev-ptp_hyperv.patch:
+    - Create symlink for hyperv-provided ptp device
+      (LP: #1913763)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ae39f8878ca5dabb4e9d8ba5ebdb6ed003993b9f
+
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 17 Mar 2021 17:41:20 -0400
+
+systemd (229-4ubuntu21.29) xenial; urgency=medium
+
+  [ Dan Streetman ]
+  * d/p/lp1881312/0001-core-don-t-dispatch-load-queue-when-setting-Slice-fo.patch,
+    d/p/lp1881312/0002-run-make-slice-work-in-conjunction-with-scope.patch:
+    - run new scope unit in specified slice (LP: #1881312)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b5a778c3cd93e3d684602146f281f315f30778a8
+  * d/p/lp1877176-sd-dhcp-client-validate-hostnames-stricter-7308.patch:
+    - strictly validate hostname sent to dhcp server (LP: #1877176)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7a1f1c41dcd860fcba6be42a2153cfe4315ebf17
+  * d/e/rules-ubuntu/40-vm-hotadd.rules:
+    - Hotadd only offline memory and CPUs
+      (LP: #1876018)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=43357bd260a1c3e7b4951d33cbacaebda1d086b3
+  * d/p/lp1698388-journal-remote-Ensure-reallocation-of-source-buf-doe.patch:
+    - Fix assertion failure when journald source->filled < source->size
+      (LP: #1698388)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d1cc15b88113510227e5a76654e103ef54a8b8f3
+
+  [ Heitor Alves de Siqueira ]
+  * d/p/lp1876600-sd-bus-deal-with-cookie-overruns.patch:
+    - deal with dbus cookie overruns (LP: #1876600)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8dc9ef188944349169044d8974a4ffa55c66be9d
+
+ -- Heitor Alves de Siqueira <halves@canonical.com>  Tue, 07 Jul 2020 17:28:11 -0400
+
+systemd (229-4ubuntu21.28) xenial; urgency=medium
+
+  * d/t/logind: skip if nonexistent /sys/power/state (LP: #1862657)
+  * d/p/lp1839290-Change-job-mode-of-manager-triggered-restarts-to-JOB.patch:
+    - when restarting service after failure, replace existing queued jobs
+      (LP: #1839290)
+  * d/t/storage:
+    - fix buggy test (LP: #1831459)
+    - without scsi_debug, skip test (LP: #1847816)
+  * d/p/lp1867421-70-mouse.hwdb-Set-DPI-for-MS-Classic-IntelliMouse.patch:
+    - fix resolution of IntelliMouse (LP: #1867421)
+  * d/p/lp1858412-journalctl-allow-running-vacuum-on-remote-journals-t.patch:
+    - allow vacuuming journal 'root' dir (LP: #1858412)
+  * d/p/lp1862232-network-DHCP-ignore-error-in-setting-hostname-when-i.patch:
+    - do not let invalid hostname break dhcpv4 (LP: #1862232)
+  * d/t/systemd-fsckd: Skip test on arm64 (LP: #1870194)
+  * d/p/lp1837914-journal-do-not-trigger-assertion-when-journal_file_c.patch:
+    - do not crash if NULL passted to journal destructor (LP: #1837914)
+  * d/e/initramfs-tools/hooks/udev:
+    - Follow symlinks when finding link files to copy into initramfs
+      (LP: #1868892)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Mon, 20 Apr 2020 10:17:40 -0400
+
+systemd (229-4ubuntu21.27) xenial-security; urgency=medium
+
+  * SECURITY UPDATE: incorrect PIDFile verification
+    - debian/patches/CVE-2018-16888.patch: be stricter when handling PID
+      files and MAINPID sd_notify() messages in man/systemd.service.xml,
+      src/core/manager.c, src/core/service.c, src/core/unit.h,
+      test/TEST-20-MAINPIDGAMES/Makefile,
+      test/TEST-20-MAINPIDGAMES/test.sh,
+      test/TEST-20-MAINPIDGAMES/testsuite.sh, test/test-functions.
+    - debian/patches/CVE-2018-16888-2.patch: relax PID file symlink chain
+      checks a bit in src/core/service.c.
+    - CVE-2018-16888
+  * SECURITY UPDATE: memory leak in button_open
+    - debian/patches/CVE-2019-20386.patch: fix event in
+      src/login/logind-button.c.
+    - CVE-2019-20386
+  * SECURITY UPDATE: heap use-after-free with async polkit queries
+    - debian/patches/CVE-2020-1712-1.patch: on async pk requests,
+      re-validate action/details in src/shared/bus-util.c.
+    - debian/patches/CVE-2020-1712-2.patch: introduce API for re-enqueuing
+      incoming messages in src/libsystemd/libsystemd.sym,
+      src/libsystemd/sd-bus/sd-bus.c, src/systemd/sd-bus.h.
+    - debian/patches/CVE-2020-1712-3.patch: when authorizing via PK
+      re-resolve callback/userdata instead of caching it in
+      src/shared/bus-util.c.
+    - debian/patches/CVE-2020-1712-4.patch: fix typo in function name in
+      src/libsystemd/libsystemd.sym, src/libsystemd/sd-bus/sd-bus.c,
+      src/systemd/sd-bus.h, src/shared/bus-util.c.
+    - debian/libsystemd0.symbols: added new symbols.
+    - CVE-2020-1712
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Tue, 04 Feb 2020 20:07:56 -0500
+
+systemd (229-4ubuntu21.23) xenial; urgency=medium
+
+  * d/p/core-use-an-AF_UNIX-SOCK_DGRAM-socket-for-cgroup-age.patch:
+    - prevent logind from leaking session files (LP: #1846787)
+
+ -- Heitor Alves de Siqueira <halves@canonical.com>  Mon, 07 Oct 2019 07:44:13 -0300
+
+systemd (229-4ubuntu21.22) xenial; urgency=medium
+
+  [ Dan Streetman ]
+  * d/t/systemd-fsckd, d/t/cmdline-upstart-boot:
+    - skip on s390x; requires grub (LP: #1830477)
+  * d/p/ask-password-prevent-buffer-overrow-when-reading-fro.patch:
+    - prevent buffer overflow when reading keyring (LP: #1814373)
+
+  [ Dimitri John Ledkov ]
+  * Specify Ubuntu's Vcs-Git
+
+  [ Balint Reczey ]
+  * Append /snap/bin to default PATH.
+    Snapd ships snapd-env-generator, but systemd does not not support
+    environment generators. Hard-coding /snap/bin is less risky than
+    backporting environment generator support and since snaps are considered
+    to be first class packages on Ubuntu /snap/bin can safely added to
+    the default PATH. (LP: #1771858)
+
+  [ Ioanna Alifieraki ]
+  * d/p/systemctl-Replace-check_one_unit-by-get_state_one_un.patch
+    - Backport upstream PR#2768 needed for next patch
+  * d/p/systemctl-load-unit-if-needed-in-systemctl-is-active.patch
+    - Backport upstream PR#7997 to fix alias service reports inactive while
+      aliased is active (LP: #1828892)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 24 Apr 2019 17:15:36 -0400
+
 systemd (229-4ubuntu21.21-acquia1) xenial; urgency=medium
 
   * ensure empty cgroup messages are not lost
@@ -126,6 +280,24 @@ systemd (229-4ubuntu21.9) xenial-security; urgency=medium
     - CVE-2018-6954
 
  -- Chris Coulson <chris.coulson@canonical.com>  Thu, 15 Nov 2018 21:02:00 +0000
+
+systemd (229-4ubuntu21.8-acquia2) xenial; urgency=medium
+
+  * ensure empty cgroup messages are not lost
+    (https://github.com/systemd/systemd/issues/1961)
+
+ -- Glenn Pratt <glenn.pratt@acquia.com>  Fri, 01 Dec 2017 14:09:48 -0800
+
+systemd (229-4ubuntu21.8-acquia1) xenial; urgency=medium
+
+  * don't dispatch load queue when setting Slice= for transient units
+    (https://github.com/systemd/systemd/pull/3094)
+  * run: make --slice= work in conjunction with --scope
+    (https://github.com/systemd/systemd/pull/3094)
+  * nspawn: decrease mkdir error logging in /sys to debug priority
+    (https://github.com/systemd/systemd/pull/3748)
+
+ -- Glenn Pratt <glenn.pratt@acquia.com>  Fri, 14 Jul 2017 11:09:48 -0800
 
 systemd (229-4ubuntu21.8) xenial-security; urgency=medium
 
