@@ -350,6 +350,9 @@ static int journal_file_verify_header(JournalFile *f) {
                         log_debug("Journal file %s has unknown state %i.", f->path, state);
                         return -EBUSY;
                 }
+
+                if (f->header->field_hash_table_size == 0 || f->header->data_hash_table_size == 0)
+                         return -EBADMSG;
         }
 
         f->compress_xz = JOURNAL_HEADER_COMPRESSED_XZ(f->header);

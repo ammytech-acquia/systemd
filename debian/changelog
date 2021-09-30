@@ -1,3 +1,9 @@
+systemd (229-4ubuntu21.31+esm1-acquia2) xenial-security; urgency=medium
+
+  * acquia journald fix assertion failure on journal file link data
+
+ -- Amirullah Khan <amirullah.khan@acquia.com>  Thu, 38 Sep 2021 18:35:23 +0200
+
 systemd (229-4ubuntu21.31+esm1-acquia1) xenial-security; urgency=medium
 
   * Remove acquia patches that have been added to upstream

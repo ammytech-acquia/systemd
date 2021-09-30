@@ -75,6 +75,7 @@ Fix-journald-rate-limit-with-low-disk-space.patch
 
 ## Acquia patches
 acquia-0003-nspawn-decrease-mkdir-error-logging.patch
+acquia-0004-journald-fix-assertion-failure-on-journal_file_link_data.patch
 
 ## Debian specific patches
 Add-back-support-for-Debian-specific-config-files.patch
