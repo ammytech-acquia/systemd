@@ -1,3 +1,20 @@
+From 5b3cc0c86aeddd4615e7e28e79aa89e5b77a6507 Mon Sep 17 00:00:00 2001
+From: Yusuke Nojima <nojima718@gmail.com>
+Date: Sun, 30 Apr 2017 02:37:53 +0900
+Subject: [PATCH] journald: fix assertion failure on journal_file_link_data.
+ (#5843)
+
+When some error occurs during the initialization of JournalFile,
+the JournalFile can be left without hash tables created.  When later
+trying to append an entry to that file, the assertion in
+journal_file_link_data() fails, and journald crashes.
+
+This patch fix this issue by checking *_hash_table_size in
+journal_file_verify_header().
+---
+ src/journal/journal-file.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
 diff --git a/src/journal/journal-file.c b/src/journal/journal-file.c
 index 912eb94d0..a42a08e7a 100644
 --- a/src/journal/journal-file.c
@@ -10,5 +27,5 @@ index 912eb94d0..a42a08e7a 100644
 +                if (f->header->field_hash_table_size == 0 || f->header->data_hash_table_size == 0)
 +                         return -EBADMSG;
          }
- 
+
          f->compress_xz = JOURNAL_HEADER_COMPRESSED_XZ(f->header);
